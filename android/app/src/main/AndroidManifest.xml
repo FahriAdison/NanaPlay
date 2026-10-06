@@ -31,7 +31,7 @@
         android:required="false" />
 
     <application
-        android:name=".OpenNowApplication"
+        android:name="com.opencloudgaming.opennow.OpenNowApplication"
         android:allowBackup="false"
         android:banner="@drawable/opennow_banner"
         android:hardwareAccelerated="true"
@@ -43,15 +43,15 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.NanaPlay">
         <service
-            android:name=".AndroidQueueStatusService"
+            android:name="com.opencloudgaming.opennow.AndroidQueueStatusService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
         <service
-            android:name=".AndroidStreamKeepAliveService"
+            android:name="com.opencloudgaming.opennow.AndroidStreamKeepAliveService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
         <activity
-            android:name=".MainActivity"
+            android:name="com.opencloudgaming.opennow.MainActivity"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
             android:exported="true"
             android:launchMode="singleTask"

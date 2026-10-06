@@ -48,6 +48,11 @@ enum class SettingsRouteTarget {
 }
 
 private const val ANDROID_UPDATE_LAUNCH_CHECK_DELAY_MS = 5_000L
+/** No queue-position improvement for this long → warn the user the queue may be stuck. */
+private const val QUEUE_STUCK_WARNING_MS = 10L * 60L * 1000L
+/** Transient-failure retries for session creation before surfacing the error. */
+private const val CREATE_SESSION_MAX_ATTEMPTS = 3
+private const val CREATE_SESSION_RETRY_BASE_MS = 2_000L
 internal const val ANDROID_UPDATE_PERIODIC_CHECK_INTERVAL_MS = 6L * 60L * 60L * 1000L
 private const val ANDROID_UPDATE_STREAMING_RETRY_DELAY_MS = 30_000L
 private const val DEBUG_EVENT_LIMIT = 140
@@ -155,6 +160,7 @@ data class OpenNowUiState(
     val launchPhase: String = "",
     val queuePosition: Int? = null,
     val queueAdActiveId: String? = null,
+    val queueStuckWarning: Boolean = false,
     val streamStatus: String = "idle",
     val error: String? = null,
     val deviceLoginPrompt: DeviceLoginPrompt? = null,
@@ -1689,7 +1695,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     return@runCatching null
                 }
                 _state.update { it.copy(launchPhase = "Creating session") }
-                val created = sessionRepository.createSession(
+                val created = createSessionWithRetry(
                     token = token,
                     streamingBaseUrl = baseUrl,
                     appId = launchAppId,
@@ -1969,7 +1975,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     }
                     .onFailure { error -> recordDebugEvent("queue", "Failed to stop active session before new launch ${pending.activeSession.shortDebugId()} error=${error.debugMessage()}") }
                 _state.update { it.copy(activeSession = null, launchPhase = "Creating session") }
-                val created = sessionRepository.createSession(
+                val created = createSessionWithRetry(
                     token = token,
                     streamingBaseUrl = pending.baseUrl,
                     appId = pending.launchAppId,
@@ -3212,6 +3218,12 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
     private suspend fun pollUntilReady(token: String, created: SessionInfo, settings: StreamSettings): SessionInfo {
         var latest = created
         var pollCount = 0
+        // Stuck-queue detection: if the queue position never improves for QUEUE_STUCK_WARNING_MS,
+        // the server side is likely wedged — surface a warning with a retry option instead of
+        // polling silently forever.
+        var bestQueuePosition: Int? = null
+        var lastImprovementMs = android.os.SystemClock.elapsedRealtime()
+        var stuckWarningShown = false
         recordDebugEvent("queue", "Begin polling ${latest.debugSummary()}")
         _state.update {
             it.copy(
@@ -3219,6 +3231,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 launchPhase = loadingPhaseFor(latest),
                 queuePosition = queueDisplayPosition(latest),
                 queueAdActiveId = chooseQueueAdActiveId(it.queueAdActiveId, latest),
+                queueStuckWarning = false,
             )
         }
         while (!latest.isReadyForStream()) {
@@ -3267,6 +3280,20 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             }
             latest = mergeQueueSessionState(latest, polled)
             recordDebugEvent("queue", "Poll #$pollCount result ${latest.debugSummary()}")
+            val currentPosition = queueDisplayPosition(latest)
+            val nowMs = android.os.SystemClock.elapsedRealtime()
+            if (currentPosition != null && (bestQueuePosition == null || currentPosition < bestQueuePosition)) {
+                bestQueuePosition = currentPosition
+                lastImprovementMs = nowMs
+                if (stuckWarningShown) {
+                    stuckWarningShown = false
+                    _state.update { it.copy(queueStuckWarning = false) }
+                }
+            } else if (!stuckWarningShown && nowMs - lastImprovementMs >= QUEUE_STUCK_WARNING_MS) {
+                stuckWarningShown = true
+                recordDebugEvent("queue", "Queue appears stuck at position $currentPosition (no improvement for ${QUEUE_STUCK_WARNING_MS / 60_000} min)")
+                _state.update { it.copy(queueStuckWarning = true) }
+            }
             _state.update {
                 it.copy(
                     streamSession = latest,
@@ -3277,7 +3304,67 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             }
         }
         recordDebugEvent("queue", "Polling complete after $pollCount polls ${latest.debugSummary()}")
+        _state.update { it.copy(queueStuckWarning = false) }
         return latest
+    }
+
+    /**
+     * Creates a session, transparently retrying transient network failures (DNS, timeouts,
+     * connection resets) a few times before surfacing the error. Non-transient failures
+     * (auth, conflicts, bad requests) fail fast so the user gets the real error immediately.
+     */
+    private suspend fun createSessionWithRetry(
+        token: String,
+        streamingBaseUrl: String?,
+        appId: String,
+        internalTitle: String,
+        zone: String,
+        settings: StreamSettings,
+        accountLinked: Boolean,
+        appLaunchMode: Int,
+    ): SessionInfo {
+        var lastError: Throwable? = null
+        repeat(CREATE_SESSION_MAX_ATTEMPTS) { attempt ->
+            val result = runCatching {
+                sessionRepository.createSession(
+                    token = token,
+                    streamingBaseUrl = streamingBaseUrl,
+                    appId = appId,
+                    internalTitle = internalTitle,
+                    zone = zone,
+                    settings = settings,
+                    accountLinked = accountLinked,
+                    appLaunchMode = appLaunchMode,
+                )
+            }
+            if (result.isSuccess) return result.getOrThrow()
+            val error = result.exceptionOrNull()
+            if (error is CancellationException) throw error
+            if (error !is java.io.IOException) {
+                recordDebugEvent("queue", "createSession failed non-transient: ${error?.debugMessage()}")
+                throw error ?: IllegalStateException("Session creation failed")
+            }
+            lastError = error
+            if (attempt < CREATE_SESSION_MAX_ATTEMPTS - 1) {
+                val backoffMs = CREATE_SESSION_RETRY_BASE_MS shl attempt
+                recordDebugEvent("queue", "createSession attempt ${attempt + 1} failed transient (${error.debugMessage()}), retrying in ${backoffMs}ms")
+                kotlinx.coroutines.delay(backoffMs)
+            }
+        }
+        recordDebugEvent("queue", "createSession failed after $CREATE_SESSION_MAX_ATTEMPTS attempts: ${lastError?.debugMessage()}")
+        throw lastError ?: IllegalStateException("Session creation failed")
+    }
+
+    /**
+     * Re-queues the current game from scratch. Used by the "queue looks stuck" retry button:
+     * cancels the wedged launch and starts a fresh session creation.
+     */
+    fun retryQueue() {
+        val game = state.value.streamGame ?: return
+        recordDebugEvent("queue", "Queue retry requested by user game=${game.title}")
+        launchJob?.cancel()
+        _state.update { it.copy(queueStuckWarning = false) }
+        play(game, skipPrintedWaste = true, skipStoreChoice = true)
     }
 
     private fun effectiveStreamingBaseUrl(sessionOverride: AuthSession? = null): String {

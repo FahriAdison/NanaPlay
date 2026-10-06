@@ -11520,6 +11520,16 @@ private fun QueueLoadingScreen(state: OpenNowUiState, viewModel: OpenNowViewMode
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
+            // Stuck-queue warning: position hasn't improved for a while. Offer a fresh re-queue.
+            if (state.queueStuckWarning) {
+                QueueStuckWarningCard(
+                    onRetry = viewModel::retryQueue,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .widthIn(max = 620.dp),
+                )
+            }
         }
     }
 }
@@ -12015,6 +12025,34 @@ private fun queueUrgencyColor(queuePosition: Int?): Color {
     val green = (0.57f - 0.49f * heat).coerceIn(0.06f, 0.57f)
     val blue = (0.25f - 0.17f * heat).coerceIn(0.08f, 0.25f)
     return Color(red = 1f, green = green, blue = blue, alpha = 1f)
+}
+
+@Composable
+private fun QueueStuckWarningCard(
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(OpenNowRadius.lg),
+        color = OpenNowPalette.PanelOverVideo,
+        border = BorderStroke(1.dp, Color(0xffffb84d)),
+        tonalElevation = 8.dp,
+    ) {
+        Row(
+            Modifier.padding(OpenNowSpacing.md),
+            horizontalArrangement = Arrangement.spacedBy(OpenNowSpacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Queue seems stuck — your position hasn't moved for a while.",
+                color = TextPrimary,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            Button(onClick = onRetry) { Text("Retry") }
+        }
+    }
 }
 
 @Composable

@@ -224,6 +224,7 @@
     <string name="stream_preset_low_data_saver">Low (data saver)</string>
     <string name="stream_preset_medium">Medium</string>
     <string name="stream_preset_high">High</string>
+    <string name="stream_preset_low_latency">Low latency</string>
     <string name="settings_fps">FPS</string>
     <string name="settings_bitrate">Bitrate Mbps</string>
     <string name="settings_codec">Codec</string>

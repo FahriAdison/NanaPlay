@@ -46,6 +46,9 @@ enum class StreamPreset {
 
     @kotlinx.serialization.SerialName("high")
     High,
+
+    @kotlinx.serialization.SerialName("low_latency")
+    LowLatency,
 }
 
 @Serializable
@@ -724,15 +727,30 @@ internal fun StreamSettings.usesTenBitStreamProfile(): Boolean =
 internal fun StreamSettings.applyingStreamPreset(preset: StreamPreset): StreamSettings {
     if (preset == StreamPreset.Custom) return this
     val target = streamPresetTargetForAspect(preset, aspectRatio)
-    return copy(
-        resolution = target.resolution,
-        aspectRatio = target.aspectRatio,
-        fps = target.fps,
-        maxBitrateMbps = target.maxBitrateMbps,
-        colorQuality = ColorQuality.EightBit420,
-        hdrEnabled = false,
-    ).withoutExperimentalTransportRequests()
-        .withAndroidSettingsAvailability()
+    // Low Latency: fastest-decode codec + L4S congestion control for minimal input lag.
+    // Other presets keep the existing behavior of clearing experimental transport flags.
+    return if (preset == StreamPreset.LowLatency) {
+        copy(
+            resolution = target.resolution,
+            aspectRatio = target.aspectRatio,
+            fps = target.fps,
+            maxBitrateMbps = target.maxBitrateMbps,
+            codec = VideoCodec.H264,
+            colorQuality = ColorQuality.EightBit420,
+            hdrEnabled = false,
+            enableL4S = true,
+        ).withAndroidSettingsAvailability()
+    } else {
+        copy(
+            resolution = target.resolution,
+            aspectRatio = target.aspectRatio,
+            fps = target.fps,
+            maxBitrateMbps = target.maxBitrateMbps,
+            colorQuality = ColorQuality.EightBit420,
+            hdrEnabled = false,
+        ).withoutExperimentalTransportRequests()
+            .withAndroidSettingsAvailability()
+    }
 }
 
 internal fun StreamSettings.withoutExperimentalTransportRequests(): StreamSettings =
@@ -841,6 +859,7 @@ private fun streamPresetTargetForAspect(preset: StreamPreset, aspectRatio: Strin
         StreamPreset.LowDataSaver -> 800
         StreamPreset.Medium -> 1200
         StreamPreset.High -> 1600
+        StreamPreset.LowLatency -> 800
     }
     val options = STREAM_RESOLUTION_OPTIONS
         .filter { it.aspectRatio == normalizedAspect }
@@ -857,6 +876,7 @@ private fun streamPresetTargetForAspect(preset: StreamPreset, aspectRatio: Strin
         StreamPreset.LowDataSaver -> StreamPresetTarget(resolution.value, resolution.aspectRatio, 30, 12)
         StreamPreset.Medium -> StreamPresetTarget(resolution.value, resolution.aspectRatio, 60, 35)
         StreamPreset.High -> StreamPresetTarget(resolution.value, resolution.aspectRatio, MAX_ULTIMATE_STREAM_FPS, 75)
+        StreamPreset.LowLatency -> StreamPresetTarget(resolution.value, resolution.aspectRatio, 60, 20)
     }
 }
 

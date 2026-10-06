@@ -3887,10 +3887,20 @@ class NativeStreamClient(
         )
     }
 
-    /** Sends one batch of finger updates. Reliable: a dropped lift leaves a finger stuck down. */
+    /**
+     * Sends one batch of finger updates. DOWN/UP/CANCEL stay reliable: a dropped lift leaves a
+     * finger stuck down on the host. MOVE batches go partially reliable instead — positions are
+     * superseded by the next MOVE, so head-of-line blocking on a lost packet only adds drag
+     * latency. Same split the mouse path already uses.
+     */
     internal fun sendNativeTouch(touches: List<TouchRecord>): Boolean {
         val packet = inputEncoder.encodeTouchBatch(touches) ?: return false
-        return sendReliableInput(packet)
+        val movesOnly = touches.isNotEmpty() && touches.all { it.phase == TouchPhase.MOVE }
+        return if (movesOnly) {
+            sendInput(packet, partiallyReliable = true)
+        } else {
+            sendReliableInput(packet)
+        }
     }
 
     fun sendTouchMouseMove(dx: Int, dy: Int, partiallyReliable: Boolean = true): Boolean {

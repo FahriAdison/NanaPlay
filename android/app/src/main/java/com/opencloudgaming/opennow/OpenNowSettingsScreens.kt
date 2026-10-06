@@ -1326,6 +1326,7 @@ private fun streamPresetLabel(preset: StreamPreset): String =
         StreamPreset.LowDataSaver -> stringResource(R.string.stream_preset_low_data_saver)
         StreamPreset.Medium -> stringResource(R.string.stream_preset_medium)
         StreamPreset.High -> stringResource(R.string.stream_preset_high)
+        StreamPreset.LowLatency -> stringResource(R.string.stream_preset_low_latency)
     }
 
 @Composable

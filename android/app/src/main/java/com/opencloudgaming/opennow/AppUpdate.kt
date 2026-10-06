@@ -37,7 +37,7 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 private const val APK_MIME_TYPE = "application/vnd.android.package-archive"
-internal const val ANDROID_UPDATE_SOURCE_URL = "https://api.printedwaste.com/releases/opennow/latest"
+internal const val ANDROID_UPDATE_SOURCE_URL = "https://api.github.com/repos/FahriAdison/NanaPlay/releases/latest"
 internal const val GOOGLE_PLAY_STORE_PACKAGE = "com.android.vending"
 internal const val GOOGLE_PLAY_STORE_LISTING_URL = "https://play.google.com/store/apps/details?id=${BuildConfig.APPLICATION_ID}"
 private const val UPDATE_FILE_PROVIDER_AUTHORITY_SUFFIX = ".updates"
@@ -686,16 +686,31 @@ private fun parseGithubReleaseCandidate(sourceUrl: String, root: JsonObject): An
             name.endsWith(".apk", ignoreCase = true) || contentType.equals(APK_MIME_TYPE, ignoreCase = true)
         } ?: return null
     val apkUrl = apkAsset.string("browser_download_url", "downloadUrl", "url")?.let { resolveUpdateUrl(sourceUrl, it) } ?: return null
-    val versionCode = root.long("versionCode", "version_code", "androidVersionCode")
+    val tagName = root.string("tag_name", "name")?.removePrefix("v")
+    // NanaPlay tags carry the versionCode after "+": e.g. "v1.0.22+77".
+    // GitHub Releases API has no versionCode field, so parse it from the tag.
+    val (versionName, tagVersionCode) = tagName?.let { parseTagVersion(it) } ?: (tagName to null)
+    val versionCode = root.long("versionCode", "version_code", "androidVersionCode") ?: tagVersionCode
     return AndroidUpdateCandidate(
         sourceUrl = sourceUrl,
         apkUrl = apkUrl,
-        versionName = root.string("tag_name", "name")?.removePrefix("v"),
+        versionName = versionName,
         versionCode = versionCode,
         sha256 = apkAsset.string("sha256", "digest")?.removePrefix("sha256:")?.cleanHex(),
         releaseNotes = normalizeReleaseNotes(root.string("body")),
         fileName = apkAsset.string("name"),
     )
+}
+
+/**
+ * Splits a release tag like "1.0.22+77" into (versionName, versionCode).
+ * Returns (tag, null) when there is no "+" suffix.
+ */
+private fun parseTagVersion(tag: String): Pair<String?, Long?> {
+    val plusIndex = tag.lastIndexOf('+')
+    if (plusIndex < 0) return tag to null
+    val code = tag.substring(plusIndex + 1).toLongOrNull() ?: return tag to null
+    return tag.substring(0, plusIndex) to code
 }
 
 private fun directApkCandidate(sourceUrl: String, versionName: String?, versionCode: Long?, sha256: String?): AndroidUpdateCandidate =

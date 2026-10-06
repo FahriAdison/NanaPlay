@@ -1,6 +1,7 @@
 package com.opencloudgaming.opennow
 import com.papahchan.nanaplay.R
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -167,6 +168,12 @@ internal fun ConsoleModeScreen(
         if (next.isBlank()) onSearchDismissed()
     }
 
+    // NanaPlay 1.0.25: back closes an active search first (clear query + dismiss),
+    // instead of exiting the app while the user is still searching.
+    BackHandler(enabled = showSearch) {
+        onConsoleSearchQueryChange("")
+    }
+
     BoxWithConstraints(
         modifier
             .fillMaxSize()
@@ -227,17 +234,12 @@ internal fun ConsoleModeScreen(
                 ),
         )
 
-        if (games.isEmpty()) {
-            ConsoleModeEmptyState(
-                loading = state.loadingGames,
-                modifier = Modifier.fillMaxSize(),
-            )
-        } else {
-            // Landscape uses a compact composition budgeted for short screens so the
-            // card strip can never collide with the title/Play panel. Portrait is
-            // intentionally left exactly as it was.
-            Column(Modifier.fillMaxSize()) {
-                if (showSearch) {
+        // NanaPlay 1.0.25 (fatal fix): the search field must stay visible even
+        // when no games match. Previously an empty result replaced the whole
+        // column — including the field's clear button — trapping the user in
+        // the empty state with no way to clear the query.
+        Column(Modifier.fillMaxSize()) {
+            if (showSearch) {
                     NativeSearchField(
                         query = searchQuery,
                         onQueryChange = ::onConsoleSearchQueryChange,
@@ -276,6 +278,16 @@ internal fun ConsoleModeScreen(
                     Spacer(Modifier.height(if (isLandscape) 6.dp else 10.dp))
                 }
 
+            // Empty results (or still loading) render below the search field,
+            // so the clear button is always reachable.
+            if (games.isEmpty()) {
+                ConsoleModeEmptyState(
+                    loading = state.loadingGames,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                )
+            } else {
                 Spacer(Modifier.weight(1f))
 
                 selectedGame?.let { game ->

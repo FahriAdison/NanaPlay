@@ -126,6 +126,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.outlined.Cast
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
@@ -174,6 +175,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -1967,6 +1969,16 @@ private fun MainShell(
                                 iconRes = R.drawable.ic_tab_library,
                                 label = stringResource(R.string.nav_library),
                             )
+                            // NanaPlay 1.0.25: local music player tab.
+                            BottomNavVectorItem(
+                                selected = state.page == AppPage.Music,
+                                onClick = {
+                                    visibleSearchTarget = null
+                                    viewModel.setPage(AppPage.Music)
+                                },
+                                imageVector = Icons.Filled.MusicNote,
+                                label = "Music",
+                            )
                             BottomNavItem(
                                 selected = state.page == AppPage.Settings,
                                 onClick = {
@@ -2142,6 +2154,8 @@ private fun MainShell(
                                     onDetailRouteChange = { settingsDetailRouteOpen = it },
                                 )
                                 AppPage.Stream -> StreamScreen(state, viewModel)
+                                // NanaPlay 1.0.25: local music player page.
+                                AppPage.Music -> NanaMusicScreen()
                             }
                         }
                         if (showMinimizedQueueDock && showNavigationRail) {
@@ -2354,6 +2368,14 @@ private fun AppNavigationRail(
                         label = stringResource(R.string.nav_library),
                         iconSize = if (largeIcons) 30.dp else 24.dp,
                     )
+                    // NanaPlay 1.0.25: local music player tab.
+                    AppNavigationRailVectorItem(
+                        selected = state.page == AppPage.Music,
+                        onClick = { onNavigate(AppPage.Music) },
+                        imageVector = Icons.Filled.MusicNote,
+                        label = "Music",
+                        iconSize = if (largeIcons) 30.dp else 24.dp,
+                    )
                     AppNavigationRailItem(
                         selected = state.page == AppPage.Settings,
                         onClick = { onNavigate(AppPage.Settings) },
@@ -2450,6 +2472,44 @@ private fun AppNavigationRailItem(
     )
 }
 
+/** NanaPlay 1.0.25: [AppNavigationRailItem] variant for Material ImageVector icons (Music tab). */
+@Composable
+private fun AppNavigationRailVectorItem(
+    selected: Boolean,
+    onClick: () -> Unit,
+    imageVector: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    modifier: Modifier = Modifier,
+    iconSize: Dp = 24.dp,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val accent = MaterialTheme.colorScheme.primary
+    NavigationRailItem(
+        selected = selected,
+        onClick = onClick,
+        modifier = modifier
+            .onFocusChanged { focused = it.isFocused }
+            .then(
+                if (focused) Modifier.border(2.dp, accent, RoundedCornerShape(12.dp)) else Modifier
+            ),
+        colors = NavigationRailItemDefaults.colors(
+            selectedIconColor = accent,
+            selectedTextColor = accent,
+            indicatorColor = if (focused) accent.copy(alpha = 0.35f) else accent.copy(alpha = 0.18f),
+            unselectedIconColor = if (focused) Color.White else TextMuted,
+            unselectedTextColor = if (focused) Color.White else TextMuted,
+        ),
+        icon = {
+            Icon(
+                imageVector = imageVector,
+                contentDescription = label,
+                modifier = Modifier.size(iconSize),
+            )
+        },
+        label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+    )
+}
+
 private data class TopBarMusicControl(
     val visible: Boolean,
     val playing: Boolean,
@@ -2459,6 +2519,49 @@ private data class TopBarMusicControl(
 
 @Composable
 private fun RowScope.BottomNavItem(selected: Boolean, onClick: () -> Unit, iconRes: Int, label: String) {
+    BottomNavItemContent(
+        selected = selected,
+        onClick = onClick,
+        label = label,
+        icon = {
+            Icon(
+                painter = painterResource(iconRes),
+                contentDescription = null,
+                modifier = Modifier.size(24.dp),
+            )
+        },
+    )
+}
+
+/** NanaPlay 1.0.25: variant of [BottomNavItem] for Material ImageVector icons (Music tab). */
+@Composable
+private fun RowScope.BottomNavVectorItem(
+    selected: Boolean,
+    onClick: () -> Unit,
+    imageVector: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+) {
+    BottomNavItemContent(
+        selected = selected,
+        onClick = onClick,
+        label = label,
+        icon = {
+            Icon(
+                imageVector = imageVector,
+                contentDescription = null,
+                modifier = Modifier.size(24.dp),
+            )
+        },
+    )
+}
+
+@Composable
+private fun RowScope.BottomNavItemContent(
+    selected: Boolean,
+    onClick: () -> Unit,
+    label: String,
+    icon: @Composable () -> Unit,
+) {
     NavigationBarItem(
         selected = selected,
         onClick = onClick,
@@ -2469,13 +2572,7 @@ private fun RowScope.BottomNavItem(selected: Boolean, onClick: () -> Unit, iconR
             unselectedIconColor = TextMuted,
             unselectedTextColor = TextMuted,
         ),
-        icon = {
-            Icon(
-                painter = painterResource(iconRes),
-                contentDescription = null,
-                modifier = Modifier.size(24.dp),
-            )
-        },
+        icon = icon,
         label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
     )
 }
@@ -2863,7 +2960,15 @@ private fun HomeScreen(
     onSearchDismissed: () -> Unit,
     onScrollChromeHiddenChange: (Boolean) -> Unit,
 ) {
-    val visibleGames = state.games.ifEmpty { state.catalogResult.games }
+    // NanaPlay 1.0.25: Classic search filters the already-loaded catalog locally
+    // (gameMatchesSearch) — instant results like Console mode, no network
+    // round-trip per keystroke.
+    val allGames = state.games.ifEmpty { state.catalogResult.games }
+    val visibleGames = remember(allGames, state.catalogSearch) {
+        val query = state.catalogSearch
+        if (query.isBlank()) allGames
+        else allGames.filter { game -> gameMatchesSearch(game, query) }
+    }
     val searchingCatalog = state.loadingGames && state.catalogSearch.isNotBlank()
     val gridState = rememberLazyGridState()
     val searchFocusRequester = remember { FocusRequester() }
@@ -2871,6 +2976,12 @@ private fun HomeScreen(
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val showSearch = searchRequested || state.catalogSearch.isNotBlank()
+    // NanaPlay 1.0.25: back closes an active search first (clear query + dismiss),
+    // instead of exiting the app while the user is still searching.
+    BackHandler(enabled = showSearch) {
+        viewModel.setCatalogSearch("")
+        onSearchDismissed()
+    }
     val showScrollActions by remember {
         derivedStateOf { gridState.firstVisibleItemIndex > 0 || gridState.firstVisibleItemScrollOffset > 80 }
     }
@@ -3215,6 +3326,12 @@ private fun LibraryScreen(
     val searchFocusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
     val showSearch = searchRequested || state.librarySearch.isNotBlank()
+    // NanaPlay 1.0.25: back closes an active search first (clear query + dismiss),
+    // instead of exiting the app while the user is still searching.
+    BackHandler(enabled = showSearch) {
+        viewModel.setLibrarySearch("")
+        onSearchDismissed()
+    }
     val scrolledAwayFromTop by remember {
         derivedStateOf { gridState.firstVisibleItemIndex > 0 || gridState.firstVisibleItemScrollOffset > 0 }
     }
@@ -3975,6 +4092,17 @@ private fun StoreGameGrid(
                 horizontalArrangement = Arrangement.spacedBy(gridSpec.horizontalSpacing),
                 verticalArrangement = Arrangement.spacedBy(gridSpec.verticalSpacing),
             ) {
+                // NanaPlay 1.0.25: branded identity header — the phase-1 differentiator
+                // from upstream OpenNOW. Hidden while searching so results stay clean.
+                if (state.catalogSearch.isBlank()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        NanaPlayHomeHeader(
+                            gameCount = games.size,
+                            favoriteCount = favoriteIds.size,
+                            modifier = Modifier.padding(bottom = 2.dp),
+                        )
+                    }
+                }
                 if (showControlsHeader) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         StoreScrollableControls(state, onSortChange, onFilterToggle, showToolbar = showToolbar)
@@ -4029,6 +4157,90 @@ private fun StoreGameGrid(
                 }
             }
         }
+    }
+}
+
+/**
+ * NanaPlay 1.0.25 — branded home header. This is the phase-1 visual differentiator
+ * from upstream OpenNOW: an electric-blue identity banner with the NanaPlay wordmark,
+ * library stats and a tagline, sitting above the game grid. Purely presentational —
+ * search, sort, filter and grid behaviour are untouched.
+ */
+@Composable
+private fun NanaPlayHomeHeader(
+    gameCount: Int,
+    favoriteCount: Int,
+    modifier: Modifier = Modifier,
+) {
+    val electricBlue = OpenNowPalette.AccentDefault
+    Box(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(
+                        electricBlue,
+                        Color(0xff0e63b6),
+                        Color(0xff0a3d75),
+                    ),
+                    start = Offset.Zero,
+                    end = Offset.Infinite,
+                ),
+            )
+            .padding(horizontal = 18.dp, vertical = 16.dp),
+    ) {
+        // Subtle decorative glow circle, top-right.
+        Box(
+            Modifier
+                .align(Alignment.TopEnd)
+                .offset(x = 28.dp, y = (-34).dp)
+                .size(120.dp)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.10f)),
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                "NanaPlay",
+                color = Color.White,
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = 0.5.sp,
+                maxLines = 1,
+            )
+            Text(
+                "Your cloud games, one tap away",
+                color = Color.White.copy(alpha = 0.82f),
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(2.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                NanaPlayHeaderChip("$gameCount games")
+                if (favoriteCount > 0) {
+                    NanaPlayHeaderChip("$favoriteCount favorites")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NanaPlayHeaderChip(label: String) {
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = Color.White.copy(alpha = 0.16f),
+        tonalElevation = 0.dp,
+    ) {
+        Text(
+            label,
+            color = Color.White,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            maxLines = 1,
+        )
     }
 }
 
@@ -6723,6 +6935,8 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
     var exitConfirmOpen by remember { mutableStateOf(false) }
     var keyboardOpen by remember { mutableStateOf(false) }
     var keyboardText by remember { mutableStateOf("") }
+    // NanaPlay 1.0.25: in-stream local music mini player.
+    var musicMiniPlayerOpen by remember { mutableStateOf(false) }
     var audioMuted by remember { mutableStateOf(false) }
     var touchLayoutEditing by remember { mutableStateOf(false) }
     var streamGuideOpen by remember(session?.sessionId) { mutableStateOf(false) }
@@ -7723,6 +7937,7 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                     touchControlsEnabled = state.settings.androidTouch.enabled,
                     keyboardOpen = keyboardOpen,
                     isRecording = recordingPhase == StreamRecorderPhase.Recording,
+                    musicMiniPlayerOpen = musicMiniPlayerOpen,
                     onFabPositionChange = { x, y ->
                         viewModel.updateSettings(state.settings.copy(quickAccessFabX = x, quickAccessFabY = y))
                     },
@@ -7740,7 +7955,17 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                     },
                     onTakeScreenshot = { takeScreenshot() },
                     onToggleRecording = { toggleStreamRecording() },
+                    onToggleMusic = { musicMiniPlayerOpen = !musicMiniPlayerOpen },
                 )
+            }
+            // NanaPlay 1.0.25: in-stream music mini player, bottom-center above the keyboard bar.
+            if (musicMiniPlayerOpen) {
+                AnimatedLaunchOverlay(Modifier.align(Alignment.BottomCenter)) {
+                    StreamMusicMiniPlayer(
+                        onClose = { musicMiniPlayerOpen = false },
+                        modifier = Modifier.padding(bottom = 12.dp),
+                    )
+                }
             }
             if (exitConfirmOpen) {
                 AnimatedLaunchOverlay(Modifier.align(Alignment.Center)) {
@@ -7751,6 +7976,59 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                             exitConfirmOpen = false
                             viewModel.stopStream()
                         },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * NanaPlay 1.0.25 — compact in-stream music mini player. Toggled from the
+ * quick-access status bar; music keeps playing while the stream runs (the
+ * player never takes audio focus, so it mixes with game audio).
+ */
+@Composable
+private fun StreamMusicMiniPlayer(
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val tracks by NanaMusicPlayer.tracks.collectAsState()
+    val isPlaying by NanaMusicPlayer.isPlaying.collectAsState()
+    val currentIndex by NanaMusicPlayer.currentIndex.collectAsState()
+    Box(
+        modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp)
+            .streamTouchPassthrough(PASSTHROUGH_ID_MUSIC_MINI),
+    ) {
+        Box(Modifier.fillMaxWidth()) {
+            NanaMusicControlBar(
+                title = tracks.getOrNull(currentIndex)?.title ?: "No music added — use the Music tab",
+                isPlaying = isPlaying,
+                hasTracks = tracks.isNotEmpty(),
+                onToggle = { NanaMusicPlayer.togglePlayPause(context) },
+                onNext = { NanaMusicPlayer.next(context) },
+                onPrevious = { NanaMusicPlayer.previous(context) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            // Close affordance, top-right over the bar.
+            Surface(
+                onClick = onClose,
+                shape = RoundedCornerShape(999.dp),
+                color = PanelAlt.copy(alpha = 0.95f),
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(x = 6.dp, y = (-10).dp)
+                    .size(28.dp),
+            ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        "×",
+                        color = TextPrimary,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
                     )
                 }
             }
@@ -7772,11 +8050,13 @@ private fun QuickAccessFab(
     touchControlsEnabled: Boolean,
     keyboardOpen: Boolean,
     isRecording: Boolean,
+    musicMiniPlayerOpen: Boolean,
     onFabPositionChange: (x: Float, y: Float) -> Unit,
     onToggleKeyboard: () -> Unit,
     onToggleTouchControls: () -> Unit,
     onTakeScreenshot: () -> Unit,
     onToggleRecording: () -> Unit,
+    onToggleMusic: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier.fillMaxSize()) {
@@ -7856,6 +8136,14 @@ private fun QuickAccessFab(
                     activeTint = Color(0xFFB3261E),
                     size = actionSize,
                     onClick = onToggleRecording,
+                )
+                // NanaPlay 1.0.25: local music mini player toggle.
+                QuickBarAction(
+                    icon = Icons.Filled.MusicNote,
+                    contentDescription = "Toggle music player",
+                    active = musicMiniPlayerOpen,
+                    size = actionSize,
+                    onClick = onToggleMusic,
                 )
             }
         }
@@ -9429,6 +9717,8 @@ private const val PASSTHROUGH_ID_PANEL = "controls-panel"
 private const val PASSTHROUGH_ID_KEYBOARD = "keyboard-bar"
 private const val PASSTHROUGH_ID_EXIT = "exit-confirmation"
 private const val PASSTHROUGH_ID_QUICK_FAB = "quick-access-fab"
+// NanaPlay 1.0.25: in-stream music mini player.
+private const val PASSTHROUGH_ID_MUSIC_MINI = "music-mini-player"
 
 @Composable
 private fun StreamPanelHeader(
@@ -11797,14 +12087,16 @@ private fun AnimatedQueueStatusText(
         0f
     }
     val parts = queueStatusParts(queueCopy, queuePosition)
-    val textStyle = (if (bigNumber) MaterialTheme.typography.displayLarge
+    // NanaPlay 1.0.25: the hero number was displayLarge (57sp) — too dominant.
+    // displayMedium (45sp) Black stays readable and bold without eating the screen.
+    val textStyle = (if (bigNumber) MaterialTheme.typography.displayMedium
         else if (compact) MaterialTheme.typography.bodyLarge
         else MaterialTheme.typography.titleMedium)
         .copy(fontWeight = if (bigNumber) FontWeight.Black else FontWeight.Normal)
     val numberPhase = numberProgress.value
     val numberAnimating = numberPhase < 1f
     val numberTravelPx = with(LocalDensity.current) {
-        (if (bigNumber) 44.dp else if (compact) 18.dp else 22.dp).toPx()
+        (if (bigNumber) 32.dp else if (compact) 18.dp else 22.dp).toPx()
     }
 
     Row(
@@ -12243,8 +12535,10 @@ private fun LandscapeQueuePositionDock(queuePosition: Int, modifier: Modifier = 
             Text(
                 queuePosition.toString(),
                 color = accent,
-                style = MaterialTheme.typography.displaySmall.copy(
-                    fontWeight = FontWeight.Black,
+                // NanaPlay 1.0.25: displaySmall (36sp) was too dominant for the dock.
+                // headlineLarge (32sp) ExtraBold keeps it punchy but proportionate.
+                style = MaterialTheme.typography.headlineLarge.copy(
+                    fontWeight = FontWeight.ExtraBold,
                     shadow = Shadow(
                         color = accent.copy(alpha = 0.24f + heat * 0.42f),
                         offset = Offset(0f, 0f),

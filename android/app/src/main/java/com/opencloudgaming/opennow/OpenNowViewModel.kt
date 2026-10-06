@@ -38,6 +38,7 @@ import java.util.Locale
 enum class AppPage {
     Home,
     Library,
+    Music,
     Settings,
     Stream,
 }
@@ -1176,7 +1177,11 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 properties = mapOf("query" to query),
             )
         }
-        refreshCatalogDebounced()
+        // NanaPlay 1.0.25: Classic search filters LOCALLY from the already-loaded
+        // catalog (see HomeScreen visibleGames) — instant like Console mode.
+        // No network refresh per keystroke: on slow/bad networks the debounced
+        // re-fetch made results lag or never appear. Network refresh stays for
+        // manual refresh, sort/filter changes and catalog updates.
     }
 
     fun setLibrarySearch(query: String) {

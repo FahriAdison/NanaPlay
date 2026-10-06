@@ -91,6 +91,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -128,9 +129,11 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.outlined.Cast
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.FiberManualRecord
 import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material.icons.rounded.PhotoCamera
 import androidx.compose.material.icons.rounded.SportsEsports
+import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -7631,6 +7634,13 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                             ),
                         )
                     },
+                    onQuickAccessBarToggle = {
+                        viewModel.updateSettings(
+                            state.settings.copy(
+                                quickAccessBarVisible = !state.settings.quickAccessBarVisible,
+                            ),
+                        )
+                    },
                     onTouchScaleChange = { value ->
                         viewModel.updateSettings(state.settings.copy(androidTouch = state.settings.androidTouch.copy(scale = value)))
                     },
@@ -7706,28 +7716,32 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                     )
                 }
             }
-            QuickAccessFab(
-                fabXFraction = state.settings.quickAccessFabX,
-                fabYFraction = state.settings.quickAccessFabY,
-                touchControlsEnabled = state.settings.androidTouch.enabled,
-                keyboardOpen = keyboardOpen,
-                onFabPositionChange = { x, y ->
-                    viewModel.updateSettings(state.settings.copy(quickAccessFabX = x, quickAccessFabY = y))
-                },
-                onToggleKeyboard = { keyboardOpen = !keyboardOpen },
-                onToggleTouchControls = {
-                    val newEnabled = !state.settings.androidTouch.enabled
-                    touchControlsForceShown = newEnabled
-                    viewModel.updateSettings(
-                        state.settings.copy(
-                            androidTouch = state.settings.androidTouch.copy(
-                                enabled = newEnabled,
+            if (state.settings.quickAccessBarVisible) {
+                QuickAccessFab(
+                    fabXFraction = state.settings.quickAccessFabX,
+                    fabYFraction = state.settings.quickAccessFabY,
+                    touchControlsEnabled = state.settings.androidTouch.enabled,
+                    keyboardOpen = keyboardOpen,
+                    isRecording = recordingPhase == StreamRecorderPhase.Recording,
+                    onFabPositionChange = { x, y ->
+                        viewModel.updateSettings(state.settings.copy(quickAccessFabX = x, quickAccessFabY = y))
+                    },
+                    onToggleKeyboard = { keyboardOpen = !keyboardOpen },
+                    onToggleTouchControls = {
+                        val newEnabled = !state.settings.androidTouch.enabled
+                        touchControlsForceShown = newEnabled
+                        viewModel.updateSettings(
+                            state.settings.copy(
+                                androidTouch = state.settings.androidTouch.copy(
+                                    enabled = newEnabled,
+                                ),
                             ),
-                        ),
-                    )
-                },
-                onTakeScreenshot = { takeScreenshot() },
-            )
+                        )
+                    },
+                    onTakeScreenshot = { takeScreenshot() },
+                    onToggleRecording = { toggleStreamRecording() },
+                )
+            }
             if (exitConfirmOpen) {
                 AnimatedLaunchOverlay(Modifier.align(Alignment.Center)) {
                     StreamExitConfirmation(
@@ -7745,11 +7759,11 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
 }
 
 /**
- * Floating quick-access button shown during active streams. The user can drag
- * it anywhere on screen (position persists in [AppSettings] as fractions, so it
- * survives rotation); tapping it expands a mini-menu with keyboard,
- * touch-controls, and screenshot actions. Touches on the FAB never reach the game thanks to
- * the touch-passthrough registration.
+ * Slim vertical quick-access status bar shown during active streams, combining
+ * keyboard, touch/gamepad, screenshot and recording actions in one compact
+ * container. The user can drag it anywhere on screen (position persists in
+ * [AppSettings] as fractions, so it survives rotation). Touches on the bar
+ * never reach the game thanks to the touch-passthrough registration.
  */
 @Composable
 private fun QuickAccessFab(
@@ -7757,118 +7771,91 @@ private fun QuickAccessFab(
     fabYFraction: Float,
     touchControlsEnabled: Boolean,
     keyboardOpen: Boolean,
+    isRecording: Boolean,
     onFabPositionChange: (x: Float, y: Float) -> Unit,
     onToggleKeyboard: () -> Unit,
     onToggleTouchControls: () -> Unit,
     onTakeScreenshot: () -> Unit,
+    onToggleRecording: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier.fillMaxSize()) {
         val density = LocalDensity.current
         val maxWidthPx = with(density) { maxWidth.toPx() }
         val maxHeightPx = with(density) { maxHeight.toPx() }
-        val fabSize = 52.dp
-        val fabSizePx = with(density) { fabSize.toPx() }
-        val actionSize = 44.dp
-        val menuGap = 8.dp
-        // Expanded menu above the FAB: three action buttons + spacing + gap to the FAB.
-        val menuAbovePx = with(density) { (actionSize * 3 + menuGap * 3).toPx() }
+        val barWidth = 48.dp
+        val actionSize = 40.dp
+        val barWidthPx = with(density) { barWidth.toPx() }
         var offsetPx by remember(fabXFraction, fabYFraction, maxWidthPx, maxHeightPx) {
             mutableStateOf(
                 Offset(
-                    x = (fabXFraction * maxWidthPx).coerceIn(0f, (maxWidthPx - fabSizePx).coerceAtLeast(0f)),
-                    y = (fabYFraction * maxHeightPx).coerceIn(0f, (maxHeightPx - fabSizePx).coerceAtLeast(0f)),
+                    x = (fabXFraction * maxWidthPx).coerceIn(0f, (maxWidthPx - barWidthPx).coerceAtLeast(0f)),
+                    y = (fabYFraction * maxHeightPx).coerceIn(0f, (maxHeightPx - barWidthPx).coerceAtLeast(0f)),
                 ),
             )
         }
-        var expanded by remember { mutableStateOf(false) }
-        // Not enough room above the FAB: unfold the menu below it instead.
-        val showMenuAbove = offsetPx.y >= menuAbovePx + with(density) { 8.dp.toPx() }
-        // Keep the FAB visually stationary while the menu unfolds above it.
-        val columnOffsetYPx = offsetPx.y - if (expanded && showMenuAbove) menuAbovePx else 0f
 
-        Column(
+        Surface(
             modifier = Modifier
-                .offset { IntOffset(offsetPx.x.roundToInt(), columnOffsetYPx.roundToInt()) }
-                .streamTouchPassthrough(PASSTHROUGH_ID_QUICK_FAB),
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .offset { IntOffset(offsetPx.x.roundToInt(), offsetPx.y.roundToInt()) }
+                .streamTouchPassthrough(PASSTHROUGH_ID_QUICK_FAB)
+                .pointerInput(Unit) {
+                    detectDragGestures(
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            offsetPx = Offset(
+                                x = (offsetPx.x + dragAmount.x)
+                                    .coerceIn(0f, (maxWidthPx - barWidthPx).coerceAtLeast(0f)),
+                                y = (offsetPx.y + dragAmount.y)
+                                    .coerceIn(0f, (maxHeightPx - barWidthPx).coerceAtLeast(0f)),
+                            )
+                        },
+                        onDragEnd = {
+                            onFabPositionChange(
+                                (offsetPx.x / maxWidthPx).coerceIn(0f, 1f),
+                                (offsetPx.y / maxHeightPx).coerceIn(0f, 1f),
+                            )
+                        },
+                    )
+                },
+            shape = RoundedCornerShape(24.dp),
+            color = OpenNowPalette.PanelOverVideo.copy(alpha = 0.92f),
+            border = BorderStroke(1.dp, OpenNowPalette.AccentDefault.copy(alpha = 0.35f)),
+            tonalElevation = 8.dp,
         ) {
-            AnimatedVisibility(visible = expanded && showMenuAbove) {
-                QuickFabMenu(
-                    keyboardOpen = keyboardOpen,
-                    touchControlsEnabled = touchControlsEnabled,
-                    actionSize = actionSize,
-                    menuGap = menuGap,
-                    onToggleKeyboard = {
-                        expanded = false
-                        onToggleKeyboard()
-                    },
-                    onToggleTouchControls = {
-                        expanded = false
-                        onToggleTouchControls()
-                    },
-                    onTakeScreenshot = {
-                        expanded = false
-                        onTakeScreenshot()
-                    },
-                )
-            }
-            if (expanded && showMenuAbove) Spacer(Modifier.height(menuGap))
-            Box(
-                modifier = Modifier
-                    .size(fabSize)
-                    .clip(CircleShape)
-                    .background(OpenNowPalette.PanelOverVideo)
-                    .border(1.dp, OpenNowPalette.AccentDefault.copy(alpha = 0.55f), CircleShape)
-                    .pointerInput(Unit) { detectTapGestures(onTap = { expanded = !expanded }) }
-                    .pointerInput(Unit) {
-                        detectDragGestures(
-                            onDragStart = { expanded = false },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                offsetPx = Offset(
-                                    x = (offsetPx.x + dragAmount.x)
-                                        .coerceIn(0f, (maxWidthPx - fabSizePx).coerceAtLeast(0f)),
-                                    y = (offsetPx.y + dragAmount.y)
-                                        .coerceIn(0f, (maxHeightPx - fabSizePx).coerceAtLeast(0f)),
-                                )
-                            },
-                            onDragEnd = {
-                                onFabPositionChange(
-                                    (offsetPx.x / maxWidthPx).coerceIn(0f, 1f),
-                                    (offsetPx.y / maxHeightPx).coerceIn(0f, 1f),
-                                )
-                            },
-                        )
-                    },
-                contentAlignment = Alignment.Center,
+            Column(
+                Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Icon(
-                    imageVector = if (expanded) Icons.Rounded.Close else Icons.Rounded.Tune,
-                    contentDescription = "Quick access",
-                    tint = OpenNowPalette.AccentDefault,
-                    modifier = Modifier.size(24.dp),
+                QuickBarAction(
+                    icon = Icons.Rounded.Keyboard,
+                    contentDescription = "Toggle keyboard",
+                    active = keyboardOpen,
+                    size = actionSize,
+                    onClick = onToggleKeyboard,
                 )
-            }
-            if (expanded && !showMenuAbove) Spacer(Modifier.height(menuGap))
-            AnimatedVisibility(visible = expanded && !showMenuAbove) {
-                QuickFabMenu(
-                    keyboardOpen = keyboardOpen,
-                    touchControlsEnabled = touchControlsEnabled,
-                    actionSize = actionSize,
-                    menuGap = menuGap,
-                    onToggleKeyboard = {
-                        expanded = false
-                        onToggleKeyboard()
-                    },
-                    onToggleTouchControls = {
-                        expanded = false
-                        onToggleTouchControls()
-                    },
-                    onTakeScreenshot = {
-                        expanded = false
-                        onTakeScreenshot()
-                    },
+                QuickBarAction(
+                    icon = Icons.Rounded.SportsEsports,
+                    contentDescription = "Toggle touch controls",
+                    active = touchControlsEnabled,
+                    size = actionSize,
+                    onClick = onToggleTouchControls,
+                )
+                QuickBarAction(
+                    icon = Icons.Rounded.PhotoCamera,
+                    contentDescription = "Take screenshot",
+                    active = false,
+                    size = actionSize,
+                    onClick = onTakeScreenshot,
+                )
+                QuickBarAction(
+                    icon = if (isRecording) Icons.Rounded.Stop else Icons.Rounded.FiberManualRecord,
+                    contentDescription = if (isRecording) "Stop recording" else "Start recording",
+                    active = isRecording,
+                    activeTint = Color(0xFFB3261E),
+                    size = actionSize,
+                    onClick = onToggleRecording,
                 )
             }
         }
@@ -7876,68 +7863,26 @@ private fun QuickAccessFab(
 }
 
 @Composable
-private fun QuickFabMenu(
-    keyboardOpen: Boolean,
-    touchControlsEnabled: Boolean,
-    actionSize: Dp,
-    menuGap: Dp,
-    onToggleKeyboard: () -> Unit,
-    onToggleTouchControls: () -> Unit,
-    onTakeScreenshot: () -> Unit,
-) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(menuGap),
-    ) {
-        QuickFabAction(
-            icon = Icons.Rounded.Keyboard,
-            contentDescription = "Toggle keyboard",
-            active = keyboardOpen,
-            size = actionSize,
-            onClick = onToggleKeyboard,
-        )
-        QuickFabAction(
-            icon = Icons.Rounded.SportsEsports,
-            contentDescription = "Toggle touch controls",
-            active = touchControlsEnabled,
-            size = actionSize,
-            onClick = onToggleTouchControls,
-        )
-        QuickFabAction(
-            icon = Icons.Rounded.PhotoCamera,
-            contentDescription = "Take screenshot",
-            active = false,
-            size = actionSize,
-            onClick = onTakeScreenshot,
-        )
-    }
-}
-
-@Composable
-private fun QuickFabAction(
+private fun QuickBarAction(
     icon: ImageVector,
     contentDescription: String,
     active: Boolean,
     size: Dp,
     onClick: () -> Unit,
+    activeTint: Color = OpenNowPalette.AccentDefault,
 ) {
     Box(
         modifier = Modifier
             .size(size)
             .clip(CircleShape)
-            .background(OpenNowPalette.PanelOverVideo)
-            .border(
-                1.dp,
-                if (active) OpenNowPalette.AccentDefault else OpenNowPalette.PanelHairline,
-                CircleShape,
-            )
+            .background(if (active) activeTint.copy(alpha = 0.18f) else Color.Transparent)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
-            tint = if (active) OpenNowPalette.AccentDefault else OpenNowPalette.TextMuted,
+            tint = if (active) activeTint else OpenNowPalette.TextMuted,
             modifier = Modifier.size(22.dp),
         )
     }
@@ -8961,6 +8906,7 @@ private fun StreamControlsPanel(
     onSharpeningToggle: () -> Unit,
     onSharpeningAmountChange: (Float) -> Unit,
     onStretchToFitToggle: () -> Unit,
+    onQuickAccessBarToggle: () -> Unit,
     onTouchScaleChange: (Float) -> Unit,
     onButtonScaleChange: (Float) -> Unit,
     onStickScaleChange: (Float) -> Unit,
@@ -9074,6 +9020,19 @@ private fun StreamControlsPanel(
                         limit = sessionTimerLimit,
                         startedAtMs = sessionStartedAtMs,
                         nowMs = sessionNowMs,
+                    )
+                }
+            }
+            item {
+                ControlSection(stringResource(R.string.stream_panel_section_quick_bar)) {
+                    ControlSwitchRow(
+                        label = stringResource(R.string.stream_panel_quick_bar),
+                        checked = settings.quickAccessBarVisible,
+                        onCheckedChange = {
+                            onButtonTone()
+                            onQuickAccessBarToggle()
+                        },
+                        value = onOffLabel(settings.quickAccessBarVisible),
                     )
                 }
             }
@@ -10540,6 +10499,8 @@ private fun StreamKeyboardBar(
     Surface(
         modifier = modifier
             .fillMaxWidth()
+            // Sit right above the system soft keyboard when it's open.
+            .imePadding()
             // The keyboard bar registered no passthrough bounds at all, so on a phone every tap on
             // it — including on the text field — was also forwarded into the game as touch input.
             .streamTouchPassthrough(PASSTHROUGH_ID_KEYBOARD),
@@ -14486,121 +14447,82 @@ private fun RecommendedRouteHeroCard(
     launchFocusRequester: FocusRequester,
     modifier: Modifier = Modifier,
 ) {
+    // Compact row instead of the big hero card: keeps badge, route name,
+    // ping + bars, wait/queue line and a small Launch button, so the other
+    // servers below stay visible without scrolling.
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(14.dp),
         color = Color(0xff0d1626),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)),
     ) {
-        Box {
-            // Static dimmed game-art backdrop (no blur — kept cheap).
-            if (!backdropUrl.isNullOrBlank()) {
-                UrlImage(
-                    backdropUrl,
-                    Modifier
-                        .matchParentSize()
-                        .graphicsLayer { alpha = 0.30f },
-                    contentScale = ContentScale.Crop,
-                )
-            }
-            Box(
-                Modifier
-                    .matchParentSize()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                Color(0xff0a1220).copy(alpha = 0.45f),
-                                Color(0xff0a1220).copy(alpha = 0.90f),
-                            )
-                        )
-                    )
-            )
+        Row(
+            Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
             Column(
-                Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Surface(
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(6.dp),
                         color = MaterialTheme.colorScheme.primary,
                     ) {
                         Text(
                             "RECOMMENDED",
-                            Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                             color = Color.White,
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
                         )
                     }
                     Text(
-                        "Best available route",
-                        color = TextMuted,
-                        style = MaterialTheme.typography.labelMedium,
+                        zoneOption.zoneId,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    Column(
-                        Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        Text(
-                            zoneOption.zoneId,
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            regionLabel(zoneOption.zone.Region),
-                            color = TextMuted,
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Column(
-                        horizontalAlignment = Alignment.End,
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            PingSignalBars(zoneOption.pingMs)
-                            Text(
-                                zoneOption.pingMs?.let { "$it ms" } ?: "--",
-                                color = zoneOption.pingMs?.let(::pingColor) ?: TextMuted,
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                        }
-                        Text(
-                            recommendedWaitLine(zoneOption.zone.eta, zoneOption.zone.QueuePosition),
-                            color = TextMuted,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                }
-                Button(
-                    onClick = onLaunch,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp)
-                        .focusRequester(launchFocusRequester),
-                ) {
+                    PingSignalBars(zoneOption.pingMs)
                     Text(
-                        "Launch",
-                        style = MaterialTheme.typography.titleMedium,
+                        zoneOption.pingMs?.let { "$it ms" } ?: "--",
+                        color = zoneOption.pingMs?.let(::pingColor) ?: TextMuted,
+                        style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Bold,
                     )
+                    Text(
+                        "· " + recommendedWaitLine(zoneOption.zone.eta, zoneOption.zone.QueuePosition),
+                        color = TextMuted,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
+            }
+            Button(
+                onClick = onLaunch,
+                modifier = Modifier
+                    .height(40.dp)
+                    .focusRequester(launchFocusRequester),
+                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 0.dp),
+            ) {
+                Text(
+                    "Launch",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                )
             }
         }
     }

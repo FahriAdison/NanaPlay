@@ -75,6 +75,8 @@
     <string name="stream_panel_done">Done</string>
     <string name="stream_panel_cd_keyboard">Open keyboard sender</string>
     <string name="stream_panel_section_display">Display</string>
+    <string name="stream_panel_section_quick_bar">Quick Access Bar</string>
+    <string name="stream_panel_quick_bar">Status bar</string>
     <string name="stream_panel_section_input">Input</string>
     <string name="stream_panel_section_touch_layout">Touch Layout</string>
     <string name="stream_panel_audio">Audio</string>

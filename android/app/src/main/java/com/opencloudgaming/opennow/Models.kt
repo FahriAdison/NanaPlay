@@ -360,6 +360,8 @@ data class AppSettings(
     /** Quick-access FAB position as fractions of the stream area (0..1). */
     val quickAccessFabX: Float = 0.92f,
     val quickAccessFabY: Float = 0.45f,
+    /** Visibility of the combined quick-access status bar during streams. */
+    val quickAccessBarVisible: Boolean = true,
 )
 
 internal const val MIN_GAME_CARD_SCALE = 0.75f

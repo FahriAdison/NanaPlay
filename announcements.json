@@ -1,0 +1,10 @@
+{
+  "announcements": [
+    {
+      "id": "2026-10-07-testing-hold",
+      "title": "Update on Hold",
+      "message": "NanaPlay updates are temporarily on hold while we run some internal testing. Thanks for your patience — we'll be back with new features soon!",
+      "showUntil": "2026-10-31T00:00:00Z"
+    }
+  ]
+}

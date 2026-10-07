@@ -614,6 +614,14 @@ fun OpenNowApp(viewModel: OpenNowViewModel) {
                         onDismiss = viewModel::dismissAndroidUpdateNotice,
                     )
                 }
+                // 1.0.34: GitHub announcements — show the first unread one.
+                // Dismissing removes it from the queue; the next shows after.
+                state.pendingAnnouncements.firstOrNull()?.let { announcement ->
+                    AnnouncementDialog(
+                        announcement = announcement,
+                        onDismiss = { viewModel.dismissAnnouncement(announcement.id) },
+                    )
+                }
                 if (showAnalyticsConsent) {
                     AnalyticsConsentDialog(
                         onAllow = {
@@ -994,6 +1002,23 @@ private fun DiagnosticShareDialog(
             dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
         )
     }
+}
+
+@Composable
+private fun AnnouncementDialog(
+    announcement: NanaAnnouncement,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(announcement.title) },
+        text = { Text(announcement.message) },
+        confirmButton = {
+            Button(onClick = onDismiss) {
+                Text("Got it")
+            }
+        },
+    )
 }
 
 @Composable

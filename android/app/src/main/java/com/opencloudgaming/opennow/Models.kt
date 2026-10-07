@@ -254,18 +254,12 @@ data class AndroidTouchSettings(
      * Default 8dp matches ViewConfiguration.getScaledTouchSlop() on most devices.
      */
     val nativeTouchJitterThresholdDp: Float = 8f,
-    val offsets: Map<String, TouchOffset> = mapOf(
-        "lstick_landscape" to TouchOffset(-67.02336f, 1.4236208f),
-        "l3_landscape" to TouchOffset(-159.65048f, 119.79623f),
-        "lt_landscape" to TouchOffset(32.63997f, -52.50644f),
-        "dpad_landscape" to TouchOffset(47.38254f, -131.70163f),
-        "rb_landscape" to TouchOffset(-124.94213f, -107.18774f),
-        "lb_landscape" to TouchOffset(119.051155f, -100.54266f),
-        "face_landscape" to TouchOffset(-20.225464f, -132.01855f),
-        "rstick_landscape" to TouchOffset(96.44574f, -7.9870353f),
-        "r3_landscape" to TouchOffset(191.65938f, 125.07891f),
-        "rt_landscape" to TouchOffset(-30.344517f, -57.420998f)
-    ),
+    // 1.0.35: default offsets reset to zero. The 1.0.33+ layout positions
+    // buttons with proper spacing by design; the old non-zero defaults were
+    // tuned for the pre-1.0.33 stacked layout and caused overlaps when applied
+    // on top of the new side-by-side LT/LB and RT/RB arrangement.
+    // Users can still drag buttons in layout-editing mode to customize.
+    val offsets: Map<String, TouchOffset> = emptyMap(),
     val touchControllerStyle: TouchControllerStyle = TouchControllerStyle.V1,
 ) {
     fun getOffset(key: String): TouchOffset = offsets[key] ?: TouchOffset()
@@ -352,6 +346,8 @@ data class AppSettings(
     val androidTouch: AndroidTouchSettings = AndroidTouchSettings(),
     val androidStreamGuideDismissed: Boolean = false,
     val androidPhysicalControllerPromptDismissed: Boolean = false,
+    /** IDs of GitHub announcements the user has already dismissed (1.0.34). */
+    val dismissedAnnouncementIds: Set<String> = emptySet(),
     val discordRichPresence: Boolean = false,
     val autoCheckForUpdates: Boolean = true,
     val analyticsOptOut: Boolean = true,

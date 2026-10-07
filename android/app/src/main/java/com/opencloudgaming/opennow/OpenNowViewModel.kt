@@ -182,6 +182,8 @@ data class OpenNowUiState(
     val remoteStreamMenuRequestToken: Int = 0,
     val remoteStatsToggleRequestToken: Int = 0,
     val sessionReport: SessionReport? = null,
+    /** 1.0.34: unread, unexpired GitHub announcements waiting to be shown. */
+    val pendingAnnouncements: List<NanaAnnouncement> = emptyList(),
 )
 
 internal fun OpenNowUiState.isAndroidUpdateCheckBlockedByStream(): Boolean =
@@ -349,8 +351,39 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         if (appUpdater.state.value.updateChecksSupported) {
             startAndroidUpdateAutoChecks()
         }
+        // 1.0.34: fetch GitHub announcements once per process; non-blocking,
+        // failures silently skip so startup is never affected.
+        checkAnnouncements()
         initialize()
     }
+
+    /**
+     * 1.0.34: fetch unread, unexpired announcements from the repo's
+     * announcements.json. Runs once per process; result is cached in state.
+     */
+    fun checkAnnouncements() {
+        if (announcementsChecked) return
+        announcementsChecked = true
+        viewModelScope.launch {
+            val dismissed = settingsStore.settings.value.dismissedAnnouncementIds
+            val active = NanaAnnouncements.fetchActive(dismissed)
+            if (active.isNotEmpty()) {
+                _state.update { it.copy(pendingAnnouncements = active) }
+            }
+        }
+    }
+
+    /** 1.0.34: mark an announcement read so it never shows again. */
+    fun dismissAnnouncement(id: String) {
+        settingsStore.update { settings ->
+            settings.copy(dismissedAnnouncementIds = settings.dismissedAnnouncementIds + id)
+        }
+        _state.update { state ->
+            state.copy(pendingAnnouncements = state.pendingAnnouncements.filterNot { it.id == id })
+        }
+    }
+
+    private var announcementsChecked = false
 
     private fun recordDebugEvent(category: String, message: String) {
         val oneLineMessage = message

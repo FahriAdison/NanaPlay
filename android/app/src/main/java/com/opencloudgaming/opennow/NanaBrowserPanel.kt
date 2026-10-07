@@ -47,10 +47,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -113,6 +115,11 @@ fun NanaBrowserPanel(
         }
         var minimized by remember { mutableStateOf(false) }
         var addressText by remember { mutableStateOf(BROWSER_HOME_URL) }
+        // 1.0.35: track whether the user is actively editing the address bar.
+        // WebViewClient.onPageStarted fires on redirects/iframe loads and would
+        // otherwise clobber the text right after the user taps X or types.
+        var isAddressEditing by remember { mutableStateOf(false) }
+        val keyboardController = LocalSoftwareKeyboardController.current
         var canGoBack by remember { mutableStateOf(false) }
         var canGoForward by remember { mutableStateOf(false) }
         var webViewRef by remember { mutableStateOf<WebView?>(null) }
@@ -256,7 +263,10 @@ fun NanaBrowserPanel(
                             onValueChange = { addressText = it },
                             modifier = Modifier
                                 .weight(1f)
-                                .height(48.dp),
+                                .height(48.dp)
+                                // 1.0.35: track focus so onPageStarted doesn't
+                                // clobber user input.
+                                .onFocusChanged { isAddressEditing = it.isFocused },
                             singleLine = true,
                             textStyle = MaterialTheme.typography.bodySmall,
                             placeholder = { Text("Enter URL", style = MaterialTheme.typography.bodySmall) },
@@ -277,13 +287,21 @@ fun NanaBrowserPanel(
                             keyboardActions = KeyboardActions(
                                 // 1.0.33: handle Go/Done/Search — some keyboards
                                 // send Done or Search instead of Go.
+                                // 1.0.35: stop editing + hide keyboard so the
+                                // loaded URL can update the bar via onPageStarted.
                                 onGo = {
+                                    isAddressEditing = false
+                                    keyboardController?.hide()
                                     webViewRef?.loadUrl(normalizeUrl(addressText))
                                 },
                                 onDone = {
+                                    isAddressEditing = false
+                                    keyboardController?.hide()
                                     webViewRef?.loadUrl(normalizeUrl(addressText))
                                 },
                                 onSearch = {
+                                    isAddressEditing = false
+                                    keyboardController?.hide()
                                     webViewRef?.loadUrl(normalizeUrl(addressText))
                                 },
                             ),
@@ -316,7 +334,11 @@ fun NanaBrowserPanel(
                                     ): Boolean = false // stay inside the panel
 
                                     override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
-                                        addressText = url
+                                        // 1.0.35: don't overwrite what the user is
+                                        // typing (or just cleared with X).
+                                        if (!isAddressEditing) {
+                                            addressText = url
+                                        }
                                     }
 
                                     override fun onPageFinished(view: WebView, url: String) {

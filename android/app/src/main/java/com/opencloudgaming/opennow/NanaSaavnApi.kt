@@ -47,7 +47,7 @@ object NanaSaavnApi {
      * Search JioSaavn for songs matching [query]. Returns up to [limit]
      * song results (id, title, artist, duration, thumbnail, play count).
      */
-    suspend fun searchSongs(query: String, limit: Int = 20): List<NanaOnlineTrack> =
+    suspend fun searchSongs(query: String, limit: Int = 50): List<NanaOnlineTrack> =
         withContext(Dispatchers.IO) {
             val encoded = URLEncoder.encode(query, "UTF-8")
             val body = get("$BASE_URL/api/search/songs?query=$encoded&limit=$limit")

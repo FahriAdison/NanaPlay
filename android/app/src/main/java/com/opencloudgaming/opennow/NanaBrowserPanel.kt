@@ -260,9 +260,30 @@ fun NanaBrowserPanel(
                             singleLine = true,
                             textStyle = MaterialTheme.typography.bodySmall,
                             placeholder = { Text("Enter URL", style = MaterialTheme.typography.bodySmall) },
+                            // 1.0.33: clear (X) button — was missing entirely.
+                            trailingIcon = {
+                                if (addressText.isNotEmpty()) {
+                                    IconButton(onClick = { addressText = "" }) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Close,
+                                            contentDescription = "Clear",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    }
+                                }
+                            },
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
                             keyboardActions = KeyboardActions(
+                                // 1.0.33: handle Go/Done/Search — some keyboards
+                                // send Done or Search instead of Go.
                                 onGo = {
+                                    webViewRef?.loadUrl(normalizeUrl(addressText))
+                                },
+                                onDone = {
+                                    webViewRef?.loadUrl(normalizeUrl(addressText))
+                                },
+                                onSearch = {
                                     webViewRef?.loadUrl(normalizeUrl(addressText))
                                 },
                             ),

@@ -130,9 +130,11 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.outlined.Cast
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.FiberManualRecord
 import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material.icons.rounded.Language
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PhotoCamera
 import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material.icons.rounded.Stop
@@ -7294,6 +7296,10 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
         streamGuideOpen = shouldOpenGuide
         if (shouldOpenGuide) {
             streamGuideStep = StreamGuideStep.OpenControls
+            // 1.0.33: mark dismissed the moment it shows — it must never
+            // reappear (e.g. after dragging the quick-access bar), even if
+            // the user never taps Skip/Open controls.
+            viewModel.updateSettings(state.settings.copy(androidStreamGuideDismissed = true))
         }
     }
 
@@ -8053,6 +8059,8 @@ private fun StreamMusicMiniPlayer(
  * container. The user can drag it anywhere on screen (position persists in
  * [AppSettings] as fractions, so it survives rotation). Touches on the bar
  * never reach the game thanks to the touch-passthrough registration.
+ * 1.0.33: collapsed to a single floating button — tap to expand the action
+ * drawer, tap again to collapse.
  */
 @Composable
 private fun QuickAccessFab(
@@ -8072,6 +8080,8 @@ private fun QuickAccessFab(
     onToggleBrowser: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // 1.0.33: drawer collapsed by default — one button, tap to expand.
+    var expanded by remember { mutableStateOf(false) }
     BoxWithConstraints(modifier.fillMaxSize()) {
         val density = LocalDensity.current
         val maxWidthPx = with(density) { maxWidth.toPx() }
@@ -8088,7 +8098,7 @@ private fun QuickAccessFab(
             )
         }
 
-        Surface(
+        Column(
             modifier = Modifier
                 .offset { IntOffset(offsetPx.x.roundToInt(), offsetPx.y.roundToInt()) }
                 .streamTouchPassthrough(PASSTHROUGH_ID_QUICK_FAB)
@@ -8111,60 +8121,83 @@ private fun QuickAccessFab(
                         },
                     )
                 },
-            shape = RoundedCornerShape(24.dp),
-            color = OpenNowPalette.PanelOverVideo.copy(alpha = 0.92f),
-            border = BorderStroke(1.dp, OpenNowPalette.AccentDefault.copy(alpha = 0.35f)),
-            tonalElevation = 8.dp,
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Column(
-                Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+            if (expanded) {
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = OpenNowPalette.PanelOverVideo.copy(alpha = 0.92f),
+                    border = BorderStroke(1.dp, OpenNowPalette.AccentDefault.copy(alpha = 0.35f)),
+                    tonalElevation = 8.dp,
+                ) {
+                    Column(
+                        Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        QuickBarAction(
+                            icon = Icons.Rounded.Keyboard,
+                            contentDescription = "Toggle keyboard",
+                            active = keyboardOpen,
+                            size = actionSize,
+                            onClick = onToggleKeyboard,
+                        )
+                        QuickBarAction(
+                            icon = Icons.Rounded.SportsEsports,
+                            contentDescription = "Toggle touch controls",
+                            active = touchControlsEnabled,
+                            size = actionSize,
+                            onClick = onToggleTouchControls,
+                        )
+                        QuickBarAction(
+                            icon = Icons.Rounded.PhotoCamera,
+                            contentDescription = "Take screenshot",
+                            active = false,
+                            size = actionSize,
+                            onClick = onTakeScreenshot,
+                        )
+                        QuickBarAction(
+                            icon = if (isRecording) Icons.Rounded.Stop else Icons.Rounded.FiberManualRecord,
+                            contentDescription = if (isRecording) "Stop recording" else "Start recording",
+                            active = isRecording,
+                            activeTint = Color(0xFFB3261E),
+                            size = actionSize,
+                            onClick = onToggleRecording,
+                        )
+                        // NanaPlay 1.0.25: local music mini player toggle.
+                        QuickBarAction(
+                            icon = Icons.Filled.MusicNote,
+                            contentDescription = "Toggle music player",
+                            active = musicMiniPlayerOpen,
+                            size = actionSize,
+                            onClick = onToggleMusic,
+                        )
+                        // NanaPlay 1.0.26: floating browser toggle.
+                        QuickBarAction(
+                            icon = Icons.Rounded.Language,
+                            contentDescription = "Toggle browser",
+                            active = browserOpen,
+                            size = actionSize,
+                            onClick = onToggleBrowser,
+                        )
+                    }
+                }
+            }
+            // The single floating trigger button (always visible).
+            Surface(
+                shape = CircleShape,
+                color = OpenNowPalette.PanelOverVideo.copy(alpha = 0.92f),
+                border = BorderStroke(1.dp, OpenNowPalette.AccentDefault.copy(alpha = 0.5f)),
+                tonalElevation = 8.dp,
+                modifier = Modifier.size(barWidth),
             ) {
                 QuickBarAction(
-                    icon = Icons.Rounded.Keyboard,
-                    contentDescription = "Toggle keyboard",
-                    active = keyboardOpen,
+                    icon = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.MoreVert,
+                    contentDescription = if (expanded) "Collapse quick actions" else "Expand quick actions",
+                    active = expanded,
                     size = actionSize,
-                    onClick = onToggleKeyboard,
-                )
-                QuickBarAction(
-                    icon = Icons.Rounded.SportsEsports,
-                    contentDescription = "Toggle touch controls",
-                    active = touchControlsEnabled,
-                    size = actionSize,
-                    onClick = onToggleTouchControls,
-                )
-                QuickBarAction(
-                    icon = Icons.Rounded.PhotoCamera,
-                    contentDescription = "Take screenshot",
-                    active = false,
-                    size = actionSize,
-                    onClick = onTakeScreenshot,
-                )
-                QuickBarAction(
-                    icon = if (isRecording) Icons.Rounded.Stop else Icons.Rounded.FiberManualRecord,
-                    contentDescription = if (isRecording) "Stop recording" else "Start recording",
-                    active = isRecording,
-                    activeTint = Color(0xFFB3261E),
-                    size = actionSize,
-                    onClick = onToggleRecording,
-                )
-                // NanaPlay 1.0.25: local music mini player toggle.
-                QuickBarAction(
-                    icon = Icons.Filled.MusicNote,
-                    contentDescription = "Toggle music player",
-                    active = musicMiniPlayerOpen,
-                    size = actionSize,
-                    onClick = onToggleMusic,
-                )
-                // NanaPlay 1.0.26: floating browser toggle.
-                QuickBarAction(
-                    icon = Icons.Rounded.Language,
-                    contentDescription = "Toggle browser",
-                    active = browserOpen,
-                    size = actionSize,
-                    onClick = onToggleBrowser,
+                    onClick = { expanded = !expanded },
                 )
             }
         }
@@ -13394,7 +13427,12 @@ private fun BoxScope.LandscapeTouchControls(
             offsetX = getLocalOffset("lb").x.dp,
             offsetY = getLocalOffset("lb").y.dp,
             onOffsetChange = { x, y -> onLocalOffsetChange("lb", x, y) },
-            modifier = Modifier.align(Alignment.TopStart).padding(top = topControlClearance + triggerDiameter + 8.dp),
+            // 1.0.33: side-by-side with LT (not below) — vertical stacking
+            // collided with the D-pad on short landscape screens.
+            modifier = Modifier.align(Alignment.TopStart).padding(
+                top = topControlClearance,
+                start = triggerDiameter + 8.dp,
+            ),
         ) {
             GamepadBumperButton(
                 label = "LB",
@@ -13435,7 +13473,12 @@ private fun BoxScope.LandscapeTouchControls(
             offsetX = getLocalOffset("rb").x.dp,
             offsetY = getLocalOffset("rb").y.dp,
             onOffsetChange = { x, y -> onLocalOffsetChange("rb", x, y) },
-            modifier = Modifier.align(Alignment.TopEnd).padding(top = topControlClearance + triggerDiameter + 8.dp),
+            // 1.0.33: side-by-side with RT (not below) — vertical stacking
+            // collided with the face buttons on short landscape screens.
+            modifier = Modifier.align(Alignment.TopEnd).padding(
+                top = topControlClearance,
+                end = triggerDiameter + 8.dp,
+            ),
         ) {
             GamepadBumperButton(
                 label = "RB",
@@ -14192,10 +14235,12 @@ private fun GamepadButton(
     }
     // NanaPlay 1.0.27: accent-tinted press feedback for the all-round gamepad.
     val pressedColor = OpenNowPalette.AccentDefault.copy(alpha = 0.38f)
+    // 1.0.33: electric-blue accent border at idle too, so the gamepad is
+    // visibly NanaPlay (not OpenNOW) without pressing anything.
     val borderColor = when {
         pressed -> OpenNowPalette.AccentDefault.copy(alpha = 0.95f)
-        style == TouchControllerStyle.V2 -> Color.White.copy(alpha = opacity * 0.5f)
-        else -> Color.White.copy(alpha = opacity * 0.45f)
+        style == TouchControllerStyle.V2 -> OpenNowPalette.AccentDefault.copy(alpha = opacity * 0.55f)
+        else -> OpenNowPalette.AccentDefault.copy(alpha = opacity * 0.5f)
     }
     Box(
         Modifier
@@ -14209,7 +14254,9 @@ private fun GamepadButton(
         Text(
             text = label,
             fontWeight = FontWeight.Bold,
-            color = Color.White.copy(alpha = opacity * 0.92f),
+            // 1.0.33: accent-tinted labels reinforce the NanaPlay identity at idle.
+            color = if (pressed) Color.White.copy(alpha = opacity * 0.95f)
+                else OpenNowPalette.AccentDefault.copy(alpha = opacity * 0.9f),
         )
     }
     DisposableEffect(client, mask) {

@@ -994,6 +994,10 @@ private fun SettingsContent(
                 SettingSwitch(stringResource(R.string.settings_queue_ready_music), settings.queueReadyMusic) { enabled ->
                     viewModel.updateSettings(settings.copy(queueReadyMusic = enabled))
                 }
+                // 1.0.33: let users hide the in-stream floating quick-action button entirely.
+                SettingSwitch("Show floating action buttons", settings.quickAccessBarVisible) { enabled ->
+                    viewModel.updateSettings(settings.copy(quickAccessBarVisible = enabled))
+                }
             }
     CategorySettingsSection(selectedCategory, SettingsCategory.General, searchQuery, "App Data", "app data", "data", "cache", "clear", "reset", "settings", "tutorial", "guide", "wipe", "relaunch", "fresh install") {
                 AppDataSettingsPanel(viewModel = viewModel)

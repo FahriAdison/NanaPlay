@@ -77,8 +77,10 @@ private fun musicReadPermission(): String =
  * `remember` inside NanaMusicOnlineTab, so switching tabs destroyed the tab
  * composable and the search reset. Hoisted to NanaMusicScreen (which stays
  * composed across tab switches) so results survive.
+ * 1.0.33 — singleton object so the search survives even when NanaMusicScreen
+ * itself is destroyed (navigating to Store/Library/Settings and back).
  */
-class NanaOnlineSearchState {
+object NanaOnlineSearchState {
     var query by mutableStateOf("")
     var results by mutableStateOf<List<NanaOnlineTrack>>(emptyList())
     var searching by mutableStateOf(false)
@@ -102,7 +104,8 @@ fun NanaMusicScreen(modifier: Modifier = Modifier) {
     val currentIndex by NanaMusicPlayer.currentIndex.collectAsState()
 
     var tab by remember { mutableIntStateOf(0) }
-    val onlineSearchState = remember { NanaOnlineSearchState() }
+    // 1.0.33: NanaOnlineSearchState is now a singleton — no remember needed,
+    // survives navigation to other main tabs.
 
     var permissionGranted by remember {
         mutableStateOf(
@@ -226,7 +229,7 @@ fun NanaMusicScreen(modifier: Modifier = Modifier) {
             )
         } else {
             NanaMusicOnlineTab(
-                state = onlineSearchState,
+                state = NanaOnlineSearchState,
                 modifier = Modifier.weight(1f),
             )
         }

@@ -6,7 +6,11 @@ import android.provider.OpenableColumns
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -53,6 +57,10 @@ object NanaMusicPlayer {
 
     private val _currentIndex = MutableStateFlow(-1)
     val currentIndex: StateFlow<Int> = _currentIndex.asStateFlow()
+
+    /** 1.0.28: last ExoPlayer error message, if any — surfaced so playback failures are visible instead of silent. */
+    private val _lastError = MutableStateFlow<String?>(null)
+    val lastError: StateFlow<String?> = _lastError.asStateFlow()
 
     val currentTrack: NanaTrack?
         get() {
@@ -212,6 +220,7 @@ object NanaMusicPlayer {
         }.getOrDefault(false)
     }
 
+    @OptIn(UnstableApi::class)
     @Synchronized
     private fun ensurePlayer(context: Context): androidx.media3.exoplayer.ExoPlayer {
         player?.let { return it }
@@ -221,7 +230,15 @@ object NanaMusicPlayer {
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
             .build()
+        // 1.0.28: route http(s) through the Range-forcing factory — YouTube
+        // throttles non-Range requests to ~30KB/s (see NanaRangedDataSource).
+        // Local files keep the default handling via DefaultDataSource.
+        val httpFactory = NanaRangedHttpDataSourceFactory(userAgent = "NanaPlay/1.0.28 (Android)")
+        val mediaSourceFactory = DefaultMediaSourceFactory(
+            DefaultDataSource.Factory(appContext, httpFactory),
+        )
         val exo = androidx.media3.exoplayer.ExoPlayer.Builder(appContext)
+            .setMediaSourceFactory(mediaSourceFactory)
             // Do NOT request audio focus: music must mix with the stream's game
             // audio, not pause/duck it (or be paused by it).
             .setAudioAttributes(audioAttributes, false)
@@ -232,6 +249,7 @@ object NanaMusicPlayer {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                     _isPlaying.value = isPlaying
                     if (isPlaying) {
+                        _lastError.value = null
                         startPeriodicSave()
                     } else {
                         stopPeriodicSave()
@@ -244,6 +262,11 @@ object NanaMusicPlayer {
                     _currentIndex.value = exo.currentMediaItemIndex
                     // Track change: persist immediately so a kill keeps the right song.
                     persistScope.launch { saveState(appContext) }
+                }
+
+                override fun onPlayerError(error: PlaybackException) {
+                    android.util.Log.e("NanaMusicPlayer", "playback error", error)
+                    _lastError.value = error.message ?: "Playback error"
                 }
             },
         )

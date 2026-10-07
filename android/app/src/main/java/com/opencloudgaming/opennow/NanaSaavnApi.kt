@@ -83,14 +83,20 @@ object NanaSaavnApi {
 
     // ---- response parsing ----
 
-    /** The search endpoint returns a bare JSON array; the song endpoint wraps it in {"data": [...]}. */
+    /** Response formats seen in the wild:
+     *  - bare JSON array: [...]
+     *  - {"success":true,"data":{"results":[...]}}  (search endpoint, current)
+     *  - {"data":[...]}  (song endpoint, older)
+     */
     private fun toSongArray(body: String): JSONArray {
         val trimmed = body.trim()
         return if (trimmed.startsWith("[")) {
             JSONArray(trimmed)
         } else {
             val root = JSONObject(trimmed)
-            root.optJSONArray("data") ?: JSONArray()
+            root.optJSONObject("data")?.optJSONArray("results")
+                ?: root.optJSONArray("data")
+                ?: JSONArray()
         }
     }
 

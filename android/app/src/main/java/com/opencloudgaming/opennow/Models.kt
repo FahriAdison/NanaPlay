@@ -232,7 +232,9 @@ data class AndroidTouchSettings(
     val buttonScale: Float = 1.102468f,
     val stickScale: Float = 1f,
     val joystickMode: TouchJoystickMode = TouchJoystickMode.Fixed,
-    val joystickDeadZone: Float = 0f,
+    // 1.0.27: small default dead zone prevents stick drift from tiny touches
+    // while staying responsive; still user-adjustable (0–0.3) in settings.
+    val joystickDeadZone: Float = 0.08f,
     val edgePaddingDp: Float = 14f,
     val bottomPaddingDp: Float = 10f,
     val leftOffsetXDp: Float = 0f,

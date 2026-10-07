@@ -329,11 +329,16 @@ object NanaMusicPlayer {
         val exo = ensurePlayer(appContext)
         val index: Int
         synchronized(this) {
-            // Reuse an existing queue entry for the same video when present.
+            // Reuse an existing queue entry for the same video when present,
+            // but ALWAYS swap in the freshly resolved URL: YouTube stream URLs
+            // expire (and are IP-bound), so replaying the old MediaItem is the
+            // classic "tap result but nothing plays" bug (1.0.27).
             val existing = _tracks.value.indexOfFirst {
                 it.isOnline && it.title == track.title && it.artist == track.artist
             }
             index = if (existing >= 0) {
+                exo.replaceMediaItem(existing, MediaItem.fromUri(track.uri))
+                _tracks.value = _tracks.value.toMutableList().also { it[existing] = track }
                 existing
             } else {
                 _tracks.value = _tracks.value + track

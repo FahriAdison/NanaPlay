@@ -73,6 +73,20 @@ private fun musicReadPermission(): String =
     }
 
 /**
+ * 1.0.27 — hoisted online-search state. Previously the query/results lived in
+ * `remember` inside NanaMusicOnlineTab, so switching tabs destroyed the tab
+ * composable and the search reset. Hoisted to NanaMusicScreen (which stays
+ * composed across tab switches) so results survive.
+ */
+class NanaOnlineSearchState {
+    var query by mutableStateOf("")
+    var results by mutableStateOf<List<NanaOnlineTrack>>(emptyList())
+    var searching by mutableStateOf(false)
+    var error by mutableStateOf<String?>(null)
+    var playingVideoId by mutableStateOf<String?>(null)
+}
+
+/**
  * NanaPlay 1.0.25 — standalone music screen (outside a stream).
  * 1.0.26 — two tabs: "My Music" (local files, unchanged) and "Online"
  * (YouTube Music search via InnerTube, inspired by Metrolist).
@@ -88,6 +102,7 @@ fun NanaMusicScreen(modifier: Modifier = Modifier) {
     val currentIndex by NanaMusicPlayer.currentIndex.collectAsState()
 
     var tab by remember { mutableIntStateOf(0) }
+    val onlineSearchState = remember { NanaOnlineSearchState() }
 
     var permissionGranted by remember {
         mutableStateOf(
@@ -191,10 +206,17 @@ fun NanaMusicScreen(modifier: Modifier = Modifier) {
         Spacer(Modifier.height(12.dp))
 
         if (tab == 0) {
+            // 1.0.27: "My Music" shows local files only. Online tracks stay in
+            // the shared player queue but must not appear here — entries carry
+            // their real playlist index so play/remove still target correctly.
+            val localEntries = remember(tracks) {
+                tracks.withIndex().filter { !it.value.isOnline }
+            }
             NanaMusicLocalTab(
-                tracks = tracks,
+                entries = localEntries,
                 isPlaying = isPlaying,
                 currentIndex = currentIndex,
+                nowPlayingTitle = tracks.getOrNull(currentIndex)?.title,
                 onPlay = { NanaMusicPlayer.play(context, it) },
                 onRemove = { NanaMusicPlayer.removeTrack(context, it) },
                 onToggle = { NanaMusicPlayer.togglePlayPause(context) },
@@ -203,16 +225,20 @@ fun NanaMusicScreen(modifier: Modifier = Modifier) {
                 modifier = Modifier.weight(1f),
             )
         } else {
-            NanaMusicOnlineTab(modifier = Modifier.weight(1f))
+            NanaMusicOnlineTab(
+                state = onlineSearchState,
+                modifier = Modifier.weight(1f),
+            )
         }
     }
 }
 
 @Composable
 private fun NanaMusicLocalTab(
-    tracks: List<NanaTrack>,
+    entries: List<IndexedValue<NanaTrack>>,
     isPlaying: Boolean,
     currentIndex: Int,
+    nowPlayingTitle: String?,
     onPlay: (Int) -> Unit,
     onRemove: (Int) -> Unit,
     onToggle: () -> Unit,
@@ -221,7 +247,7 @@ private fun NanaMusicLocalTab(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier.fillMaxSize()) {
-        if (tracks.isEmpty()) {
+        if (entries.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -253,7 +279,9 @@ private fun NanaMusicLocalTab(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                itemsIndexed(tracks, key = { index, track -> "$index-${track.uri}" }) { index, track ->
+                itemsIndexed(entries, key = { _, entry -> "${entry.index}-${entry.value.uri}" }) { _, entry ->
+                    val index = entry.index
+                    val track = entry.value
                     val selected = index == currentIndex
                     Surface(
                         modifier = Modifier
@@ -331,9 +359,9 @@ private fun NanaMusicLocalTab(
             Spacer(Modifier.height(8.dp))
             // Now-playing control bar
             NanaMusicControlBar(
-                title = tracks.getOrNull(currentIndex)?.title ?: "Select a track",
+                title = nowPlayingTitle ?: "Select a track",
                 isPlaying = isPlaying,
-                hasTracks = tracks.isNotEmpty(),
+                hasTracks = entries.isNotEmpty(),
                 onToggle = onToggle,
                 onNext = onNext,
                 onPrevious = onPrevious,
@@ -348,18 +376,23 @@ private fun NanaMusicLocalTab(
  * ExoPlayer (audio focus stays off, so it mixes with game audio in-stream).
  */
 @Composable
-private fun NanaMusicOnlineTab(modifier: Modifier = Modifier) {
+private fun NanaMusicOnlineTab(
+    state: NanaOnlineSearchState,
+    modifier: Modifier = Modifier,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val isPlaying by NanaMusicPlayer.isPlaying.collectAsState()
     val currentIndex by NanaMusicPlayer.currentIndex.collectAsState()
     val tracks by NanaMusicPlayer.tracks.collectAsState()
 
-    var query by remember { mutableStateOf("") }
-    var results by remember { mutableStateOf<List<NanaOnlineTrack>>(emptyList()) }
-    var searching by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var playingVideoId by remember { mutableStateOf<String?>(null) }
+    // 1.0.27: search state is hoisted to NanaMusicScreen so it survives tab
+    // switches (previously `remember`ed here and reset on every tab change).
+    var query by state::query
+    var results by state::results
+    var searching by state::searching
+    var error by state::error
+    var playingVideoId by state::playingVideoId
 
     // Clear the "now playing" highlight when the player moves to a track that
     // isn't this online result (e.g. user picked a local file or pressed next).

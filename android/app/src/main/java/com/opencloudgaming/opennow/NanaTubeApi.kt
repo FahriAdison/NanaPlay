@@ -71,14 +71,47 @@ object NanaTubeApi {
      * Resolve a direct audio-only stream URL for [videoId], picking the
      * highest-bitrate audio format. Returns null when unavailable.
      */
+    /**
+     * Resolve a direct audio-only stream URL for [videoId], picking the
+     * highest-bitrate audio format. Tries several InnerTube clients in order
+     * (ANDROID → ANDROID_VR → IOS) because YouTube sometimes withholds direct
+     * URLs from one client but serves them to another. Returns null when
+     * unavailable from all clients.
+     *
+     * 1.0.27: multi-client fallback. Previously only ANDROID was tried, so a
+     * track whose formats came back ciphered/unavailable failed to play.
+     */
     suspend fun resolveAudioUrl(videoId: String): String? = withContext(Dispatchers.IO) {
+        for (client in PLAYER_CLIENTS) {
+            val url = runCatching { resolveWithClient(videoId, client) }.getOrNull()
+            if (!url.isNullOrBlank()) return@withContext url
+        }
+        null
+    }
+
+    private data class PlayerClient(
+        val clientName: String,
+        val clientVersion: String,
+        val androidSdkVersion: Int? = null,
+    )
+
+    private val PLAYER_CLIENTS = listOf(
+        PlayerClient("ANDROID", "20.10.35", androidSdkVersion = 34),
+        PlayerClient("ANDROID_VR", "1.43.32"),
+        PlayerClient("IOS", "20.10.35"),
+    )
+
+    private fun resolveWithClient(videoId: String, client: PlayerClient): String? {
+        val clientJson = JSONObject()
+            .put("clientName", client.clientName)
+            .put("clientVersion", client.clientVersion)
+            .put("hl", "en")
+            .put("gl", "US")
+        if (client.androidSdkVersion != null) {
+            clientJson.put("androidSdkVersion", client.androidSdkVersion)
+        }
         val body = JSONObject()
-            .put("context", JSONObject().put("client", JSONObject()
-                .put("clientName", "ANDROID")
-                .put("clientVersion", "20.10.35")
-                .put("androidSdkVersion", 34)
-                .put("hl", "en")
-                .put("gl", "US")))
+            .put("context", JSONObject().put("client", clientJson))
             .put("videoId", videoId)
             .put("racyCheckOk", true)
             .put("contentCheckOk", true)
@@ -86,15 +119,19 @@ object NanaTubeApi {
             .toRequestBody(JSON_MEDIA_TYPE)
         val json = JSONObject(post(PLAYER_URL, body))
         if (json.optJSONObject("playabilityStatus")?.optString("status") != "OK") {
-            return@withContext null
+            return null
         }
         val formats = json.optJSONObject("streamingData")?.optJSONArray("adaptiveFormats")
-            ?: return@withContext null
+            ?: return null
         var bestUrl: String? = null
         var bestBitrate = -1
         for (i in 0 until formats.length()) {
             val f = formats.optJSONObject(i) ?: continue
             if (!f.optString("mimeType").startsWith("audio/")) continue
+            // NOTE: formats may carry `signatureCipher` instead of a plain
+            // `url` (ciphered signature). We deliberately skip those — without
+            // a JS decipher engine we cannot use them, and another client in
+            // the fallback chain usually serves a plain URL.
             val url = f.optString("url").takeIf { it.isNotBlank() } ?: continue
             val bitrate = f.optInt("bitrate", 0)
             if (bitrate > bestBitrate) {
@@ -102,7 +139,7 @@ object NanaTubeApi {
                 bestUrl = url
             }
         }
-        bestUrl
+        return bestUrl
     }
 
     private fun post(url: String, body: okhttp3.RequestBody): String {

@@ -13164,8 +13164,7 @@ private fun PortraitTouchControls(
         Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 24.dp)
     ) {
         val scale = buttonScale * layoutScale
-        val triggerWidth = 64.dp * scale
-        val bumperHeight = 32.dp * scale
+        val triggerDiameter = 52.dp * scale
 
         TouchControlGroup(
             id = "portrait-lt",
@@ -13180,9 +13179,7 @@ private fun PortraitTouchControls(
                 left = true,
                 client = client,
                 opacity = opacity,
-                width = triggerWidth,
-                height = bumperHeight,
-                shape = RoundedCornerShape(50),
+                diameter = triggerDiameter,
                 onPressTone = onButtonTone,
             )
         }
@@ -13193,15 +13190,14 @@ private fun PortraitTouchControls(
             offsetX = getLocalOffset("lb").x.dp,
             offsetY = getLocalOffset("lb").y.dp,
             onOffsetChange = { x, y -> onLocalOffsetChange("lb", x, y) },
-            modifier = Modifier.align(Alignment.TopStart).padding(top = bumperHeight + 6.dp),
+            modifier = Modifier.align(Alignment.TopStart).padding(top = triggerDiameter + 8.dp),
         ) {
             GamepadBumperButton(
                 label = "LB",
                 mask = 0x0100,
                 client = client,
                 opacity = opacity,
-                width = triggerWidth,
-                height = bumperHeight,
+                diameter = triggerDiameter,
                 onPressTone = onButtonTone,
             )
         }
@@ -13263,9 +13259,7 @@ private fun PortraitTouchControls(
                 left = false,
                 client = client,
                 opacity = opacity,
-                width = triggerWidth,
-                height = bumperHeight,
-                shape = RoundedCornerShape(50),
+                diameter = triggerDiameter,
                 onPressTone = onButtonTone,
             )
         }
@@ -13276,15 +13270,14 @@ private fun PortraitTouchControls(
             offsetX = getLocalOffset("rb").x.dp,
             offsetY = getLocalOffset("rb").y.dp,
             onOffsetChange = { x, y -> onLocalOffsetChange("rb", x, y) },
-            modifier = Modifier.align(Alignment.TopEnd).padding(top = bumperHeight + 6.dp),
+            modifier = Modifier.align(Alignment.TopEnd).padding(top = triggerDiameter + 8.dp),
         ) {
             GamepadBumperButton(
                 label = "RB",
                 mask = 0x0200,
                 client = client,
                 opacity = opacity,
-                width = triggerWidth,
-                height = bumperHeight,
+                diameter = triggerDiameter,
                 onPressTone = onButtonTone,
             )
         }
@@ -13375,8 +13368,7 @@ private fun BoxScope.LandscapeTouchControls(
     val controlScale = buttonScale * layoutScale
     val topControlClearance = landscapeTouchTopControlClearanceDp(viewportHeight.value, controlScale).dp
     Box(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 24.dp)) {
-        val triggerWidth = 76.dp * controlScale
-        val bumperHeight = 36.dp * controlScale
+        val triggerDiameter = 58.dp * controlScale
 
         TouchControlGroup(
             id = "landscape-lt",
@@ -13391,9 +13383,7 @@ private fun BoxScope.LandscapeTouchControls(
                 left = true,
                 client = client,
                 opacity = opacity,
-                width = triggerWidth,
-                height = bumperHeight,
-                shape = RoundedCornerShape(50),
+                diameter = triggerDiameter,
                 onPressTone = onButtonTone,
             )
         }
@@ -13404,15 +13394,14 @@ private fun BoxScope.LandscapeTouchControls(
             offsetX = getLocalOffset("lb").x.dp,
             offsetY = getLocalOffset("lb").y.dp,
             onOffsetChange = { x, y -> onLocalOffsetChange("lb", x, y) },
-            modifier = Modifier.align(Alignment.TopStart).padding(top = topControlClearance + bumperHeight + 6.dp),
+            modifier = Modifier.align(Alignment.TopStart).padding(top = topControlClearance + triggerDiameter + 8.dp),
         ) {
             GamepadBumperButton(
                 label = "LB",
                 mask = 0x0100,
                 client = client,
                 opacity = opacity,
-                width = triggerWidth,
-                height = bumperHeight,
+                diameter = triggerDiameter,
                 onPressTone = onButtonTone,
             )
         }
@@ -13446,15 +13435,14 @@ private fun BoxScope.LandscapeTouchControls(
             offsetX = getLocalOffset("rb").x.dp,
             offsetY = getLocalOffset("rb").y.dp,
             onOffsetChange = { x, y -> onLocalOffsetChange("rb", x, y) },
-            modifier = Modifier.align(Alignment.TopEnd).padding(top = topControlClearance + bumperHeight + 6.dp),
+            modifier = Modifier.align(Alignment.TopEnd).padding(top = topControlClearance + triggerDiameter + 8.dp),
         ) {
             GamepadBumperButton(
                 label = "RB",
                 mask = 0x0200,
                 client = client,
                 opacity = opacity,
-                width = triggerWidth,
-                height = bumperHeight,
+                diameter = triggerDiameter,
                 onPressTone = onButtonTone,
             )
         }
@@ -13472,9 +13460,7 @@ private fun BoxScope.LandscapeTouchControls(
                 left = false,
                 client = client,
                 opacity = opacity,
-                width = triggerWidth,
-                height = bumperHeight,
-                shape = RoundedCornerShape(50),
+                diameter = triggerDiameter,
                 onPressTone = onButtonTone,
             )
         }
@@ -14077,15 +14063,18 @@ private fun Modifier.virtualPressInput(
     }
 }
 
+/**
+ * NanaPlay 1.0.27 — all-round gamepad redesign (member request, GFN-style).
+ * Triggers are now circular like the official GFN overlay, with NanaPlay
+ * accent feedback on press. Diameter-based instead of width/height/shape.
+ */
 @Composable
 private fun GamepadTriggerButton(
     label: String,
     left: Boolean,
     client: NativeStreamClient,
     opacity: Float,
-    width: androidx.compose.ui.unit.Dp,
-    height: androidx.compose.ui.unit.Dp,
-    shape: androidx.compose.ui.graphics.Shape,
+    diameter: androidx.compose.ui.unit.Dp,
     onPressTone: () -> Unit = {},
 ) {
     var pressed by remember { mutableStateOf(false) }
@@ -14100,30 +14089,25 @@ private fun GamepadTriggerButton(
     val buttonColor = if (style == TouchControllerStyle.V2) {
         Color.Transparent
     } else {
-        Color.Black.copy(alpha = opacity * 0.6f)
+        Color.Black.copy(alpha = opacity * 0.55f)
     }
-    val pressedColor = if (style == TouchControllerStyle.V2) {
-        Color.White.copy(alpha = opacity * 0.15f)
-    } else {
-        Color.White.copy(alpha = opacity * 0.2f)
+    // NanaPlay identity: accent-tinted press feedback instead of plain white.
+    val pressedColor = OpenNowPalette.AccentDefault.copy(alpha = 0.38f)
+    val borderColor = when {
+        pressed -> OpenNowPalette.AccentDefault.copy(alpha = 0.95f)
+        style == TouchControllerStyle.V2 -> Color.White.copy(alpha = opacity * 0.5f)
+        else -> Color.White.copy(alpha = opacity * 0.45f)
     }
-    val borderColor = if (style == TouchControllerStyle.V2) {
-        if (pressed) Color.White.copy(alpha = opacity * 0.9f) else Color.White.copy(alpha = opacity * 0.5f)
-    } else {
-        Color.White.copy(alpha = opacity * 0.4f)
-    }
-    val borderWidth = if (style == TouchControllerStyle.V2 && pressed) 2.dp else 1.dp
     Box(
         Modifier
-            .width(width)
-            .height(height)
-            .clip(shape)
+            .size(diameter)
+            .clip(CircleShape)
             .background(if (pressed) pressedColor else buttonColor)
-            .border(borderWidth, borderColor, shape)
+            .border(if (pressed) 2.dp else 1.dp, borderColor, CircleShape)
             .virtualPressInput(client, left, currentOnPressedChange),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = opacity * 0.9f))
+        Text(label, fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = opacity * 0.92f))
     }
     DisposableEffect(client, left) {
         onDispose {
@@ -14132,14 +14116,16 @@ private fun GamepadTriggerButton(
     }
 }
 
+/**
+ * NanaPlay 1.0.27 — circular bumper to match the all-round gamepad redesign.
+ */
 @Composable
 private fun GamepadBumperButton(
     label: String,
     mask: Int,
     client: NativeStreamClient,
     opacity: Float,
-    width: androidx.compose.ui.unit.Dp,
-    height: androidx.compose.ui.unit.Dp,
+    diameter: androidx.compose.ui.unit.Dp,
     onPressTone: () -> Unit = {},
 ) {
     var pressed by remember { mutableStateOf(false) }
@@ -14154,31 +14140,24 @@ private fun GamepadBumperButton(
     val buttonColor = if (style == TouchControllerStyle.V2) {
         Color.Transparent
     } else {
-        Color.Black.copy(alpha = opacity * 0.6f)
+        Color.Black.copy(alpha = opacity * 0.55f)
     }
-    val pressedColor = if (style == TouchControllerStyle.V2) {
-        Color.White.copy(alpha = opacity * 0.15f)
-    } else {
-        Color.White.copy(alpha = opacity * 0.2f)
+    val pressedColor = OpenNowPalette.AccentDefault.copy(alpha = 0.38f)
+    val borderColor = when {
+        pressed -> OpenNowPalette.AccentDefault.copy(alpha = 0.95f)
+        style == TouchControllerStyle.V2 -> Color.White.copy(alpha = opacity * 0.5f)
+        else -> Color.White.copy(alpha = opacity * 0.45f)
     }
-    val borderColor = if (style == TouchControllerStyle.V2) {
-        if (pressed) Color.White.copy(alpha = opacity * 0.9f) else Color.White.copy(alpha = opacity * 0.5f)
-    } else {
-        Color.White.copy(alpha = opacity * 0.4f)
-    }
-    val borderWidth = if (style == TouchControllerStyle.V2 && pressed) 2.dp else 1.dp
-    val shape = RoundedCornerShape(50)
     Box(
         Modifier
-            .width(width)
-            .height(height)
-            .clip(shape)
+            .size(diameter)
+            .clip(CircleShape)
             .background(if (pressed) pressedColor else buttonColor)
-            .border(borderWidth, borderColor, shape)
+            .border(if (pressed) 2.dp else 1.dp, borderColor, CircleShape)
             .virtualPressInput(client, mask, currentOnPressedChange),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = opacity * 0.9f))
+        Text(label, fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = opacity * 0.92f))
     }
     DisposableEffect(client, mask) {
         onDispose {
@@ -14209,32 +14188,28 @@ private fun GamepadButton(
     val buttonColor = if (style == TouchControllerStyle.V2) {
         Color.Transparent
     } else {
-        Color.Black.copy(alpha = opacity * 0.6f)
+        Color.Black.copy(alpha = opacity * 0.55f)
     }
-    val pressedColor = if (style == TouchControllerStyle.V2) {
-        Color.White.copy(alpha = opacity * 0.15f)
-    } else {
-        Color.White.copy(alpha = opacity * 0.2f)
+    // NanaPlay 1.0.27: accent-tinted press feedback for the all-round gamepad.
+    val pressedColor = OpenNowPalette.AccentDefault.copy(alpha = 0.38f)
+    val borderColor = when {
+        pressed -> OpenNowPalette.AccentDefault.copy(alpha = 0.95f)
+        style == TouchControllerStyle.V2 -> Color.White.copy(alpha = opacity * 0.5f)
+        else -> Color.White.copy(alpha = opacity * 0.45f)
     }
-    val borderColor = if (style == TouchControllerStyle.V2) {
-        if (pressed) Color.White.copy(alpha = opacity * 0.9f) else Color.White.copy(alpha = opacity * 0.5f)
-    } else {
-        Color.White.copy(alpha = opacity * 0.4f)
-    }
-    val borderWidth = if (style == TouchControllerStyle.V2 && pressed) 2.dp else 1.dp
     Box(
         Modifier
             .size(size)
             .clip(CircleShape)
             .background(if (pressed) pressedColor else buttonColor)
-            .border(borderWidth, borderColor, CircleShape)
+            .border(if (pressed) 2.dp else 1.dp, borderColor, CircleShape)
             .virtualPressInput(client, mask, currentOnPressedChange),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = label,
-            fontWeight = FontWeight.SemiBold,
-            color = Color.White.copy(alpha = opacity * 0.9f),
+            fontWeight = FontWeight.Bold,
+            color = Color.White.copy(alpha = opacity * 0.92f),
         )
     }
     DisposableEffect(client, mask) {

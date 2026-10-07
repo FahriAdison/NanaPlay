@@ -67,6 +67,12 @@ object NanaMusicPlayer {
     private val _isBuffering = MutableStateFlow(false)
     val isBuffering: StateFlow<Boolean> = _isBuffering.asStateFlow()
 
+    /**
+     * 1.0.30: videoIds already retried via Piped for the current playback
+     * attempt. Prevents retry loops when Piped also fails.
+     */
+    private val pipedRetriedVideoIds = mutableSetOf<String>()
+
     val currentTrack: NanaTrack?
         get() {
             val idx = _currentIndex.value
@@ -265,6 +271,8 @@ object NanaMusicPlayer {
                     _isPlaying.value = isPlaying
                     if (isPlaying) {
                         _lastError.value = null
+                        // 1.0.30: fresh playback — allow Piped retry again for the next failure.
+                        synchronized(this@NanaMusicPlayer) { pipedRetriedVideoIds.clear() }
                         startPeriodicSave()
                     } else {
                         stopPeriodicSave()
@@ -281,7 +289,26 @@ object NanaMusicPlayer {
 
                 override fun onPlayerError(error: PlaybackException) {
                     android.util.Log.e("NanaMusicPlayer", "playback error", error)
-                    _lastError.value = error.message ?: "Playback error"
+                    // 1.0.30: surface the HTTP status when the source was rejected
+                    // (e.g. YouTube 403) to make future diagnosis easier. The
+                    // message from ExoPlayer usually already contains the code.
+                    val httpCode: Int? = generateSequence<Throwable>(error) { it.cause }
+                        .filterIsInstance<androidx.media3.datasource.HttpDataSource.HttpDataSourceException>()
+                        .mapNotNull { ex ->
+                            runCatching {
+                                val field = ex.javaClass.getField("responseCode")
+                                (field.get(ex) as? Int)?.takeIf { code -> code > 0 }
+                            }.getOrNull()
+                        }
+                        .firstOrNull()
+                    _lastError.value = buildString {
+                        append(error.message ?: "Playback error")
+                        if (httpCode != null) append(" (HTTP $httpCode)")
+                    }
+                    // 1.0.30: one-shot Piped retry — if a direct YouTube URL is
+                    // rejected at playback time (source error), swap in a Piped
+                    // proxied URL for the same track instead of giving up.
+                    maybeRetryOnlineViaPiped(error)
                 }
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
@@ -291,6 +318,52 @@ object NanaMusicPlayer {
         )
         player = exo
         return exo
+    }
+
+    /**
+     * 1.0.30: One-shot Piped retry for online tracks rejected at playback
+     * time (e.g. YouTube 403 on the direct URL). Resolves a proxied URL and
+     * swaps it into the current media item, then resumes playback.
+     */
+    private fun maybeRetryOnlineViaPiped(error: PlaybackException) {
+        val isSourceError = error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
+            error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
+            error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ||
+            error.errorCode == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND ||
+            error.errorCode == PlaybackException.ERROR_CODE_IO_NO_PERMISSION ||
+            error.errorCode == PlaybackException.ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE
+        if (!isSourceError) return
+        val exo = player ?: return
+        val idx = _currentIndex.value
+        val track = _tracks.value.getOrNull(idx) ?: return
+        if (!track.isOnline) return
+        val videoId = track.videoId ?: return
+        synchronized(this) {
+            if (!pipedRetriedVideoIds.add(videoId)) return
+        }
+        _lastError.value = "Retrying via alternate source…"
+        persistScope.launch {
+            val pipedUrl = runCatching { NanaTubeApi.resolveAudioUrlViaPiped(videoId) }.getOrNull()
+            if (pipedUrl.isNullOrBlank()) {
+                _lastError.value = "Playback error: source unavailable"
+                return@launch
+            }
+            val newTrack = track.copy(uri = Uri.parse(pipedUrl))
+            synchronized(this@NanaMusicPlayer) {
+                _tracks.value = _tracks.value.toMutableList().also { it[idx] = newTrack }
+            }
+            val appCtx = appContextRef ?: return@launch
+            // Must run on the thread ExoPlayer expects; post via handler.
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                runCatching {
+                    exo.replaceMediaItem(idx, MediaItem.fromUri(newTrack.uri))
+                    exo.seekTo(idx, 0)
+                    exo.prepare()
+                    exo.play()
+                }
+            }
+            persistScope.launch { appContextRef?.let { saveState(it) } }
+        }
     }
 
     @Synchronized
@@ -353,8 +426,14 @@ object NanaMusicPlayer {
      * the resolve itself runs on Dispatchers.IO inside NanaTubeApi.
      */
     suspend fun playOnlineTrack(context: Context, online: NanaOnlineTrack): Boolean {
+        // 1.0.30: try direct YouTube URL first, fall back to Piped proxy when
+        // direct resolve fails (Piped URLs aren't IP-bound/throttled).
         val url = try {
             NanaTubeApi.resolveAudioUrl(online.videoId)
+        } catch (e: Exception) {
+            null
+        } ?: try {
+            NanaTubeApi.resolveAudioUrlViaPiped(online.videoId)
         } catch (e: Exception) {
             null
         } ?: return false

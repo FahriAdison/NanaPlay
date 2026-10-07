@@ -2561,8 +2561,6 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             }
 
             runCatching {
-                val activeSessions = sessionRepository.getActiveSessions(token, baseUrl, currentSettings)
-                recordDebugEvent("recovery", "Recovery active sessions count=${activeSessions.size} base=${hostForDebug(baseUrl)}")
                 val resolvedAppId = runCatching {
                     resolveFallbackLaunchAppId(
                         token = token,
@@ -2571,6 +2569,18 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                         baseUrl = baseUrl,
                     ).toIntOrNull()
                 }.getOrNull()
+                // 1.0.30: for a session this app just created, poll it directly
+                // by ID first. The active-sessions list may not have propagated
+                // it yet (race condition behind "session could not be found").
+                val directCandidate = pollKnownSessionDirectly(
+                    token = token,
+                    previousSession = previousSession,
+                    resolvedAppId = resolvedAppId,
+                    fallbackAppId = active?.appId,
+                    settings = currentSettings,
+                )
+                val activeSessions = sessionRepository.getActiveSessions(token, baseUrl, currentSettings)
+                recordDebugEvent("recovery", "Recovery active sessions count=${activeSessions.size} base=${hostForDebug(baseUrl)}")
                 val readyCandidate = activeSessionRecoveryCandidate(
                     sessions = activeSessions,
                     previousSessionId = previousSession.sessionId,
@@ -2586,11 +2596,16 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 val cachedCurrentSession = active?.takeIf {
                     it.sessionId == previousSession.sessionId && it.matchesStreamGeometry(currentSettings)
                 }
-                val fallbackCandidate = readyCandidate
+                // 1.0.30: for a freshly created session, don't demand exact
+                // geometry match in the fallback — ready status + serverIp
+                // suffices. Behavior for old sessions is unchanged.
+                val isFreshSession = isFreshlyCreatedSession(previousSession)
+                val fallbackCandidate = directCandidate
+                    ?: readyCandidate
                     ?: previousSession.toRecoveryActiveSession(
                         appId = resolvedAppId ?: active?.appId ?: 0,
                         fallbackActive = cachedCurrentSession,
-                    )?.takeIf { it.matchesStreamGeometry(currentSettings) }
+                    )?.takeIf { isFreshSession || it.matchesStreamGeometry(currentSettings) }
                     ?: error("The running session could not be found anymore, so recovery was not possible.")
                 recordDebugEvent("recovery", "Claiming recovery candidate ${fallbackCandidate.debugSummary()}")
                 claimActiveSessionOrContinuePolling(token, fallbackCandidate, currentSettings)
@@ -2630,11 +2645,62 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    /**
+     * 1.0.30: Poll a known session ID directly with a short grace period.
+     * The active-sessions list can lag behind a just-created session (race
+     * condition), so for recovery of a session this app created itself we ask
+     * for it by ID instead of relying on list matching. Returns null when the
+     * session is not ready after the grace period.
+     */
+    private suspend fun pollKnownSessionDirectly(
+        token: String,
+        previousSession: SessionInfo,
+        resolvedAppId: Int?,
+        fallbackAppId: Int?,
+        settings: StreamSettings,
+    ): ActiveSessionInfo? {
+        repeat(3) { attempt ->
+            if (attempt > 0) delay(2000)
+            val polled = runCatching {
+                sessionRepository.pollSession(
+                    token = token,
+                    streamingBaseUrl = previousSession.streamingBaseUrl,
+                    serverIp = previousSession.serverIp.takeIf { it.isNotBlank() },
+                    zone = previousSession.zone,
+                    sessionId = previousSession.sessionId,
+                    clientId = previousSession.clientId,
+                    deviceId = previousSession.deviceId,
+                    settings = settings,
+                )
+            }.getOrNull()
+            if (polled != null && polled.status in setOf(2, 3) && polled.serverIp.isNotBlank()) {
+                recordDebugEvent("recovery", "Direct session poll hit attempt=$attempt session=${polled.sessionId} status=${polled.status}")
+                return polled.toRecoveryActiveSession(
+                    appId = resolvedAppId ?: fallbackAppId ?: 0,
+                    fallbackActive = null,
+                )
+            }
+        }
+        recordDebugEvent("recovery", "Direct session poll missed session=${previousSession.sessionId}")
+        return null
+    }
+
+    /**
+     * 1.0.30: Heuristic for "this session was just created by us". The timer
+     * anchor is only minutes old for a fresh session. Recovery for such
+     * sessions skips the strict geometry matching that can reject a session
+     * the server hasn't fully propagated yet. Old sessions keep the previous
+     * strict behavior.
+     */
+    private fun isFreshlyCreatedSession(session: SessionInfo): Boolean {
+        val startedAt = session.timerStartedAtMs ?: return true
+        return System.currentTimeMillis() - startedAt < 10 * 60 * 1000L
+    }
+
     private fun SessionInfo.withSessionTimerAnchor(): SessionInfo =
         copy(
             timerStartedAtMs = sessionTimerAnchorStore.startedAtMsFor(
-                sessionId = sessionId,
-                preferredStartedAtMs = timerStartedAtMs,
+                sessionId = sessionId,                preferredStartedAtMs = timerStartedAtMs,
             ),
         )
 

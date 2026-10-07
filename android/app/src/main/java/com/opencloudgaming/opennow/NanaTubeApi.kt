@@ -142,6 +142,52 @@ object NanaTubeApi {
         return bestUrl
     }
 
+    /**
+     * 1.0.30: Fallback stream resolver via public Piped API instances.
+     * Piped proxies YouTube streams through its own servers, so the returned
+     * URLs are not IP-bound to the resolving device and don't face YouTube's
+     * direct-client throttling/blocking. Public instances are volunteer-run
+     * and flaky — we try several in order and take the first that yields a
+     * usable audio URL. Returns null when none work.
+     */
+    private val PIPED_INSTANCES = listOf(
+        "https://api.piped.private.coffee",
+        "https://pipedapi.adminforge.de",
+        "https://pipedapi.kavin.rocks",
+        "https://pipedapi.leptons.xyz",
+    )
+
+    suspend fun resolveAudioUrlViaPiped(videoId: String): String? = withContext(Dispatchers.IO) {
+        for (base in PIPED_INSTANCES) {
+            val url = runCatching {
+                val request = Request.Builder()
+                    .url("$base/streams/$videoId")
+                    .header("User-Agent", "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
+                    .build()
+                http.newCall(request).execute().use { resp ->
+                    if (!resp.isSuccessful) return@runCatching null
+                    val json = JSONObject(resp.body?.string() ?: return@runCatching null)
+                    val audio = json.optJSONArray("audioStreams") ?: return@runCatching null
+                    var best: String? = null
+                    var bestBitrate = -1
+                    for (i in 0 until audio.length()) {
+                        val s = audio.optJSONObject(i) ?: continue
+                        val u = s.optString("url").takeIf { it.isNotBlank() } ?: continue
+                        val br = s.optInt("bitrate", 0)
+                        if (br > bestBitrate) {
+                            bestBitrate = br
+                            best = u
+                        }
+                    }
+                    // Piped may return relative proxy URLs — resolve against instance base.
+                    best?.let { if (it.startsWith("/")) base + it else it }
+                }
+            }.getOrNull()
+            if (!url.isNullOrBlank()) return@withContext url
+        }
+        null
+    }
+
     private fun post(url: String, body: okhttp3.RequestBody): String {
         val request = Request.Builder()
             .url(url)

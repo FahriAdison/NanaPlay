@@ -44,7 +44,7 @@ internal class NanaRangedHttpDataSourceFactory(
 
             private fun maybeForceRange(dataSpec: DataSpec): DataSpec {
                 if (dataSpec.httpMethod != DataSpec.HTTP_METHOD_GET) return dataSpec
-                if (dataSpec.position != 0L || dataSpec.length != C.LENGTH_UNSET) return dataSpec
+                if (dataSpec.position != 0L || dataSpec.length != C.LENGTH_UNSET.toLong()) return dataSpec
                 val host = dataSpec.uri.host?.lowercase().orEmpty()
                 val isYoutube = host.contains("googlevideo.com")
                     || host.contains("youtube.com")

@@ -54,6 +54,12 @@ The changelog is updated with every release. Highlights:
 
 | Version | Code | Highlights |
 |---------|------|------------|
+| 1.0.26 | 81 | **Online music** in the music player (YouTube Music search via InnerTube) |
+| 1.0.25 | 80 | Local music player; NanaPlay home identity; instant Classic search; search-stuck & back-button fixes |
+| 1.0.24 | 79 | Queue stuck warning + retry; session auto-retry; faster touch drag; Low Latency preset |
+| 1.0.23 | 78 | Compact recommended card; keyboard bar alignment; slim quick-access status bar + toggle |
+| 1.0.22 | 77 | Update checker reads NanaPlay's own GitHub releases (tag `v<name>+<code>`) |
+| 1.0.21 | 76 | Critical launch-crash fix (fully-qualified manifest components) |
 | 1.0.20 | 75 | **New package** `com.papahchan.nanaplay` (side-by-side with OpenNOW); initial GitHub release |
 | 1.0.19 | 74 | Immersive fix for queue minimize/view; **Persistent reconnect** for poor networks |
 | 1.0.18 | 73 | Minimized queue bar redesigned to match the new queue screen |
@@ -70,6 +76,7 @@ The changelog is updated with every release. Highlights:
 
 - **Upstream:** [OpenNOW](https://github.com/OpenCloudGaming/OpenNOW) by [Zortos](https://github.com/OpenCloudGaming) — the foundation everything here is built on.
 - **Recode & redesign:** [Papah Chan](https://github.com/FahriAdison)
+- **Online music:** the InnerTube search/playback approach in the music player is inspired by [Metrolist](https://github.com/MetrolistGroup/Metrolist) (GPL-3.0) and its InnerTune lineage. No Metrolist code is bundled; the client was written from scratch for NanaPlay.
 
 ## 📄 License
 

@@ -132,6 +132,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.FiberManualRecord
 import androidx.compose.material.icons.rounded.Keyboard
+import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.PhotoCamera
 import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material.icons.rounded.Stop
@@ -6937,6 +6938,8 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
     var keyboardText by remember { mutableStateOf("") }
     // NanaPlay 1.0.25: in-stream local music mini player.
     var musicMiniPlayerOpen by remember { mutableStateOf(false) }
+    // NanaPlay 1.0.26: floating in-stream browser.
+    var browserOpen by remember { mutableStateOf(false) }
     var audioMuted by remember { mutableStateOf(false) }
     var touchLayoutEditing by remember { mutableStateOf(false) }
     var streamGuideOpen by remember(session?.sessionId) { mutableStateOf(false) }
@@ -7938,6 +7941,7 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                     keyboardOpen = keyboardOpen,
                     isRecording = recordingPhase == StreamRecorderPhase.Recording,
                     musicMiniPlayerOpen = musicMiniPlayerOpen,
+                    browserOpen = browserOpen,
                     onFabPositionChange = { x, y ->
                         viewModel.updateSettings(state.settings.copy(quickAccessFabX = x, quickAccessFabY = y))
                     },
@@ -7956,6 +7960,7 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                     onTakeScreenshot = { takeScreenshot() },
                     onToggleRecording = { toggleStreamRecording() },
                     onToggleMusic = { musicMiniPlayerOpen = !musicMiniPlayerOpen },
+                    onToggleBrowser = { browserOpen = !browserOpen },
                 )
             }
             // NanaPlay 1.0.25: in-stream music mini player, bottom-center above the keyboard bar.
@@ -7966,6 +7971,12 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                         modifier = Modifier.padding(bottom = 12.dp),
                     )
                 }
+            }
+            // NanaPlay 1.0.26: floating in-stream browser (interactive maps, etc.).
+            if (browserOpen) {
+                NanaBrowserPanel(
+                    onClose = { browserOpen = false },
+                )
             }
             if (exitConfirmOpen) {
                 AnimatedLaunchOverlay(Modifier.align(Alignment.Center)) {
@@ -8051,12 +8062,14 @@ private fun QuickAccessFab(
     keyboardOpen: Boolean,
     isRecording: Boolean,
     musicMiniPlayerOpen: Boolean,
+    browserOpen: Boolean,
     onFabPositionChange: (x: Float, y: Float) -> Unit,
     onToggleKeyboard: () -> Unit,
     onToggleTouchControls: () -> Unit,
     onTakeScreenshot: () -> Unit,
     onToggleRecording: () -> Unit,
     onToggleMusic: () -> Unit,
+    onToggleBrowser: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier.fillMaxSize()) {
@@ -8144,6 +8157,14 @@ private fun QuickAccessFab(
                     active = musicMiniPlayerOpen,
                     size = actionSize,
                     onClick = onToggleMusic,
+                )
+                // NanaPlay 1.0.26: floating browser toggle.
+                QuickBarAction(
+                    icon = Icons.Rounded.Language,
+                    contentDescription = "Toggle browser",
+                    active = browserOpen,
+                    size = actionSize,
+                    onClick = onToggleBrowser,
                 )
             }
         }
@@ -9695,7 +9716,7 @@ private fun BugReportDataDisclosure(
  * height would shrink the rect during a transition and leak touches into the game.
  */
 @Composable
-private fun Modifier.streamTouchPassthrough(id: String, inflate: Dp = 8.dp): Modifier {
+internal fun Modifier.streamTouchPassthrough(id: String, inflate: Dp = 8.dp): Modifier {
     val inflatePx = with(LocalDensity.current) { inflate.roundToPx() }
     DisposableEffect(id) {
         onDispose { NativeStreamInputRouter.clearOverlayTouchPassthroughBound(id) }

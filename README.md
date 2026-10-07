@@ -54,6 +54,7 @@ The changelog is updated with every release. Highlights:
 
 | Version | Code | Highlights |
 |---------|------|------------|
+| 1.0.31 | 86 | **Online music** backend switched to JioSaavn (was YouTube InnerTube) |
 | 1.0.26 | 81 | **Online music** in the music player (YouTube Music search via InnerTube) |
 | 1.0.25 | 80 | Local music player; NanaPlay home identity; instant Classic search; search-stuck & back-button fixes |
 | 1.0.24 | 79 | Queue stuck warning + retry; session auto-retry; faster touch drag; Low Latency preset |
@@ -76,7 +77,7 @@ The changelog is updated with every release. Highlights:
 
 - **Upstream:** [OpenNOW](https://github.com/OpenCloudGaming/OpenNOW) by [Zortos](https://github.com/OpenCloudGaming) — the foundation everything here is built on.
 - **Recode & redesign:** [Papah Chan](https://github.com/FahriAdison)
-- **Online music:** the InnerTube search/playback approach in the music player is inspired by [Metrolist](https://github.com/MetrolistGroup/Metrolist) (GPL-3.0) and its InnerTune lineage. No Metrolist code is bundled; the client was written from scratch for NanaPlay.
+- **Online music:** streams via the [JioSaavn](https://www.jiosaavn.com) catalog using the ShnwazDev public API wrapper (based on [sumitkolhe/jiosaavn-api](https://github.com/sumitkolhe/jiosaavn-api), MIT). (1.0.26–1.0.30 used YouTube InnerTube, inspired by [Metrolist](https://github.com/MetrolistGroup/Metrolist) (GPL-3.0); retired for reliability.)
 
 ## 📄 License
 

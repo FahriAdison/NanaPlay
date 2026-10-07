@@ -8,9 +8,6 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
-import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -25,8 +22,9 @@ import org.json.JSONObject
 
 /**
  * NanaPlay 1.0.25 — local music player ("play your own music from storage").
- * 1.0.26 — online tracks from YouTube InnerTube can be added to the same
- * queue; they resolve to a fresh stream URL at play time (URLs expire).
+ * 1.0.31 — online tracks come from JioSaavn (replacing YouTube InnerTube,
+ * which proved unreliable for playback); they resolve to a fresh CDN stream
+ * URL at play time.
  *
  * Plays audio files from device storage both outside and inside a stream. Uses
  * ExoPlayer (Media3, already a dependency) with audio-focus handling DISABLED so
@@ -41,8 +39,8 @@ data class NanaTrack(
     val artist: String? = null,
     val thumbnailUrl: String? = null,
     val isOnline: Boolean = false,
-    /** 1.0.26: videoId for online tracks — used to re-resolve the stream URL on restore (URLs expire). */
-    val videoId: String? = null,
+    /** 1.0.31: JioSaavn song id for online tracks — used to re-resolve the stream URL on restore. */
+    val saavnId: String? = null,
 )
 
 object NanaMusicPlayer {
@@ -67,29 +65,14 @@ object NanaMusicPlayer {
     private val _isBuffering = MutableStateFlow(false)
     val isBuffering: StateFlow<Boolean> = _isBuffering.asStateFlow()
 
-    /**
-     * 1.0.30: videoIds already retried via Piped for the current playback
-     * attempt. Prevents retry loops when Piped also fails.
-     */
-    private val pipedRetriedVideoIds = mutableSetOf<String>()
-
     val currentTrack: NanaTrack?
         get() {
             val idx = _currentIndex.value
             return _tracks.value.getOrNull(idx)
         }
 
-    /**
-     * 1.0.29: YouTube videoplayback servers throttle/block unknown user-agents
-     * (curl with a standard browser UA gets full speed; our custom UA stalled).
-     * Identify as a common Android Chrome browser so streams are served at
-     * full speed.
-     */
-    private const val YOUTUBE_STREAM_USER_AGENT =
-        "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
-
     // ---- 1.0.26: playback state persistence (Spotify-style restore) ----
-    // Persists the playlist (local URIs + online videoIds/metadata), the
+    // Persists the playlist (local URIs + online saavnIds/metadata), the
     // current track identity, and the playback position. Restored lazily on
     // first player access after a process restart; the user continues paused
     // at the exact track and second where they left off.
@@ -140,7 +123,7 @@ object NanaMusicPlayer {
                 if (t.artist != null) o.put("artist", t.artist)
                 if (t.thumbnailUrl != null) o.put("thumbnailUrl", t.thumbnailUrl)
                 if (t.isOnline) {
-                    o.put("videoId", t.videoId)
+                    o.put("saavnId", t.saavnId)
                 } else {
                     o.put("uri", t.uri.toString())
                 }
@@ -151,7 +134,7 @@ object NanaMusicPlayer {
                 .put("tracks", arr)
                 .put("positionMs", exo.currentPosition)
                 .put("currentUri", if (current?.isOnline == false) current.uri.toString() else null)
-                .put("currentVideoId", if (current?.isOnline == true) current.videoId else null)
+                .put("currentSaavnId", if (current?.isOnline == true) current.saavnId else null)
             context.getSharedPreferences(MUSIC_PREFS, Context.MODE_PRIVATE)
                 .edit()
                 .putString(KEY_STATE_JSON, state.toString())
@@ -177,12 +160,17 @@ object NanaMusicPlayer {
         for (i in 0 until arr.length()) {
             val o = arr.optJSONObject(i) ?: continue
             if (o.optBoolean("isOnline", false)) {
-                val videoId = o.optString("videoId").takeIf { it.isNotBlank() } ?: continue
+                // 1.0.31: JioSaavn ids. Legacy "videoId" entries are YouTube
+                // ids from 1.0.26–1.0.30 — they can't resolve on JioSaavn, so
+                // they're skipped gracefully below.
+                val saavnId = o.optString("saavnId").takeIf { it.isNotBlank() }
+                    ?: o.optString("videoId").takeIf { it.isNotBlank() }
+                    ?: continue
                 val url = try {
-                    NanaTubeApi.resolveAudioUrl(videoId)
+                    NanaSaavnApi.resolveAudioUrl(saavnId)
                 } catch (e: Exception) {
                     null
-                } ?: continue // offline or YouTube changed — skip, don't break restore
+                } ?: continue // offline or API changed — skip, don't break restore
                 rebuilt.add(
                     NanaTrack(
                         uri = Uri.parse(url),
@@ -190,7 +178,7 @@ object NanaMusicPlayer {
                         artist = o.optString("artist").takeIf { it.isNotBlank() },
                         thumbnailUrl = o.optString("thumbnailUrl").takeIf { it.isNotBlank() },
                         isOnline = true,
-                        videoId = videoId,
+                        saavnId = saavnId,
                     ),
                 )
             } else {
@@ -210,7 +198,8 @@ object NanaMusicPlayer {
         val exo = ensurePlayer(context)
         val positionMs = state.optLong("positionMs", 0L)
         val currentUri = state.optString("currentUri").takeIf { it.isNotBlank() }
-        val currentVideoId = state.optString("currentVideoId").takeIf { it.isNotBlank() }
+        val currentSaavnId = state.optString("currentSaavnId").takeIf { it.isNotBlank() }
+            ?: state.optString("currentVideoId").takeIf { it.isNotBlank() }
         synchronized(this) {
             // Don't clobber a playlist the user already built this session
             // (e.g. they added tracks while restore was in flight).
@@ -219,8 +208,8 @@ object NanaMusicPlayer {
             rebuilt.forEach { exo.addMediaItem(MediaItem.fromUri(it.uri)) }
             exo.prepare()
             val idx = when {
-                currentVideoId != null ->
-                    rebuilt.indexOfFirst { it.isOnline && it.videoId == currentVideoId }
+                currentSaavnId != null ->
+                    rebuilt.indexOfFirst { it.isOnline && it.saavnId == currentSaavnId }
                 currentUri != null ->
                     rebuilt.indexOfFirst { !it.isOnline && it.uri.toString() == currentUri }
                 else -> 0
@@ -239,7 +228,6 @@ object NanaMusicPlayer {
         }.getOrDefault(false)
     }
 
-    @OptIn(UnstableApi::class)
     @Synchronized
     private fun ensurePlayer(context: Context): androidx.media3.exoplayer.ExoPlayer {
         player?.let { return it }
@@ -249,17 +237,11 @@ object NanaMusicPlayer {
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
             .build()
-        // 1.0.28: route http(s) through the Range-forcing factory — YouTube
-        // throttles non-Range requests to ~30KB/s (see NanaRangedDataSource).
-        // Local files keep the default handling via DefaultDataSource.
-        // 1.0.29: videoplayback servers also throttle/block unknown user-agents,
-        // so identify as a common Android Chrome browser.
-        val httpFactory = NanaRangedHttpDataSourceFactory(userAgent = YOUTUBE_STREAM_USER_AGENT)
-        val mediaSourceFactory = DefaultMediaSourceFactory(
-            DefaultDataSource.Factory(appContext, httpFactory),
-        )
+        // 1.0.31: plain default media source factory. The YouTube-specific
+        // Range-forcing DataSource and UA spoofing (1.0.28/1.0.29) are gone —
+        // JioSaavn serves direct CDN URLs that stream fine with a normal
+        // request (no throttling, no IP binding).
         val exo = androidx.media3.exoplayer.ExoPlayer.Builder(appContext)
-            .setMediaSourceFactory(mediaSourceFactory)
             // Do NOT request audio focus: music must mix with the stream's game
             // audio, not pause/duck it (or be paused by it).
             .setAudioAttributes(audioAttributes, false)
@@ -271,8 +253,6 @@ object NanaMusicPlayer {
                     _isPlaying.value = isPlaying
                     if (isPlaying) {
                         _lastError.value = null
-                        // 1.0.30: fresh playback — allow Piped retry again for the next failure.
-                        synchronized(this@NanaMusicPlayer) { pipedRetriedVideoIds.clear() }
                         startPeriodicSave()
                     } else {
                         stopPeriodicSave()
@@ -289,9 +269,9 @@ object NanaMusicPlayer {
 
                 override fun onPlayerError(error: PlaybackException) {
                     android.util.Log.e("NanaMusicPlayer", "playback error", error)
-                    // 1.0.30: surface the HTTP status when the source was rejected
-                    // (e.g. YouTube 403) to make future diagnosis easier. The
-                    // message from ExoPlayer usually already contains the code.
+                    // Surface the HTTP status when the source was rejected to
+                    // make future diagnosis easier. The message from ExoPlayer
+                    // usually already contains the code.
                     val httpCode: Int? = generateSequence<Throwable>(error) { it.cause }
                         .filterIsInstance<androidx.media3.datasource.HttpDataSource.HttpDataSourceException>()
                         .mapNotNull { ex ->
@@ -305,10 +285,6 @@ object NanaMusicPlayer {
                         append(error.message ?: "Playback error")
                         if (httpCode != null) append(" (HTTP $httpCode)")
                     }
-                    // 1.0.30: one-shot Piped retry — if a direct YouTube URL is
-                    // rejected at playback time (source error), swap in a Piped
-                    // proxied URL for the same track instead of giving up.
-                    maybeRetryOnlineViaPiped(error)
                 }
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
@@ -318,52 +294,6 @@ object NanaMusicPlayer {
         )
         player = exo
         return exo
-    }
-
-    /**
-     * 1.0.30: One-shot Piped retry for online tracks rejected at playback
-     * time (e.g. YouTube 403 on the direct URL). Resolves a proxied URL and
-     * swaps it into the current media item, then resumes playback.
-     */
-    private fun maybeRetryOnlineViaPiped(error: PlaybackException) {
-        val isSourceError = error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
-            error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
-            error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ||
-            error.errorCode == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND ||
-            error.errorCode == PlaybackException.ERROR_CODE_IO_NO_PERMISSION ||
-            error.errorCode == PlaybackException.ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE
-        if (!isSourceError) return
-        val exo = player ?: return
-        val idx = _currentIndex.value
-        val track = _tracks.value.getOrNull(idx) ?: return
-        if (!track.isOnline) return
-        val videoId = track.videoId ?: return
-        synchronized(this) {
-            if (!pipedRetriedVideoIds.add(videoId)) return
-        }
-        _lastError.value = "Retrying via alternate source…"
-        persistScope.launch {
-            val pipedUrl = runCatching { NanaTubeApi.resolveAudioUrlViaPiped(videoId) }.getOrNull()
-            if (pipedUrl.isNullOrBlank()) {
-                _lastError.value = "Playback error: source unavailable"
-                return@launch
-            }
-            val newTrack = track.copy(uri = Uri.parse(pipedUrl))
-            synchronized(this@NanaMusicPlayer) {
-                _tracks.value = _tracks.value.toMutableList().also { it[idx] = newTrack }
-            }
-            val appCtx = appContextRef ?: return@launch
-            // Must run on the thread ExoPlayer expects; post via handler.
-            android.os.Handler(android.os.Looper.getMainLooper()).post {
-                runCatching {
-                    exo.replaceMediaItem(idx, MediaItem.fromUri(newTrack.uri))
-                    exo.seekTo(idx, 0)
-                    exo.prepare()
-                    exo.play()
-                }
-            }
-            persistScope.launch { appContextRef?.let { saveState(it) } }
-        }
     }
 
     @Synchronized
@@ -420,20 +350,14 @@ object NanaMusicPlayer {
     }
 
     /**
-     * 1.0.26 — resolve [online] to a fresh stream URL and play it.
+     * 1.0.31 — resolve [online] to a fresh JioSaavn CDN stream URL and play it.
      * Returns false when the stream URL cannot be resolved (caller shows
      * "Online music temporarily unavailable"). Must be called from a coroutine;
-     * the resolve itself runs on Dispatchers.IO inside NanaTubeApi.
+     * the resolve itself runs on Dispatchers.IO inside NanaSaavnApi.
      */
     suspend fun playOnlineTrack(context: Context, online: NanaOnlineTrack): Boolean {
-        // 1.0.30: try direct YouTube URL first, fall back to Piped proxy when
-        // direct resolve fails (Piped URLs aren't IP-bound/throttled).
         val url = try {
-            NanaTubeApi.resolveAudioUrl(online.videoId)
-        } catch (e: Exception) {
-            null
-        } ?: try {
-            NanaTubeApi.resolveAudioUrlViaPiped(online.videoId)
+            NanaSaavnApi.resolveAudioUrl(online.saavnId)
         } catch (e: Exception) {
             null
         } ?: return false
@@ -443,19 +367,19 @@ object NanaMusicPlayer {
             artist = online.artist,
             thumbnailUrl = online.thumbnailUrl,
             isOnline = true,
-            videoId = online.videoId,
+            saavnId = online.saavnId,
         )
         ensureRestored(context)
         val appContext = context.applicationContext
         val exo = ensurePlayer(appContext)
         val index: Int
         synchronized(this) {
-            // Reuse an existing queue entry for the same video when present,
-            // but ALWAYS swap in the freshly resolved URL: YouTube stream URLs
-            // expire (and are IP-bound), so replaying the old MediaItem is the
-            // classic "tap result but nothing plays" bug (1.0.27).
+            // Reuse an existing queue entry for the same song when present,
+            // but ALWAYS swap in the freshly resolved URL so replaying never
+            // uses a stale MediaItem (the classic "tap result but nothing
+            // plays" bug).
             val existing = _tracks.value.indexOfFirst {
-                it.isOnline && it.title == track.title && it.artist == track.artist
+                it.isOnline && it.saavnId == track.saavnId
             }
             index = if (existing >= 0) {
                 exo.replaceMediaItem(existing, MediaItem.fromUri(track.uri))

@@ -83,7 +83,7 @@ class NanaOnlineSearchState {
     var results by mutableStateOf<List<NanaOnlineTrack>>(emptyList())
     var searching by mutableStateOf(false)
     var error by mutableStateOf<String?>(null)
-    var playingVideoId by mutableStateOf<String?>(null)
+    var playingTrackId by mutableStateOf<String?>(null)
 }
 
 /**
@@ -371,9 +371,10 @@ private fun NanaMusicLocalTab(
 }
 
 /**
- * NanaPlay 1.0.26 — online music tab: search YouTube Music via InnerTube,
- * tap a result to resolve its audio stream and play it through the shared
- * ExoPlayer (audio focus stays off, so it mixes with game audio in-stream).
+ * NanaPlay 1.0.26 — online music tab: search JioSaavn (1.0.31; previously
+ * YouTube InnerTube), tap a result to resolve its audio stream and play it
+ * through the shared ExoPlayer (audio focus stays off, so it mixes with game
+ * audio in-stream).
  */
 @Composable
 private fun NanaMusicOnlineTab(
@@ -395,15 +396,15 @@ private fun NanaMusicOnlineTab(
     var results by state::results
     var searching by state::searching
     var error by state::error
-    var playingVideoId by state::playingVideoId
+    var playingTrackId by state::playingTrackId
 
     // Clear the "now playing" highlight when the player moves to a track that
     // isn't this online result (e.g. user picked a local file or pressed next).
     val currentTrack = tracks.getOrNull(currentIndex)
     androidx.compose.runtime.LaunchedEffect(currentTrack) {
         val stillThis = currentTrack?.isOnline == true &&
-            results.any { it.videoId == playingVideoId && it.title == currentTrack.title }
-        if (!stillThis) playingVideoId = null
+            results.any { it.saavnId == playingTrackId && it.title == currentTrack.title }
+        if (!stillThis) playingTrackId = null
     }
 
     fun doSearch(q: String) {
@@ -413,7 +414,7 @@ private fun NanaMusicOnlineTab(
         error = null
         scope.launch {
             try {
-                results = NanaTubeApi.searchSongs(trimmed)
+                results = NanaSaavnApi.searchSongs(trimmed)
                 if (results.isEmpty()) {
                     error = "No results found"
                 }
@@ -515,7 +516,7 @@ private fun NanaMusicOnlineTab(
                     )
                     if (error == "Online music temporarily unavailable") {
                         Text(
-                            "YouTube may have changed something. Local music still works.",
+                            "The music service may be down. Local music still works.",
                             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
                             style = MaterialTheme.typography.bodyMedium,
                         )
@@ -527,25 +528,25 @@ private fun NanaMusicOnlineTab(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                itemsIndexed(results, key = { _, t -> t.videoId }) { _, track ->
-                    val isThisPlaying = playingVideoId == track.videoId && isPlaying
+                itemsIndexed(results, key = { _, t -> t.saavnId }) { _, track ->
+                    val isThisPlaying = playingTrackId == track.saavnId && isPlaying
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                if (playingVideoId == track.videoId) return@clickable
-                                playingVideoId = track.videoId
+                                if (playingTrackId == track.saavnId) return@clickable
+                                playingTrackId = track.saavnId
                                 error = null
                                 scope.launch {
                                     val ok = NanaMusicPlayer.playOnlineTrack(context, track)
                                     if (!ok) {
-                                        playingVideoId = null
+                                        playingTrackId = null
                                         error = "Online music temporarily unavailable"
                                     }
                                 }
                             },
                         shape = RoundedCornerShape(14.dp),
-                        color = if (playingVideoId == track.videoId) {
+                        color = if (playingTrackId == track.saavnId) {
                             OpenNowPalette.AccentDefault.copy(alpha = 0.16f)
                         } else {
                             MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
@@ -577,9 +578,11 @@ private fun NanaMusicOnlineTab(
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 Text(
-                                    listOf(track.artist, track.durationText)
-                                        .filter { it.isNotBlank() }
-                                        .joinToString(" • "),
+                                    listOfNotNull(
+                                        track.artist.takeIf { it.isNotBlank() },
+                                        track.playCountText,
+                                        track.durationText.takeIf { it.isNotBlank() },
+                                    ).joinToString(" • "),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                                     style = MaterialTheme.typography.bodySmall,
                                     maxLines = 1,

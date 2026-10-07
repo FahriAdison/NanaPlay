@@ -62,14 +62,27 @@ object NanaMusicPlayer {
     private val _lastError = MutableStateFlow<String?>(null)
     val lastError: StateFlow<String?> = _lastError.asStateFlow()
 
+    /** 1.0.29: true while ExoPlayer is stuck buffering — surfaced so the user can
+     * tell "still loading" apart from a hard error. */
+    private val _isBuffering = MutableStateFlow(false)
+    val isBuffering: StateFlow<Boolean> = _isBuffering.asStateFlow()
+
     val currentTrack: NanaTrack?
         get() {
             val idx = _currentIndex.value
             return _tracks.value.getOrNull(idx)
         }
 
+    /**
+     * 1.0.29: YouTube videoplayback servers throttle/block unknown user-agents
+     * (curl with a standard browser UA gets full speed; our custom UA stalled).
+     * Identify as a common Android Chrome browser so streams are served at
+     * full speed.
+     */
+    private const val YOUTUBE_STREAM_USER_AGENT =
+        "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+
     // ---- 1.0.26: playback state persistence (Spotify-style restore) ----
-    //
     // Persists the playlist (local URIs + online videoIds/metadata), the
     // current track identity, and the playback position. Restored lazily on
     // first player access after a process restart; the user continues paused
@@ -233,7 +246,9 @@ object NanaMusicPlayer {
         // 1.0.28: route http(s) through the Range-forcing factory — YouTube
         // throttles non-Range requests to ~30KB/s (see NanaRangedDataSource).
         // Local files keep the default handling via DefaultDataSource.
-        val httpFactory = NanaRangedHttpDataSourceFactory(userAgent = "NanaPlay/1.0.28 (Android)")
+        // 1.0.29: videoplayback servers also throttle/block unknown user-agents,
+        // so identify as a common Android Chrome browser.
+        val httpFactory = NanaRangedHttpDataSourceFactory(userAgent = YOUTUBE_STREAM_USER_AGENT)
         val mediaSourceFactory = DefaultMediaSourceFactory(
             DefaultDataSource.Factory(appContext, httpFactory),
         )
@@ -267,6 +282,10 @@ object NanaMusicPlayer {
                 override fun onPlayerError(error: PlaybackException) {
                     android.util.Log.e("NanaMusicPlayer", "playback error", error)
                     _lastError.value = error.message ?: "Playback error"
+                }
+
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    _isBuffering.value = playbackState == Player.STATE_BUFFERING
                 }
             },
         )

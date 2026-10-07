@@ -385,6 +385,9 @@ private fun NanaMusicOnlineTab(
     val isPlaying by NanaMusicPlayer.isPlaying.collectAsState()
     val currentIndex by NanaMusicPlayer.currentIndex.collectAsState()
     val tracks by NanaMusicPlayer.tracks.collectAsState()
+    // 1.0.29: surface playback failures + buffering so "can't play" is diagnosable.
+    val playbackError by NanaMusicPlayer.lastError.collectAsState()
+    val isBuffering by NanaMusicPlayer.isBuffering.collectAsState()
 
     // 1.0.27: search state is hoisted to NanaMusicScreen so it survives tab
     // switches (previously `remember`ed here and reset on every tab change).
@@ -447,6 +450,48 @@ private fun NanaMusicOnlineTab(
         )
 
         Spacer(Modifier.height(8.dp))
+
+        // 1.0.29: playback status banner — shows a hard error or buffering so
+        // the user can tell "still loading" apart from "failed".
+        if (playbackError != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Warning,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(20.dp),
+                )
+                Text(
+                    "Playback error: $playbackError",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        } else if (isBuffering) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                )
+                Text(
+                    "Buffering…",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
 
         if (error != null && results.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

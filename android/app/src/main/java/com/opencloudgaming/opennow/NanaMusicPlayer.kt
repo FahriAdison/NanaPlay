@@ -406,8 +406,13 @@ object NanaMusicPlayer {
         if (exo.isPlaying) {
             exo.pause()
         } else {
-            // If playback never started, start from the current/first track.
-            if (exo.currentMediaItem == null && _tracks.value.isNotEmpty()) {
+            // 1.0.35: if the track finished, seek back to the start first —
+            // play() is a no-op while in STATE_ENDED, which left the play
+            // button dead after a track completed.
+            if (exo.playbackState == Player.STATE_ENDED) {
+                exo.seekTo(0)
+            } else if (exo.currentMediaItem == null && _tracks.value.isNotEmpty()) {
+                // If playback never started, start from the current/first track.
                 val idx = _currentIndex.value.coerceIn(0, _tracks.value.size - 1).coerceAtLeast(0)
                 _currentIndex.value = idx
                 exo.seekTo(idx, 0)

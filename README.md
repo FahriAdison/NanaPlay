@@ -1,7 +1,17 @@
+<p align="center">
+  <img src="logo.png" width="120" alt="NanaPlay icon">
+</p>
+
 <h1 align="center">NanaPlay</h1>
 
 <p align="center">
   <strong>An open-source Android client for GeForce NOW — reimagined.</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/FahriAdison/NanaPlay/releases/latest">
+    <img src="https://img.shields.io/github/v/release/FahriAdison/NanaPlay?style=for-the-badge&label=DOWNLOAD" alt="Download">
+  </a>
 </p>
 
 <p align="center">
@@ -10,12 +20,24 @@
   <img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="MIT License">
 </p>
 
+<p align="center">
+  <img src="https://img.shields.io/github/stars/FahriAdison/NanaPlay?style=social" alt="stars">
+  <img src="https://img.shields.io/github/downloads/FahriAdison/NanaPlay/total?style=social&label=downloads" alt="downloads">
+</p>
+
 > [!WARNING]
 > **NanaPlay is in BETA.** It works, and it's tested on real devices — but expect rough edges. Bug reports are welcome!
 
 NanaPlay is a community fork of [OpenNOW](https://github.com/OpenCloudGaming/OpenNOW) by [Zortos](https://github.com/OpenCloudGaming), rebuilt and redesigned for Android by **Papah Chan** ([FahriAdison](https://github.com/FahriAdison)).
 
 It keeps everything great about OpenNOW's GeForce NOW streaming, and adds a console-style experience, smarter queue handling, and tools for players on slower networks.
+
+## 📸 Screenshots
+
+<p align="center">
+  <img src="screenshot-console.png" width="720" alt="NanaPlay Console Mode">
+</p>
+<p align="center"><em>Console Mode — PS5-style interface in landscape</em></p>
 
 ## ✨ Features
 
@@ -27,6 +49,9 @@ It keeps everything great about OpenNOW's GeForce NOW streaming, and adds a cons
 - **⚡ Quick Access FAB** — floating draggable button for keyboard, touch/controller toggle, and screenshot
 - **🔊 Low-Latency Audio** — toggle for reduced audio delay
 - **🔍 Full Search** — game search in both Classic and Console modes
+- **🎵 Music Player** — local files + online streaming (JioSaavn), playable outside and inside the stream
+- **🌐 Floating Browser** — lightweight WebView over the stream for maps & guides
+- **📢 Announcements** — in-app popups for important updates
 
 ## 📦 Package info
 
@@ -48,12 +73,38 @@ The APK lands in `android/app/build/outputs/apk/release/`. Release builds use R8
 
 > **Signing:** release builds expect a keystore configured as the `nanaplay` signing config. Never commit keystores — see `.gitignore`.
 
+## 🗂️ Repository Layout
+
+```
+.
+├── android/                    # Android app (Jetpack Compose + Kotlin)
+│   ├── app/
+│   │   ├── src/main/
+│   │   │   ├── java/com/opencloudgaming/opennow/   # App source
+│   │   │   │   ├── Nana*.kt    # NanaPlay additions (music, browser, announcements…)
+│   │   │   │   └── OpenNow*.kt # Upstream OpenNOW base (streaming, queue, auth…)
+│   │   │   └── res/            # Resources
+│   │   └── build.gradle.kts
+│   └── gradle.properties
+├── announcements.json          # In-app announcement feed
+├── logo.png                    # App icon
+├── screenshot-console.png      # Console Mode screenshot
+├── README.md
+└── LICENSE
+```
+
 ## 🗒️ Changelog
 
 The changelog is updated with every release. Highlights:
 
 | Version | Code | Highlights |
 |---------|------|------------|
+| 1.0.37 | 92 | Touch session recovery (ported from upstream); recovery fail-fast |
+| 1.0.36 | 91 | Music player reliability rework; auto-advance to next track |
+| 1.0.35 | 90 | Gamepad overlap fix; floating browser URL fix; music replay fix |
+| 1.0.34 | 89 | In-app announcement popup via GitHub JSON |
+| 1.0.33 | 88 | Search state persistence; 50 music results; gamepad restyle; floating drawer |
+| 1.0.32 | 87 | JioSaavn parser fix (`data.results`) |
 | 1.0.31 | 86 | **Online music** backend switched to JioSaavn (was YouTube InnerTube) |
 | 1.0.26 | 81 | **Online music** in the music player (YouTube Music search via InnerTube) |
 | 1.0.25 | 80 | Local music player; NanaPlay home identity; instant Classic search; search-stuck & back-button fixes |
@@ -73,9 +124,13 @@ The changelog is updated with every release. Highlights:
 | 1.0.11 | 66 | Landscape fixes; Search enabled in Console Mode |
 | 1.0.10 | 65 | First **Console Mode** (PS5-style UI) |
 
+## ⭐ Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=FahriAdison/NanaPlay&type=Date)](https://star-history.com/#FahriAdison/NanaPlay&Date)
+
 ## 🙏 Credits
 
-- **Upstream:** [OpenNOW](https://github.com/OpenCloudGaming/OpenNOW) by [Zortos](https://github.com/OpenCloudGaming) — the foundation everything here is built on.
+- **Upstream:** [OpenNOW](https://github.com/OpenCloudGaming/OpenNOW) by [Zortos](https://github.com/OpenCloudGaming) — the foundation everything here is built on. Android contributions by [Kief5555](https://github.com/Kief5555).
 - **Recode & redesign:** [Papah Chan](https://github.com/FahriAdison)
 - **Online music:** streams via the [JioSaavn](https://www.jiosaavn.com) catalog using the ShnwazDev public API wrapper (based on [sumitkolhe/jiosaavn-api](https://github.com/sumitkolhe/jiosaavn-api), MIT). (1.0.26–1.0.30 used YouTube InnerTube, inspired by [Metrolist](https://github.com/MetrolistGroup/Metrolist) (GPL-3.0); retired for reliability.)
 

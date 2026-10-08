@@ -840,6 +840,13 @@ object NativeStreamInputRouter {
     @Volatile
     private var uiTouchPassthroughActive = false
     private val nativeUiTouchPointerIds = mutableSetOf<Int>()
+    /**
+     * 1.0.37 (port from upstream Kief5555 "recover touch input across sessions"):
+     * Tracks ALL pointer IDs seen in the current gesture, not just UI ones.
+     * A pointer's UI/game classification is sticky for the gesture duration —
+     * this prevents flickering when a finger drifts across a UI boundary mid-gesture.
+     */
+    private val trackedPointerIds = mutableSetOf<Int>()
     private val touchMouseState = TouchMouseState()
 
     /**
@@ -870,9 +877,11 @@ object NativeStreamInputRouter {
 
     fun detach(next: NativeStreamClient) {
         if (client === next) {
+            // 1.0.37 (port from upstream): release touch/mouse state properly on
+            // detach so input cannot stick across sessions.
+            releaseTouchMouseForLifecycle()
             client = null
             touchMouseState.forgetCursorPosition()
-            touchSlots.clear()
             decodedStreamWidth = 0
             decodedStreamHeight = 0
         }
@@ -887,6 +896,12 @@ object NativeStreamInputRouter {
     fun releaseTouchMouseForLifecycle() {
         touchMouseState.reset(client)
         releaseAllNativeTouches()
+        // 1.0.37 (port from upstream): clear stale touch-down points and pointer
+        // tracking so a new session starts with clean input state.
+        nativeTouchDownPoints.clear()
+        trackedPointerIds.clear()
+        nativeUiTouchPointerIds.clear()
+        uiTouchPassthroughActive = false
     }
 
     fun setTouchMouseEnabled(enabled: Boolean) {
@@ -1480,20 +1495,49 @@ object NativeStreamInputRouter {
         if (!event.isFingerTouchEvent()) return
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                // 1.0.37: track the new gesture's pointer from the start (upstream port).
+                trackedPointerIds.clear()
                 nativeUiTouchPointerIds.clear()
+                val pointerId = event.getPointerId(0)
+                trackedPointerIds += pointerId
                 if (pointerTouchesNativeUi(event, 0, width, height)) {
-                    nativeUiTouchPointerIds += event.getPointerId(0)
+                    nativeUiTouchPointerIds += pointerId
                 }
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
                 val index = event.actionIndex
-                if (index in 0 until event.pointerCount && pointerTouchesNativeUi(event, index, width, height)) {
-                    nativeUiTouchPointerIds += event.getPointerId(index)
+                if (index in 0 until event.pointerCount) {
+                    val pointerId = event.getPointerId(index)
+                    trackedPointerIds += pointerId
+                    if (pointerTouchesNativeUi(event, index, width, height)) {
+                        nativeUiTouchPointerIds += pointerId
+                    }
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_CANCEL -> {
+                // 1.0.37: forget the lifted pointer from tracking (upstream port).
+                val index = event.actionIndex
+                if (index in 0 until event.pointerCount) {
+                    val pointerId = event.getPointerId(index)
+                    trackedPointerIds.remove(pointerId)
+                    nativeUiTouchPointerIds.remove(pointerId)
+                }
+                if (event.actionMasked != MotionEvent.ACTION_POINTER_UP) {
+                    trackedPointerIds.clear()
+                    nativeUiTouchPointerIds.clear()
                 }
             }
         }
         uiTouchPassthroughActive = nativeUiTouchPointerIds.isNotEmpty()
     }
+
+    /**
+     * 1.0.37 (port from upstream): sticky UI/game classification per pointer.
+     * If the pointer was seen in this gesture, keep its original classification;
+     * otherwise fall back to the live hit-test. Prevents mid-gesture flicker.
+     */
+    private fun classifiesPointerAsUi(pointerId: Int, touchesUiNow: Boolean): Boolean =
+        if (pointerId in trackedPointerIds) pointerId in nativeUiTouchPointerIds else touchesUiNow
 
     fun postDispatchTouch(event: MotionEvent) {
         if (!event.isFingerTouchEvent()) return
@@ -1523,8 +1567,12 @@ object NativeStreamInputRouter {
         }
 
     private fun isNativeUiTouchPointer(event: MotionEvent, index: Int, width: Int, height: Int): Boolean =
-        event.getPointerId(index) in nativeUiTouchPointerIds ||
-            pointerTouchesNativeUi(event, index, width, height)
+        // 1.0.37 (port from upstream): sticky classification — a pointer keeps its
+        // UI/game verdict for the whole gesture instead of flickering on boundary.
+        classifiesPointerAsUi(
+            event.getPointerId(index),
+            pointerTouchesNativeUi(event, index, width, height),
+        )
 
     private fun pointerTouchesNativeUi(event: MotionEvent, index: Int, width: Int, height: Int): Boolean {
         if (index !in 0 until event.pointerCount) return false

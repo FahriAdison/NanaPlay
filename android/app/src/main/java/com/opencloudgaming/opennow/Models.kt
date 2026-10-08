@@ -1492,6 +1492,14 @@ internal fun ActiveSessionInfo.matchesStreamGeometry(settings: StreamSettings): 
 internal fun ActiveSessionInfo.matchesStreamSettings(settings: StreamSettings): Boolean =
     settingsSignature == streamSettingsSessionSignature(settings) && matchesStreamGeometry(settings)
 
+/**
+ * 1.0.37 (port from upstream Kief5555 "recover touch input across sessions"):
+ * When recovery finds zero active sessions, there is nothing to match against —
+ * the right move is a fresh session, not a strict-matching failure.
+ */
+internal fun shouldCreateFreshRecoverySession(activeSessionCount: Int): Boolean =
+    activeSessionCount == 0
+
 internal fun activeSessionRecoveryCandidate(
     sessions: List<ActiveSessionInfo>,
     previousSessionId: String,

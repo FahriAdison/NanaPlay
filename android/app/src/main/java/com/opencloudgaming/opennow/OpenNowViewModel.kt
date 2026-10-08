@@ -2614,6 +2614,13 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 )
                 val activeSessions = sessionRepository.getActiveSessions(token, baseUrl, currentSettings)
                 recordDebugEvent("recovery", "Recovery active sessions count=${activeSessions.size} base=${hostForDebug(baseUrl)}")
+                // 1.0.37 (port from upstream): zero active sessions means the old
+                // session is fully gone — strict matching cannot succeed. Fail fast
+                // with a clear message so the user re-queues instead of hanging.
+                if (shouldCreateFreshRecoverySession(activeSessions.size) && directCandidate == null) {
+                    recordDebugEvent("recovery", "No active sessions and no direct candidate — session is gone, requesting fresh launch")
+                    error("The cloud session has ended. Please start the game again.")
+                }
                 val readyCandidate = activeSessionRecoveryCandidate(
                     sessions = activeSessions,
                     previousSessionId = previousSession.sessionId,

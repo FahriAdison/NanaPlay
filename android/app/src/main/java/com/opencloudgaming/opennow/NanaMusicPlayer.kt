@@ -121,6 +121,69 @@ object NanaMusicPlayer {
     /** 1.0.36: serializes every "start playing" request so rapid taps can't interleave. */
     private val playMutex = Mutex()
 
+    // ---- 1.0.38: crash catcher ----
+    // The 1.0.37 member report ("force close when adding a song") couldn't be
+    // diagnosed because Share diagnostics never captured the stack trace.
+    // Every public entry point now funnels through [guarded], which catches
+    // any throwable, writes a crash log file, and keeps a short summary in
+    // memory so it can be included in the next diagnostics export.
+    private const val CRASH_DIR = "NanaPlay/crash-logs"
+    private const val MAX_CRASH_FILES = 10
+
+    @Volatile
+    private var lastCrashSummary: String? = null
+
+    /** Short human-readable summary of the most recent music-player crash, if any. Null when clean. */
+    fun lastCrashSummary(): String? = lastCrashSummary
+
+    private fun logCrashToFile(context: Context, tag: String, t: Throwable) {
+        val summary = buildString {
+            append(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date()))
+            append(" [").append(tag).append("] ")
+            append(t.javaClass.simpleName).append(": ").append(t.message)
+        }
+        lastCrashSummary = summary
+        runCatching {
+            val dir = java.io.File(context.applicationContext.filesDir, CRASH_DIR).apply { mkdirs() }
+            // Prune old logs so the folder can't grow forever.
+            dir.listFiles()?.sortedBy { it.lastModified() }?.let { files ->
+                if (files.size >= MAX_CRASH_FILES) {
+                    files.take(files.size - MAX_CRASH_FILES + 1).forEach { runCatching { it.delete() } }
+                }
+            }
+            val file = java.io.File(dir, "crash-${System.currentTimeMillis()}.txt")
+            val deviceLine = runCatching {
+                "device=${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} " +
+                    "sdk=${android.os.Build.VERSION.SDK_INT} app=1.0.38"
+            }.getOrDefault("device=unknown")
+            file.writeText(buildString {
+                appendLine(summary)
+                appendLine(deviceLine)
+                appendLine("--- stack trace ---")
+                append(t.stackTraceToString())
+                t.cause?.let { cause ->
+                    appendLine("--- cause ---")
+                    append(cause.stackTraceToString())
+                }
+            })
+        }
+        android.util.Log.e("NanaMusicPlayer", "crash [$tag]", t)
+    }
+
+    /**
+     * 1.0.38: run [block] with a crash net. Any throwable is logged to a
+     * crash file (see [logCrashToFile]) and surfaced via [_lastError] instead
+     * of force-closing the app.
+     */
+    private inline fun guarded(context: Context, tag: String, block: () -> Unit) {
+        try {
+            block()
+        } catch (t: Throwable) {
+            logCrashToFile(context.applicationContext, tag, t)
+            _lastError.value = "Something went wrong ($tag). Please try again."
+        }
+    }
+
     private fun isPlaceholderUri(track: NanaTrack): Boolean =
         track.isOnline && track.uri.scheme == PLACEHOLDER_SCHEME
 
@@ -261,8 +324,41 @@ object NanaMusicPlayer {
         }.getOrDefault(false)
     }
 
-    @Synchronized
+    /**
+     * 1.0.38: ExoPlayer MUST be created on a thread with a Looper (it binds
+     * its internal handler to the creating thread). persistScope runs on
+     * Dispatchers.IO which has no Looper — creating the player there threw
+     * and force-closed the app on some devices (member report 1.0.37).
+     * Now creation is marshalled to the main thread; callers block briefly
+     * via runBlocking-free latch instead.
+     */
     private fun ensurePlayer(context: Context): androidx.media3.exoplayer.ExoPlayer {
+        synchronized(this) { player?.let { return it } }
+        // Already on main? Build directly.
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            return buildPlayer(context)
+        }
+        // Otherwise hop to main and wait (bounded) for the player.
+        val appContext = context.applicationContext
+        val latch = java.util.concurrent.CountDownLatch(1)
+        val holder = arrayOfNulls<androidx.media3.exoplayer.ExoPlayer>(1)
+        val error = arrayOfNulls<Throwable>(1)
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            try {
+                holder[0] = buildPlayer(appContext)
+            } catch (t: Throwable) {
+                error[0] = t
+            } finally {
+                latch.countDown()
+            }
+        }
+        latch.await(10, java.util.concurrent.TimeUnit.SECONDS)
+        error[0]?.let { throw it }
+        return holder[0] ?: throw IllegalStateException("Music player failed to start")
+    }
+
+    @Synchronized
+    private fun buildPlayer(context: Context): androidx.media3.exoplayer.ExoPlayer {
         player?.let { return it }
         val appContext = context.applicationContext
         appContextRef = appContext
@@ -448,20 +544,47 @@ object NanaMusicPlayer {
         }
     }
 
+    /**
+     * 1.0.38: hardened add flow.
+     * - URI validation first: skip entries with a blank/null scheme instead of
+     *   letting ExoPlayer choke on them later.
+     * - Title resolution (content-resolver query) moved off the UI thread —
+     *   the file picker callback runs on main and a slow provider used to
+     *   jank/ANR here.
+     * - The whole body is crash-netted: any failure surfaces via [lastError]
+     *   instead of force-closing the app (member report 1.0.37).
+     */
     fun addTracks(context: Context, uris: List<Uri>) {
         if (uris.isEmpty()) return
-        ensureRestored(context)
         val appContext = context.applicationContext
-        val newTracks = uris.map { uri ->
-            NanaTrack(uri = uri, title = resolveTitle(appContext, uri))
+        // Validate synchronously (cheap) so obviously-bad URIs never enter the queue.
+        val valid = uris.filter { uri ->
+            runCatching { uri.scheme?.isNotBlank() == true }.getOrDefault(false)
         }
-        val (startIndex, shouldAutoPlay) = synchronized(this) {
-            val start = _tracks.value.size
-            _tracks.value = _tracks.value + newTracks
-            start to (_currentIndex.value < 0 && !_isPlaying.value)
+        if (valid.isEmpty()) {
+            _lastError.value = "Couldn't add songs: no valid files selected."
+            return
         }
-        // Auto-start playing the first newly added track when nothing was playing.
-        if (shouldAutoPlay) serializedPlay(appContext) { startIndex }
+        persistScope.launch {
+            runCatching {
+                ensureRestored(appContext)
+                restoreJob?.join()
+                val newTracks = valid.map { uri ->
+                    NanaTrack(uri = uri, title = resolveTitle(appContext, uri))
+                }
+                val (startIndex, shouldAutoPlay) = synchronized(this@NanaMusicPlayer) {
+                    val start = _tracks.value.size
+                    _tracks.value = _tracks.value + newTracks
+                    start to (_currentIndex.value < 0 && !_isPlaying.value)
+                }
+                persistScope.launch { appContextRef?.let { saveState(it) } }
+                // Auto-start playing the first newly added track when nothing was playing.
+                if (shouldAutoPlay) serializedPlay(appContext) { startIndex }
+            }.onFailure { t ->
+                logCrashToFile(appContext, "addTracks", t)
+                _lastError.value = "Couldn't add songs. Please try again."
+            }
+        }
     }
 
     fun removeTrack(context: Context, index: Int) {
@@ -490,7 +613,7 @@ object NanaMusicPlayer {
     }
 
     fun play(context: Context, index: Int) {
-        serializedPlay(context) { index }
+        guarded(context, "play") { serializedPlay(context) { index } }
     }
 
     /**
@@ -526,44 +649,50 @@ object NanaMusicPlayer {
     }
 
     fun togglePlayPause(context: Context) {
-        ensureRestored(context)
-        val exo = ensurePlayer(context.applicationContext)
-        if (exo.isPlaying) {
-            exo.pause()
-            return
+        guarded(context, "togglePlayPause") {
+            ensureRestored(context)
+            val exo = ensurePlayer(context.applicationContext)
+            if (exo.isPlaying) {
+                exo.pause()
+                return@guarded
+            }
+            // 1.0.35: if the track finished, seek back to the start first —
+            // play() is a no-op while in STATE_ENDED, which left the play
+            // button dead after a track completed.
+            if (exo.playbackState == Player.STATE_ENDED) {
+                exo.seekTo(0)
+                exo.play()
+                return@guarded
+            }
+            if (exo.currentMediaItem != null) {
+                // Resume the paused item without re-resolving.
+                exo.play()
+                return@guarded
+            }
+            // Nothing loaded — start the current (or first) track.
+            val idx = synchronized(this) { _currentIndex.value.takeIf { it >= 0 } ?: 0 }
+            serializedPlay(context) { idx }
         }
-        // 1.0.35: if the track finished, seek back to the start first —
-        // play() is a no-op while in STATE_ENDED, which left the play
-        // button dead after a track completed.
-        if (exo.playbackState == Player.STATE_ENDED) {
-            exo.seekTo(0)
-            exo.play()
-            return
-        }
-        if (exo.currentMediaItem != null) {
-            // Resume the paused item without re-resolving.
-            exo.play()
-            return
-        }
-        // Nothing loaded — start the current (or first) track.
-        val idx = synchronized(this) { _currentIndex.value.takeIf { it >= 0 } ?: 0 }
-        serializedPlay(context) { idx }
     }
 
     fun next(context: Context) {
-        serializedPlay(context) {
-            val size = _tracks.value.size
-            if (size == 0) -1 else (_currentIndex.value + 1) % size
+        guarded(context, "next") {
+            serializedPlay(context) {
+                val size = _tracks.value.size
+                if (size == 0) -1 else (_currentIndex.value + 1) % size
+            }
         }
     }
 
     fun previous(context: Context) {
-        serializedPlay(context) {
-            val size = _tracks.value.size
-            if (size == 0) -1
-            else {
-                val cur = _currentIndex.value
-                if (cur <= 0) size - 1 else cur - 1
+        guarded(context, "previous") {
+            serializedPlay(context) {
+                val size = _tracks.value.size
+                if (size == 0) -1
+                else {
+                    val cur = _currentIndex.value
+                    if (cur <= 0) size - 1 else cur - 1
+                }
             }
         }
     }

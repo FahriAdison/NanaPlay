@@ -70,8 +70,9 @@ object StreamTranslate {
     /**
      * Downscale a bitmap so OCR stays fast on low-end phones.
      * Keeps aspect ratio, caps the long edge at [maxEdge] px.
+     * Default 1920px: enough detail for small game text, still fast.
      */
-    fun downscaleForOcr(bitmap: Bitmap, maxEdge: Int = 1024): Bitmap {
+    fun downscaleForOcr(bitmap: Bitmap, maxEdge: Int = 1920): Bitmap {
         val w = bitmap.width
         val h = bitmap.height
         val longEdge = maxOf(w, h)
@@ -92,6 +93,51 @@ object StreamTranslate {
             GoogleApiAvailability.getInstance()
                 .isGooglePlayServicesAvailable(context) == ConnectionResult.SUCCESS
         }.getOrDefault(false)
+    }
+
+    /**
+     * Checks if a bitmap is blank (all pixels nearly the same color).
+     * PixelCopy can succeed but return a black/blank frame on some devices.
+     */
+    private fun isBitmapBlank(bitmap: Bitmap): Boolean {
+        return runCatching {
+            val w = bitmap.width
+            val h = bitmap.height
+            // Sample a grid of pixels across the frame.
+            val stepX = (w / 10).coerceAtLeast(1)
+            val stepY = (h / 10).coerceAtLeast(1)
+            var firstColor = 0
+            var first = true
+            var y = 0
+            while (y < h) {
+                var x = 0
+                while (x < w) {
+                    val c = bitmap.getPixel(x, y)
+                    // Ignore alpha, compare RGB with tolerance for compression noise.
+                    val rgb = c and 0x00FFFFFF
+                    if (first) {
+                        firstColor = rgb
+                        first = false
+                    } else {
+                        val dr = ((rgb shr 16) and 0xFF) - ((firstColor shr 16) and 0xFF)
+                        val dg = ((rgb shr 8) and 0xFF) - ((firstColor shr 8) and 0xFF)
+                        val db = (rgb and 0xFF) - (firstColor and 0xFF)
+                        if (kotlin.math.abs(dr) > 12 || kotlin.math.abs(dg) > 12 || kotlin.math.abs(db) > 12) {
+                            return false // Found a meaningfully different pixel.
+                        }
+                    }
+                    x += stepX
+                }
+                y += stepY
+            }
+            true
+        }.getOrDefault(false)
+    }
+
+    /** Recreates the text recognizer (a stale instance can silently return empty). */
+    private fun freshTextRecognizer(): com.google.mlkit.vision.text.TextRecognizer {
+        runCatching { textRecognizer.close() }
+        return TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     }
 
     /**
@@ -122,17 +168,60 @@ object StreamTranslate {
                     return@launch
                 }
                 emit(TranslateState.Recognizing)
+                // Defense 1: PixelCopy can succeed but return a blank frame.
+                if (isBitmapBlank(bitmap)) {
+                    emit(TranslateState.Error(context.getString(R.string.translate_error_blank_frame)))
+                    return@launch
+                }
                 small = downscaleForOcr(bitmap)
-                val frame = small
-                val image = InputImage.fromBitmap(frame, 0)
-                val visionText = com.google.android.gms.tasks.Tasks.await(
-                    textRecognizer.process(image)
-                )
+                var frame = small
+                // First pass: OCR on the downscaled frame (fast).
+                var recognizer = textRecognizer
+                var visionText = runCatching {
+                    com.google.android.gms.tasks.Tasks.await(
+                        recognizer.process(InputImage.fromBitmap(frame, 0))
+                    )
+                }.getOrNull()
+                var textBlocks = visionText?.textBlocks.orEmpty()
+                    .filter { !it.text.isNullOrBlank() && it.boundingBox != null }
+                var raw = visionText?.text?.trim().orEmpty()
+                // Defense 2: a stale recognizer can silently return empty —
+                // retry once with a fresh instance before falling back.
+                if (raw.isEmpty() || textBlocks.isEmpty()) {
+                    recognizer = freshTextRecognizer()
+                    visionText = runCatching {
+                        com.google.android.gms.tasks.Tasks.await(
+                            recognizer.process(InputImage.fromBitmap(frame, 0))
+                        )
+                    }.getOrNull()
+                    textBlocks = visionText?.textBlocks.orEmpty()
+                        .filter { !it.text.isNullOrBlank() && it.boundingBox != null }
+                    raw = visionText?.text?.trim().orEmpty()
+                }
+                // Second pass (fallback): if nothing found, retry at full
+                // resolution — like Google Translate's "photo mode". Small
+                // game text often only survives at full res.
+                if ((raw.isEmpty() || textBlocks.isEmpty()) && frame !== bitmap) {
+                    val fullText = runCatching {
+                        com.google.android.gms.tasks.Tasks.await(
+                            textRecognizer.process(InputImage.fromBitmap(bitmap, 0))
+                        )
+                    }.getOrNull()
+                    val fullBlocks = fullText?.textBlocks.orEmpty()
+                        .filter { !it.text.isNullOrBlank() && it.boundingBox != null }
+                    val fullRaw = fullText?.text?.trim().orEmpty()
+                    if (fullRaw.isNotEmpty() && fullBlocks.isNotEmpty()) {
+                        // Full-res won: recycle the downscaled frame, Done owns bitmap.
+                        runCatching { frame.recycle() }
+                        small = bitmap
+                        frame = bitmap
+                        visionText = fullText
+                        textBlocks = fullBlocks
+                        raw = fullRaw
+                    }
+                }
                 // Tasks.await() can return null when the GMS task completes empty —
                 // guard before touching .text (Kotlin null-check would throw NPE).
-                val textBlocks = visionText?.textBlocks.orEmpty()
-                    .filter { !it.text.isNullOrBlank() && it.boundingBox != null }
-                val raw = visionText?.text?.trim().orEmpty()
                 if (raw.isEmpty() || textBlocks.isEmpty()) {
                     emit(TranslateState.Error(context.getString(R.string.translate_error_no_text)))
                     return@launch

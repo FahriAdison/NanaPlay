@@ -68,6 +68,18 @@
     <string name="action_open">Open</string>
     <string name="action_reset">Reset</string>
     <string name="action_close">Close</string>
+    <string name="action_retry">Retry</string>
+
+    <!-- Tap-to-translate (NanaPlay 1.0.39) -->
+    <string name="translate_title">Translate screen</string>
+    <string name="translate_capturing">Capturing frame…</string>
+    <string name="translate_recognizing">Reading text…</string>
+    <string name="translate_translating">Translating…</string>
+    <string name="translate_original">Detected text</string>
+    <string name="translate_result">Translation</string>
+    <string name="translate_target">Translate to:</string>
+    <string name="translate_capture_failed">Could not capture the frame</string>
+    <string name="translate_first_run_note">First use downloads the language model once, then works offline.</string>
 
     <!-- In-stream controls panel -->
     <string name="stream_panel_title">Stream Controls</string>
@@ -282,6 +294,9 @@
     <string name="settings_hide_stream_buttons">Hide stream buttons</string>
     <string name="settings_show_stats">Show stats on launch</string>
     <string name="settings_stats_position">Stats overlay position</string>
+    <string name="settings_stats_opacity">Status bar background opacity</string>
+    <string name="settings_stats_opacity_desc">Drag the status bar in-stream to move it. Long-press the slider value to reset position.</string>
+    <string name="settings_stats_reset_position">Reset status bar position</string>
     <string name="settings_hide_server_selector">Hide server selector</string>
     <string name="settings_button_press_tones">Button press tones</string>
     <string name="settings_button_press_tones_desc">Plays a short UI tone for controller navigation and on-screen control presses.</string>

@@ -3781,6 +3781,45 @@ class NativeStreamClient(
         }, mainHandler)
     }
 
+    /**
+     * Captures the currently displayed stream frame as a Bitmap in memory (not saved
+     * to disk). Used by tap-to-translate. The caller owns the returned bitmap and
+     * must recycle it. [onResult] is always invoked on the main thread.
+     */
+    internal fun captureFrameBitmap(onResult: (Bitmap?) -> Unit) {
+        val mainHandler = Handler(Looper.getMainLooper())
+        fun finish(bitmap: Bitmap?) {
+            if (Looper.myLooper() == Looper.getMainLooper()) onResult(bitmap)
+            else mainHandler.post { onResult(bitmap) }
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N || !canCaptureScreenshot()) {
+            finish(null)
+            return
+        }
+        val surfaceView = renderer
+        val surface = surfaceView?.holder?.surface
+        val width = surfaceView?.width ?: 0
+        val height = surfaceView?.height ?: 0
+        if (surface == null || !surface.isValid || width <= 0 || height <= 0) {
+            finish(null)
+            return
+        }
+        val bitmap = try {
+            Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        } catch (_: Throwable) {
+            finish(null)
+            return
+        }
+        PixelCopy.request(surface, bitmap, { copyResult ->
+            if (copyResult != PixelCopy.SUCCESS) {
+                bitmap.recycle()
+                finish(null)
+                return@request
+            }
+            finish(bitmap)
+        }, mainHandler)
+    }
+
     @Synchronized
     private fun attachRecordingAudioSink() {
         val track = audioTrack ?: return

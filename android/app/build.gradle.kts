@@ -60,8 +60,8 @@ android {
         applicationId = "com.papahchan.nanaplay"
         minSdk = 23
         targetSdk = 36
-        versionCode = 93
-        versionName = "1.0.38"
+        versionCode = 94
+        versionName = "1.0.39"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "POSTHOG_PROJECT_TOKEN", buildConfigString(postHogProjectToken))
@@ -167,6 +167,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
     implementation("com.posthog:posthog-android:3.51.2")
+    // Tap-to-translate: on-device OCR + translation (models download on first use)
+    implementation("com.google.mlkit:text-recognition:16.0.1")
+    implementation("com.google.mlkit:translate:17.0.3")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

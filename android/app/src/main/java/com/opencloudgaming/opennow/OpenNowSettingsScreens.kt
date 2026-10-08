@@ -964,6 +964,15 @@ private fun SettingsContent(
                         viewModel.updateSettings(settings.copy(streamStatsPosition = position))
                     }
                 }
+                NumberSlider(
+                    stringResource(R.string.settings_stats_opacity),
+                    settings.streamStatsBackgroundOpacity,
+                    0.05f, 1f, 0.01f,
+                    valueFormatter = { value -> "${(value * 100).roundToInt()}%" },
+                    descriptionProvider = { stringResource(R.string.settings_stats_opacity_desc) },
+                ) { value ->
+                    viewModel.updateSettings(settings.copy(streamStatsBackgroundOpacity = value))
+                }
                 SettingSwitch(stringResource(R.string.settings_hide_server_selector), settings.hideServerSelector) { viewModel.updateSettings(settings.copy(hideServerSelector = it)) }
                 SettingSwitch(
                     label = stringResource(R.string.settings_button_press_tones),

@@ -113,6 +113,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -133,6 +134,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.FiberManualRecord
 import androidx.compose.material.icons.rounded.Keyboard
+import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PhotoCamera
@@ -7273,6 +7275,39 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
             captureScreenshotInFolder(folder, fileName)
         } else {
             pendingScreenshotFileName = fileName
+        }
+    }
+
+    // ---- NanaPlay 1.0.39: tap-to-translate ----
+    var translateState by remember(session?.sessionId) {
+        mutableStateOf<StreamTranslate.TranslateState>(StreamTranslate.TranslateState.Idle)
+    }
+    var translateTargetLang by remember(session?.sessionId) {
+        mutableStateOf(com.google.mlkit.nl.translate.TranslateLanguage.INDONESIAN)
+    }
+    val translateScope = rememberCoroutineScope()
+    fun startTapToTranslate() {
+        if (translateState is StreamTranslate.TranslateState.Capturing ||
+            translateState is StreamTranslate.TranslateState.Recognizing ||
+            translateState is StreamTranslate.TranslateState.Translating
+        ) return
+        if (!client.canCaptureScreenshot()) {
+            Toast.makeText(context, R.string.stream_screenshot_unavailable, Toast.LENGTH_LONG).show()
+            return
+        }
+        translateState = StreamTranslate.TranslateState.Capturing
+        client.captureFrameBitmap { bitmap ->
+            if (bitmap == null) {
+                translateState = StreamTranslate.TranslateState.Error(
+                    context.getString(R.string.translate_capture_failed)
+                )
+                return@captureFrameBitmap
+            }
+            StreamTranslate.translateFrame(bitmap, translateTargetLang, translateScope) { s ->
+                translateState = s
+            }
+        }
+    }
             screenshotFolderLauncher.launch(null)
         }
     }
@@ -7520,13 +7555,48 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                 stretchToFit = stretchToFit,
             )
             if (statsVisible) {
+                // Draggable status bar: drag to reposition, offset persists in settings.
+                var statsDragOffset by remember(
+                    state.settings.streamStatsOffsetX,
+                    state.settings.streamStatsOffsetY,
+                ) {
+                    mutableStateOf(
+                        Offset(
+                            state.settings.streamStatsOffsetX,
+                            state.settings.streamStatsOffsetY,
+                        )
+                    )
+                }
                 StreamStatsPill(
                     streamStats = streamStats,
                     streamSettings = launchStreamSettings,
                     style = state.settings.streamStatsStyle,
                     metrics = state.settings.streamStatsMetrics,
                     serverLocation = session.zone,
-                    modifier = Modifier.align(statsAlignment),
+                    backgroundOpacity = state.settings.streamStatsBackgroundOpacity,
+                    modifier = Modifier
+                        .align(statsAlignment)
+                        .offset {
+                            IntOffset(
+                                statsDragOffset.x.roundToInt(),
+                                statsDragOffset.y.roundToInt(),
+                            )
+                        }
+                        .pointerInput(Unit) {
+                            detectDragGestures(
+                                onDragEnd = {
+                                    viewModel.updateSettings(
+                                        state.settings.copy(
+                                            streamStatsOffsetX = statsDragOffset.x,
+                                            streamStatsOffsetY = statsDragOffset.y,
+                                        )
+                                    )
+                                }
+                            ) { change, dragAmount ->
+                                change.consume()
+                                statsDragOffset += dragAmount
+                            }
+                        },
                 )
             }
             if (activeStreamMode != null) {
@@ -7992,6 +8062,7 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                     onToggleRecording = { toggleStreamRecording() },
                     onToggleMusic = { musicMiniPlayerOpen = !musicMiniPlayerOpen },
                     onToggleBrowser = { browserOpen = !browserOpen },
+                    onTranslate = { startTapToTranslate() },
                 )
             }
             // NanaPlay 1.0.25: in-stream music mini player, bottom-center above the keyboard bar.
@@ -8008,6 +8079,21 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                 NanaBrowserPanel(
                     onClose = { browserOpen = false },
                 )
+            }
+            // NanaPlay 1.0.39: tap-to-translate result overlay.
+            if (translateState !is StreamTranslate.TranslateState.Idle) {
+                AnimatedLaunchOverlay(Modifier.align(Alignment.Center)) {
+                    TranslateResultCard(
+                        state = translateState,
+                        targetLang = translateTargetLang,
+                        onTargetLangChange = { translateTargetLang = it },
+                        onRetry = { startTapToTranslate() },
+                        onClose = {
+                            translateState = StreamTranslate.TranslateState.Idle
+                        },
+                        modifier = Modifier.padding(16.dp),
+                    )
+                }
             }
             if (exitConfirmOpen) {
                 AnimatedLaunchOverlay(Modifier.align(Alignment.Center)) {
@@ -8103,6 +8189,7 @@ private fun QuickAccessFab(
     onToggleRecording: () -> Unit,
     onToggleMusic: () -> Unit,
     onToggleBrowser: () -> Unit,
+    onTranslate: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // 1.0.33: drawer collapsed by default — one button, tap to expand.
@@ -8205,6 +8292,14 @@ private fun QuickAccessFab(
                             active = browserOpen,
                             size = actionSize,
                             onClick = onToggleBrowser,
+                        )
+                        // NanaPlay 1.0.39: tap-to-translate (single frame OCR + translate).
+                        QuickBarAction(
+                            icon = Icons.Rounded.Translate,
+                            contentDescription = "Translate screen text",
+                            active = false,
+                            size = actionSize,
+                            onClick = onTranslate,
                         )
                     }
                 }
@@ -10907,6 +11002,136 @@ private fun StreamKeyboardBar(
     }
 }
 
+/**
+ * NanaPlay 1.0.39: tap-to-translate result card. Shows progress while the single
+ * captured frame is OCR'd + translated on-device, then the result with a
+ * dismiss button. Never blocks the stream — all work is off the video path.
+ */
+@Composable
+private fun TranslateResultCard(
+    state: StreamTranslate.TranslateState,
+    targetLang: String,
+    onTargetLangChange: (String) -> Unit,
+    onRetry: () -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.widthIn(max = 420.dp),
+        shape = RoundedCornerShape(OpenNowRadius.lg),
+        color = OpenNowPalette.PanelOverVideo.copy(alpha = 0.96f),
+        border = BorderStroke(1.dp, OpenNowPalette.AccentDefault.copy(alpha = 0.35f)),
+        tonalElevation = 8.dp,
+    ) {
+        Column(Modifier.padding(OpenNowSpacing.md)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    stringResource(R.string.translate_title),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                )
+                IconButton(onClick = onClose) {
+                    Icon(Icons.Rounded.Close, contentDescription = stringResource(R.string.action_close))
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+            when (state) {
+                is StreamTranslate.TranslateState.Capturing,
+                is StreamTranslate.TranslateState.Recognizing,
+                is StreamTranslate.TranslateState.Translating -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            when (state) {
+                                is StreamTranslate.TranslateState.Capturing -> stringResource(R.string.translate_capturing)
+                                is StreamTranslate.TranslateState.Recognizing -> stringResource(R.string.translate_recognizing)
+                                else -> stringResource(R.string.translate_translating)
+                            }
+                        )
+                    }
+                    Text(
+                        stringResource(R.string.translate_first_run_note),
+                        fontSize = 12.sp,
+                        color = OpenNowPalette.TextSecondary,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+                is StreamTranslate.TranslateState.Done -> {
+                    Text(
+                        stringResource(R.string.translate_original),
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp,
+                        color = OpenNowPalette.TextSecondary,
+                    )
+                    Text(state.sourceText, fontSize = 14.sp, modifier = Modifier.padding(top = 2.dp))
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        stringResource(R.string.translate_result),
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp,
+                        color = OpenNowPalette.TextSecondary,
+                    )
+                    Text(state.translatedText, fontSize = 15.sp, modifier = Modifier.padding(top = 2.dp))
+                }
+                is StreamTranslate.TranslateState.Error -> {
+                    Text(state.message, color = Color(0xFFB3261E))
+                    Spacer(Modifier.height(8.dp))
+                    Button(onClick = onRetry) {
+                        Text(stringResource(R.string.action_retry))
+                    }
+                }
+                is StreamTranslate.TranslateState.Idle -> Unit
+            }
+            if (state is StreamTranslate.TranslateState.Done ||
+                state is StreamTranslate.TranslateState.Error
+            ) {
+                Spacer(Modifier.height(8.dp))
+                // Target language picker.
+                var langExpanded by remember { mutableStateOf(false) }
+                val currentLabel = remember(targetLang) {
+                    StreamTranslate.targetLanguages.firstOrNull { it.first == targetLang }?.second
+                        ?: targetLang
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        stringResource(R.string.translate_target),
+                        fontSize = 13.sp,
+                        color = OpenNowPalette.TextSecondary,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Box {
+                        OutlinedButton(onClick = { langExpanded = true }) {
+                            Text(currentLabel)
+                        }
+                        DropdownMenu(
+                            expanded = langExpanded,
+                            onDismissRequest = { langExpanded = false },
+                        ) {
+                            StreamTranslate.targetLanguages.forEach { (code, label) ->
+                                DropdownMenuItem(
+                                    text = { Text(label) },
+                                    onClick = {
+                                        langExpanded = false
+                                        if (code != targetLang) {
+                                            onTargetLangChange(code)
+                                            onRetry()
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun StreamStatsPill(
@@ -10915,6 +11140,7 @@ private fun StreamStatsPill(
     style: StreamStatsStyle,
     metrics: StreamStatsMetrics,
     serverLocation: String?,
+    backgroundOpacity: Float = 0.52f,
     modifier: Modifier = Modifier,
 ) {
     if (metrics.enabledCount() == 0) return
@@ -10926,8 +11152,8 @@ private fun StreamStatsPill(
             .widthIn(max = if (compact) 720.dp else 300.dp),
         shape = RoundedCornerShape(if (compact) OpenNowRadius.full else OpenNowRadius.lg),
         // Stays genuinely see-through — this one sits over gameplay by design. The hairline is
-        // what keeps its edge readable against a bright frame.
-        color = Panel.copy(alpha = 0.52f),
+        // what keeps its edge readable against a bright frame. Opacity is user-adjustable.
+        color = Panel.copy(alpha = backgroundOpacity.coerceIn(0.05f, 1f)),
         border = BorderStroke(1.dp, OpenNowPalette.PanelHairline),
         tonalElevation = 0.dp,
     ) {

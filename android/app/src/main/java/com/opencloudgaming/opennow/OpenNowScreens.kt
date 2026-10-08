@@ -7308,9 +7308,6 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
             }
         }
     }
-            screenshotFolderLauncher.launch(null)
-        }
-    }
 
     DisposableEffect(Unit) {
         val decor = activity?.window?.decorView
@@ -11057,7 +11054,7 @@ private fun TranslateResultCard(
                     Text(
                         stringResource(R.string.translate_first_run_note),
                         fontSize = 12.sp,
-                        color = OpenNowPalette.TextSecondary,
+                        color = OpenNowPalette.TextMuted,
                         modifier = Modifier.padding(top = 8.dp),
                     )
                 }
@@ -11066,7 +11063,7 @@ private fun TranslateResultCard(
                         stringResource(R.string.translate_original),
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 13.sp,
-                        color = OpenNowPalette.TextSecondary,
+                        color = OpenNowPalette.TextMuted,
                     )
                     Text(state.sourceText, fontSize = 14.sp, modifier = Modifier.padding(top = 2.dp))
                     Spacer(Modifier.height(8.dp))
@@ -11074,7 +11071,7 @@ private fun TranslateResultCard(
                         stringResource(R.string.translate_result),
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 13.sp,
-                        color = OpenNowPalette.TextSecondary,
+                        color = OpenNowPalette.TextMuted,
                     )
                     Text(state.translatedText, fontSize = 15.sp, modifier = Modifier.padding(top = 2.dp))
                 }
@@ -11101,7 +11098,7 @@ private fun TranslateResultCard(
                     Text(
                         stringResource(R.string.translate_target),
                         fontSize = 13.sp,
-                        color = OpenNowPalette.TextSecondary,
+                        color = OpenNowPalette.TextMuted,
                     )
                     Spacer(Modifier.width(8.dp))
                     Box {

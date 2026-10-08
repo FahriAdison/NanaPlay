@@ -969,7 +969,7 @@ private fun SettingsContent(
                     settings.streamStatsBackgroundOpacity,
                     0.05f, 1f, 0.01f,
                     valueFormatter = { value -> "${(value * 100).roundToInt()}%" },
-                    descriptionProvider = { stringResource(R.string.settings_stats_opacity_desc) },
+                    descriptionProvider = { _ -> stringResource(R.string.settings_stats_opacity_desc) },
                 ) { value ->
                     viewModel.updateSettings(settings.copy(streamStatsBackgroundOpacity = value))
                 }

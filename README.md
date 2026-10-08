@@ -20,6 +20,9 @@
   <img src="https://img.shields.io/badge/Platform-Android-3DDC84?style=flat-square&logo=android&logoColor=white" alt="Android">
   <img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" alt="MIT License">
   <img src="https://img.shields.io/github/stars/FahriAdison/NanaPlay?style=flat-square" alt="stars">
+  <a href="https://discord.gg/TyBrNKnavR">
+    <img src="https://img.shields.io/badge/Discord-Join%20us-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Join our Discord">
+  </a>
 </p>
 
 > **NanaPlay is in BETA.** Tested on real devices and working — but it's still beta, so expect some rough edges. Bug reports are always welcome!
@@ -124,6 +127,18 @@ The APK lands in `android/app/build/outputs/apk/release/`. Release builds use R8
 ## ⭐ Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=FahriAdison/NanaPlay&type=Date)](https://star-history.com/#FahriAdison/NanaPlay&Date)
+
+---
+
+## 💬 Community
+
+Join the **NanaPlay Community** on Discord — chat with other players, share feedback, and get help:
+
+<p align="center">
+  <a href="https://discord.gg/TyBrNKnavR">
+    <img src="https://img.shields.io/badge/Discord-Join%20the%20NanaPlay%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Join our Discord">
+  </a>
+</p>
 
 ---
 

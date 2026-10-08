@@ -1,18 +1,21 @@
 package com.opencloudgaming.opennow
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
+import com.google.android.gms.common.ConnectionResult
+import com.google.android.gms.common.GoogleApiAvailability
 import com.google.mlkit.nl.translate.TranslateLanguage
 import com.google.mlkit.nl.translate.Translation
 import com.google.mlkit.nl.translate.TranslatorOptions
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.papahchan.nanaplay.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /**
  * Tap-to-translate for the stream: captures a single frame, runs on-device OCR,
@@ -26,9 +29,26 @@ object StreamTranslate {
         data object Capturing : TranslateState
         data object Recognizing : TranslateState
         data object Translating : TranslateState
-        data class Done(val sourceText: String, val translatedText: String) : TranslateState
+        /**
+         * Overlay result: [frame] is the (downscaled) bitmap OCR ran on,
+         * [blocks] are translated text blocks with bounds in [frame]'s
+         * coordinate space — the UI draws each translation over the
+         * original text position, Google Lens style.
+         */
+        data class Done(
+            val frame: Bitmap,
+            val blocks: List<TranslatedBlock>,
+            val sourceText: String,
+            val translatedText: String,
+        ) : TranslateState
         data class Error(val message: String) : TranslateState
     }
+
+    /** One OCR text block with its translated text. Bounds are in frame pixels. */
+    data class TranslatedBlock(
+        val bounds: android.graphics.Rect,
+        val text: String,
+    )
 
     private val textRecognizer by lazy {
         TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
@@ -63,10 +83,25 @@ object StreamTranslate {
     }
 
     /**
+     * The Play Services thin OCR client needs working Google Play Services.
+     * Without it, the recognizer throws a raw NullPointerException from inside
+     * the GMS dynamite module — check first and fail with a friendly message.
+     */
+    fun isOcrAvailable(context: Context): Boolean {
+        return runCatching {
+            GoogleApiAvailability.getInstance()
+                .isGooglePlayServicesAvailable(context) == ConnectionResult.SUCCESS
+        }.getOrDefault(false)
+    }
+
+    /**
      * Runs OCR + translation on [bitmap] off the main thread.
      * [onState] is always invoked on the main thread.
+     * All failures surface as friendly [TranslateState.Error] messages —
+     * never raw exception text.
      */
     fun translateFrame(
+        context: Context,
         bitmap: Bitmap,
         targetLang: String,
         scope: CoroutineScope,
@@ -78,33 +113,85 @@ object StreamTranslate {
             else mainHandler.post { onState(state) }
         }
         scope.launch(Dispatchers.Default) {
+            var small: Bitmap? = null
+            var handedToDone = false
             try {
+                // Pre-flight: Play Services must be working for the thin OCR client.
+                if (!isOcrAvailable(context)) {
+                    emit(TranslateState.Error(context.getString(R.string.translate_error_play_services)))
+                    return@launch
+                }
                 emit(TranslateState.Recognizing)
-                val small = downscaleForOcr(bitmap)
-                val image = InputImage.fromBitmap(small, 0)
+                small = downscaleForOcr(bitmap)
+                val frame = small
+                val image = InputImage.fromBitmap(frame, 0)
                 val visionText = com.google.android.gms.tasks.Tasks.await(
                     textRecognizer.process(image)
                 )
-                val raw = visionText.text.trim()
-                if (small !== bitmap) small.recycle()
-                if (raw.isEmpty()) {
-                    emit(TranslateState.Error("No text found in this frame"))
+                // Tasks.await() can return null when the GMS task completes empty —
+                // guard before touching .text (Kotlin null-check would throw NPE).
+                val textBlocks = visionText?.textBlocks.orEmpty()
+                    .filter { !it.text.isNullOrBlank() && it.boundingBox != null }
+                val raw = visionText?.text?.trim().orEmpty()
+                if (raw.isEmpty() || textBlocks.isEmpty()) {
+                    emit(TranslateState.Error(context.getString(R.string.translate_error_no_text)))
                     return@launch
                 }
                 emit(TranslateState.Translating)
                 val translator = translatorFor(targetLang)
                 // Download the language model on first use (needs network once).
-                com.google.android.gms.tasks.Tasks.await(
-                    translator.downloadModelIfNeeded()
-                )
-                val translated = com.google.android.gms.tasks.Tasks.await(
-                    translator.translate(raw)
-                )
-                emit(TranslateState.Done(raw, translated))
+                // NOTE: downloadModelIfNeeded() returns Task<Void> — Tasks.await()
+                // returns null on SUCCESS (Void has no instance), so check the
+                // exception, not the result.
+                val downloadResult = runCatching {
+                    com.google.android.gms.tasks.Tasks.await(
+                        translator.downloadModelIfNeeded()
+                    )
+                }
+                if (downloadResult.isFailure) {
+                    emit(TranslateState.Error(context.getString(R.string.translate_error_download_failed)))
+                    return@launch
+                }
+                // Translate per text block so the UI can overlay each translation
+                // on the original text position (Google Lens style).
+                val translatedBlocks = textBlocks.mapNotNull { block ->
+                    val box = block.boundingBox ?: return@mapNotNull null
+                    // Skip tiny noise blocks.
+                    if (box.width() < 8 || box.height() < 8) return@mapNotNull null
+                    val t = runCatching {
+                        com.google.android.gms.tasks.Tasks.await(
+                            translator.translate(block.text)
+                        )
+                    }.getOrNull()?.trim()
+                    if (t.isNullOrEmpty()) null
+                    else TranslatedBlock(android.graphics.Rect(box), t)
+                }
+                if (translatedBlocks.isEmpty()) {
+                    emit(TranslateState.Error(context.getString(R.string.translate_error_failed)))
+                    return@launch
+                }
+                val translatedFull = translatedBlocks.joinToString("\n") { it.text }
+                // Done owns `frame` now (for the overlay) — don't recycle below.
+                handedToDone = true
+                emit(TranslateState.Done(frame, translatedBlocks, raw, translatedFull))
             } catch (e: Exception) {
-                emit(TranslateState.Error(e.message ?: "Translation failed"))
+                // Never leak raw exception text (e.g. NPE internals) to the UI.
+                val msg = when (e) {
+                    is NullPointerException ->
+                        context.getString(R.string.translate_error_ocr_failed)
+                    else ->
+                        context.getString(R.string.translate_error_failed)
+                }
+                emit(TranslateState.Error(msg))
             } finally {
-                withContext(Dispatchers.Main) {
+                // Recycle bitmaps the UI doesn't own. Done owns `small`;
+                // the original full-size bitmap is always recyclable here
+                // (it's either === small and owned by Done, or garbage).
+                val s = small
+                if (!handedToDone && s != null && s !== bitmap) {
+                    runCatching { s.recycle() }
+                }
+                if (!handedToDone || s !== bitmap) {
                     runCatching { bitmap.recycle() }
                 }
             }

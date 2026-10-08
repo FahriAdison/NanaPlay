@@ -60,8 +60,8 @@ android {
         applicationId = "com.papahchan.nanaplay"
         minSdk = 23
         targetSdk = 36
-        versionCode = 94
-        versionName = "1.0.39"
+        versionCode = 95
+        versionName = "1.0.40"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "POSTHOG_PROJECT_TOKEN", buildConfigString(postHogProjectToken))
@@ -170,6 +170,8 @@ dependencies {
     // Tap-to-translate: on-device OCR + translation
     // OCR via Play Services (thin client — model stays on device, not bundled in APK)
     implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.1")
+    // Needed for GoogleApiAvailability pre-flight check in StreamTranslate
+    implementation("com.google.android.gms:play-services-base:18.5.0")
     // Translate base is small; language models download on first use
     implementation("com.google.mlkit:translate:17.0.3")
 

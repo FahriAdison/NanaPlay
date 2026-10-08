@@ -217,6 +217,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.SolidColor
@@ -7295,6 +7296,10 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
             Toast.makeText(context, R.string.stream_screenshot_unavailable, Toast.LENGTH_LONG).show()
             return
         }
+        // Recycle any previous overlay frame before capturing a new one.
+        (translateState as? StreamTranslate.TranslateState.Done)?.frame?.let {
+            runCatching { it.recycle() }
+        }
         translateState = StreamTranslate.TranslateState.Capturing
         client.captureFrameBitmap { bitmap ->
             if (bitmap == null) {
@@ -7303,7 +7308,7 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                 )
                 return@captureFrameBitmap
             }
-            StreamTranslate.translateFrame(bitmap, translateTargetLang, translateScope) { s ->
+            StreamTranslate.translateFrame(context, bitmap, translateTargetLang, translateScope) { s ->
                 translateState = s
             }
         }
@@ -8077,19 +8082,40 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                     onClose = { browserOpen = false },
                 )
             }
-            // NanaPlay 1.0.39: tap-to-translate result overlay.
+            // NanaPlay 1.0.40: tap-to-translate result overlay.
+            // BackHandler guarantees the overlay can always be dismissed.
+            // Done shows the frozen frame with translations overlaid on the
+            // original text positions (Google Lens style); other states show
+            // the progress/error card.
             if (translateState !is StreamTranslate.TranslateState.Idle) {
-                AnimatedLaunchOverlay(Modifier.align(Alignment.Center)) {
-                    TranslateResultCard(
-                        state = translateState,
+                fun dismissTranslate() {
+                    (translateState as? StreamTranslate.TranslateState.Done)?.frame?.let {
+                        runCatching { it.recycle() }
+                    }
+                    translateState = StreamTranslate.TranslateState.Idle
+                }
+                BackHandler { dismissTranslate() }
+                val doneState = translateState as? StreamTranslate.TranslateState.Done
+                if (doneState != null) {
+                    TranslateOverlay(
+                        state = doneState,
                         targetLang = translateTargetLang,
                         onTargetLangChange = { translateTargetLang = it },
-                        onRetry = { startTapToTranslate() },
-                        onClose = {
-                            translateState = StreamTranslate.TranslateState.Idle
-                        },
-                        modifier = Modifier.padding(16.dp),
+                        onRetranslate = { startTapToTranslate() },
+                        onClose = { dismissTranslate() },
+                        modifier = Modifier.fillMaxSize(),
                     )
+                } else {
+                    AnimatedLaunchOverlay(Modifier.align(Alignment.Center)) {
+                        TranslateResultCard(
+                            state = translateState,
+                            targetLang = translateTargetLang,
+                            onTargetLangChange = { translateTargetLang = it },
+                            onRetry = { startTapToTranslate() },
+                            onClose = { dismissTranslate() },
+                            modifier = Modifier.padding(16.dp),
+                        )
+                    }
                 }
             }
             if (exitConfirmOpen) {
@@ -10994,6 +11020,158 @@ private fun StreamKeyboardBar(
                         onDone()
                     },
                 ) { Text("Done") }
+            }
+        }
+    }
+}
+
+/**
+ * NanaPlay 1.0.40: tap-to-translate overlay. Shows the frozen captured frame
+ * with each translated text block drawn over the original text position
+ * (Google Lens style). Tap X, back button, or outside the frame to dismiss.
+ */
+@Composable
+private fun TranslateOverlay(
+    state: StreamTranslate.TranslateState.Done,
+    targetLang: String,
+    onTargetLangChange: (String) -> Unit,
+    onRetranslate: () -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    // Remember the bitmap as an ImageBitmap once (cheap wrapper, no copy).
+    val imageBitmap = remember(state.frame) { state.frame.asImageBitmap() }
+    var langExpanded by remember { mutableStateOf(false) }
+    val currentLabel = remember(targetLang) {
+        StreamTranslate.targetLanguages.firstOrNull { it.first == targetLang }?.second
+            ?: targetLang
+    }
+    Box(
+        modifier = modifier
+            .background(Color.Black.copy(alpha = 0.85f))
+            .clickable(
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() },
+            ) { onClose() },
+    ) {
+        BoxWithConstraints(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .fillMaxWidth()
+                .aspectRatio(state.frame.width.toFloat() / state.frame.height.toFloat())
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() },
+                ) { /* consume taps on the frame so they don't dismiss */ },
+        ) {
+            val frameW = state.frame.width.toFloat()
+            val frameH = state.frame.height.toFloat()
+            // FillBounds-equivalent: BoxWithConstraints + aspectRatio gives us an
+            // exact linear map from frame pixels to displayed pixels.
+            val scaleX = remember(constraints.maxWidth, frameW) {
+                constraints.maxWidth / frameW
+            }
+            val scaleY = remember(constraints.maxHeight, frameH) {
+                constraints.maxHeight / frameH
+            }
+            Image(
+                bitmap = imageBitmap,
+                contentDescription = null,
+                contentScale = ContentScale.FillBounds,
+                modifier = Modifier.fillMaxSize(),
+            )
+            // Translated blocks over original positions.
+            state.blocks.forEach { block ->
+                val b = block.bounds
+                val fontSizePx = (b.height() * scaleY * 0.62f).coerceAtLeast(10f)
+                Box(
+                    modifier = Modifier
+                        .offset {
+                            IntOffset(
+                                (b.left * scaleX).roundToInt(),
+                                (b.top * scaleY).roundToInt(),
+                            )
+                        }
+                        .size(
+                            width = with(density) { (b.width() * scaleX).toDp() },
+                            height = with(density) { (b.height() * scaleY).toDp() },
+                        )
+                        .background(OpenNowPalette.PanelOverVideo.copy(alpha = 0.92f))
+                        .padding(2.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = block.text,
+                        color = Color.White,
+                        fontSize = with(density) { fontSizePx.toSp() },
+                        lineHeight = with(density) { (fontSizePx * 1.1f).toSp() },
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+        // Top bar: title + close.
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .padding(OpenNowSpacing.md),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                stringResource(R.string.translate_title),
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp,
+                color = Color.White,
+            )
+            IconButton(onClick = onClose) {
+                Icon(
+                    Icons.Rounded.Close,
+                    contentDescription = stringResource(R.string.action_close),
+                    tint = Color.White,
+                )
+            }
+        }
+        // Bottom bar: language picker.
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(OpenNowSpacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                stringResource(R.string.translate_target),
+                fontSize = 13.sp,
+                color = Color.White.copy(alpha = 0.8f),
+            )
+            Spacer(Modifier.width(8.dp))
+            Box {
+                OutlinedButton(
+                    onClick = { langExpanded = true },
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                ) {
+                    Text(currentLabel)
+                }
+                DropdownMenu(
+                    expanded = langExpanded,
+                    onDismissRequest = { langExpanded = false },
+                ) {
+                    StreamTranslate.targetLanguages.forEach { (code, label) ->
+                        DropdownMenuItem(
+                            text = { Text(label) },
+                            onClick = {
+                                langExpanded = false
+                                if (code != targetLang) {
+                                    onTargetLangChange(code)
+                                    onRetranslate()
+                                }
+                            },
+                        )
+                    }
+                }
             }
         }
     }

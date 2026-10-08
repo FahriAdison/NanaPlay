@@ -80,6 +80,11 @@
     <string name="translate_target">Translate to:</string>
     <string name="translate_capture_failed">Could not capture the frame</string>
     <string name="translate_first_run_note">First use downloads the language model once, then works offline.</string>
+    <string name="translate_error_play_services">Translation needs Google Play Services, which isn\'t working on this device right now.</string>
+    <string name="translate_error_no_text">No text found in this frame</string>
+    <string name="translate_error_ocr_failed">Couldn\'t read text from this frame. Try again with clearer text on screen.</string>
+    <string name="translate_error_download_failed">Couldn\'t download the translation model. Check your connection and try again.</string>
+    <string name="translate_error_failed">Translation failed. Please try again.</string>
 
     <!-- In-stream controls panel -->
     <string name="stream_panel_title">Stream Controls</string>

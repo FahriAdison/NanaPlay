@@ -964,12 +964,13 @@ private fun SettingsContent(
                         viewModel.updateSettings(settings.copy(streamStatsPosition = position))
                     }
                 }
+                val statsOpacityDesc = stringResource(R.string.settings_stats_opacity_desc)
                 NumberSlider(
                     stringResource(R.string.settings_stats_opacity),
                     settings.streamStatsBackgroundOpacity,
                     0.05f, 1f, 0.01f,
                     valueFormatter = { value -> "${(value * 100).roundToInt()}%" },
-                    descriptionProvider = { _ -> stringResource(R.string.settings_stats_opacity_desc) },
+                    descriptionProvider = { _ -> statsOpacityDesc },
                 ) { value ->
                     viewModel.updateSettings(settings.copy(streamStatsBackgroundOpacity = value))
                 }

@@ -167,8 +167,10 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
     implementation("com.posthog:posthog-android:3.51.2")
-    // Tap-to-translate: on-device OCR + translation (models download on first use)
-    implementation("com.google.mlkit:text-recognition:16.0.1")
+    // Tap-to-translate: on-device OCR + translation
+    // OCR via Play Services (thin client — model stays on device, not bundled in APK)
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.1")
+    // Translate base is small; language models download on first use
     implementation("com.google.mlkit:translate:17.0.3")
 
     debugImplementation("androidx.compose.ui:ui-tooling")

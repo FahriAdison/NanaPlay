@@ -541,8 +541,13 @@ private fun NanaMusicOnlineTab(
                                 playingTrackId = track.saavnId
                                 error = null
                                 scope.launch {
+                                    // 1.0.36: only clear the highlight/error for
+                                    // THIS tap — the user may have tapped
+                                    // another result while this resolve was in
+                                    // flight (serialized in the player).
+                                    val tappedId = track.saavnId
                                     val ok = NanaMusicPlayer.playOnlineTrack(context, track)
-                                    if (!ok) {
+                                    if (!ok && playingTrackId == tappedId) {
                                         playingTrackId = null
                                         error = "Online music temporarily unavailable"
                                     }

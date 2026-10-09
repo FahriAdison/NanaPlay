@@ -24,6 +24,15 @@ import kotlinx.coroutines.launch
  */
 object StreamTranslate {
 
+    /**
+     * NanaPlay 1.0.42: tap-to-translate is temporarily hidden from the UI.
+     * The Play Services ML Kit OCR engine returns empty results on members'
+     * devices (no app-side bug found after 3 versions of hardening), so we
+     * stop shipping a button that never works. All translate code is kept
+     * intact — set this to true to bring the feature back.
+     */
+    const val TRANSLATE_ENABLED = false
+
     sealed interface TranslateState {
         data object Idle : TranslateState
         data object Capturing : TranslateState

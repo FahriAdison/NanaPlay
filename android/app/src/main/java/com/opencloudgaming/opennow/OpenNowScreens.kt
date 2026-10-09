@@ -8317,13 +8317,17 @@ private fun QuickAccessFab(
                             onClick = onToggleBrowser,
                         )
                         // NanaPlay 1.0.39: tap-to-translate (single frame OCR + translate).
-                        QuickBarAction(
-                            icon = Icons.Rounded.Translate,
-                            contentDescription = "Translate screen text",
-                            active = false,
-                            size = actionSize,
-                            onClick = onTranslate,
-                        )
+                        // 1.0.42: hidden via StreamTranslate.TRANSLATE_ENABLED (OCR engine
+                        // not working on members' devices) — code kept for re-enable.
+                        if (StreamTranslate.TRANSLATE_ENABLED) {
+                            QuickBarAction(
+                                icon = Icons.Rounded.Translate,
+                                contentDescription = "Translate screen text",
+                                active = false,
+                                size = actionSize,
+                                onClick = onTranslate,
+                            )
+                        }
                     }
                 }
             }

@@ -32,6 +32,14 @@ object NanaAnnouncements {
     internal const val SOURCE_URL =
         "https://raw.githubusercontent.com/FahriAdison/NanaPlay/main/announcements.json"
 
+    /**
+     * 1.0.47: IDs that are retired and never shown to anyone (outdated announcements).
+     * "Akal-akalan" so new users don't see stale announcements like "Update on Hold".
+     */
+    private val RETIRED_IDS = setOf(
+        "2026-10-07-testing-hold",
+    )
+
     private val http = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
@@ -70,6 +78,7 @@ object NanaAnnouncements {
             val obj = items.optJSONObject(i) ?: continue
             val id = obj.optString("id").takeIf { it.isNotBlank() } ?: continue
             if (id in dismissedIds) continue
+            if (id in RETIRED_IDS) continue
             val showUntil = obj.optString("showUntil").takeIf { it.isNotBlank() }
             if (showUntil != null && isExpired(showUntil, now)) continue
             val title = obj.optString("title").takeIf { it.isNotBlank() } ?: continue

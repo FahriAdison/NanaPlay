@@ -6774,8 +6774,10 @@ object SdpTools {
             add("a=vqos.resControl.perfHistory.rtcIgnoreOutOfFocusWindowState:1")
             add("a=vqos.resControl.cpmRtc.featureMask:0")
             add("a=vqos.resControl.cpmRtc.enable:0")
-            add("a=vqos.resControl.cpmRtc.minResolutionPercent:100")
-            add("a=vqos.resControl.cpmRtc.resolutionChangeHoldonMs:999999")
+            if (!settings.experimentalDynamicNetworkAdjustment) {
+                add("a=vqos.resControl.cpmRtc.minResolutionPercent:100")
+                add("a=vqos.resControl.cpmRtc.resolutionChangeHoldonMs:999999")
+            }
             add("a=packetPacing.numGroups:${if (is120Fps) 3 else 5}")
             add("a=packetPacing.maxDelayUs:1000")
             add("a=packetPacing.minNumPacketsFrame:10")

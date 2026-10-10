@@ -681,4 +681,6 @@
     <string name="toast_app_id_copied">App ID tersalin</string>
     <string name="store_not_owned">Tidak dimiliki</string>
     <string name="store_owned_on_store">Dimiliki di %1$s</string>
+    <string name="settings_dynamic_network_adjustment">Sesuaikan dengan kondisi jaringan</string>
+    <string name="settings_dynamic_network_adjustment_desc">Server boleh nurunin resolusi stream pas koneksi jelek. FPS pilihanmu tetap jadi target. Berlaku untuk sesi baru.</string>
 </resources>

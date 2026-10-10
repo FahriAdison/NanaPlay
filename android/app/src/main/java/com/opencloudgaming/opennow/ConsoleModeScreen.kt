@@ -312,7 +312,7 @@ internal fun ConsoleModeScreen(
 
                 Spacer(Modifier.height(if (isLandscape) 8.dp else 14.dp))
 
-                val baseCardWidth = if (isLandscape) 60.dp else 84.dp
+                val baseCardWidth = if (isLandscape) 52.dp else 68.dp
                 LazyRow(
                     state = listState,
                     contentPadding = PaddingValues(
@@ -426,10 +426,20 @@ private fun ConsoleTopHeader(
     onSearchClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // PS5-style: time on left, quick actions on right
-    val timeText = remember {
-        val fmt = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
-        fmt.format(java.util.Date())
+    // PS5-style: compact overlay header — live clock + search
+    // Clock follows phone time, updates every 30s
+    var timeText by remember {
+        mutableStateOf(
+            java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+                .format(java.util.Date())
+        )
+    }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(30_000)
+            timeText = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+                .format(java.util.Date())
+        }
     }
     Row(
         modifier = modifier,
@@ -438,22 +448,17 @@ private fun ConsoleTopHeader(
     ) {
         Text(
             text = timeText,
-            color = OpenNowPalette.TextPrimary.copy(alpha = 0.9f),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
+            color = OpenNowPalette.TextPrimary.copy(alpha = 0.75f),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
         )
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onSearchClick, modifier = Modifier.size(40.dp)) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_search),
-                    contentDescription = "Search",
-                    tint = OpenNowPalette.TextPrimary.copy(alpha = 0.85f),
-                    modifier = Modifier.size(22.dp),
-                )
-            }
+        IconButton(onClick = onSearchClick, modifier = Modifier.size(36.dp)) {
+            Icon(
+                painter = painterResource(R.drawable.ic_search),
+                contentDescription = "Search",
+                tint = OpenNowPalette.TextPrimary.copy(alpha = 0.75f),
+                modifier = Modifier.size(20.dp),
+            )
         }
     }
 }

@@ -56,6 +56,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -186,7 +187,7 @@ fun NanaMusicScreen(modifier: Modifier = Modifier) {
                         contentDescription = null,
                         modifier = Modifier.size(18.dp),
                     )
-                    Text("Add", modifier = Modifier.padding(start = 4.dp))
+                    Text(stringResource(R.string.music_add), modifier = Modifier.padding(start = 4.dp))
                 }
             }
         }
@@ -197,12 +198,12 @@ fun NanaMusicScreen(modifier: Modifier = Modifier) {
             Tab(
                 selected = tab == 0,
                 onClick = { tab = 0 },
-                text = { Text("My Music") },
+                text = { Text(stringResource(R.string.music_tab_my_music)) },
             )
             Tab(
                 selected = tab == 1,
                 onClick = { tab = 1 },
-                text = { Text("Online") },
+                text = { Text(stringResource(R.string.music_tab_online)) },
             )
         }
 
@@ -436,7 +437,7 @@ private fun NanaMusicOnlineTab(
             onValueChange = { query = it },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
-            placeholder = { Text("Search songs, artists…") },
+            placeholder = { Text(stringResource(R.string.music_search_hint)) },
             leadingIcon = {
                 Icon(
                     imageVector = Icons.Filled.Search,

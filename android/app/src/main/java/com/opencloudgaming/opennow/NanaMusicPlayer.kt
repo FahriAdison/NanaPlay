@@ -8,6 +8,7 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -43,6 +44,18 @@ import org.json.JSONObject
  *   - On playback error for an online track, one automatic retry with a
  *     freshly resolved URL (JioSaavn CDN URLs can expire mid-playback).
  *   - Natural track end auto-advances to the next queued track.
+ * 1.0.43 — hardening pass (no behavior change on the happy path):
+ *   - resolvePlayable validates ids/URLs (blank id, empty or unparseable
+ *     stream URL) and never lets a bad URI reach ExoPlayer.
+ *   - playInternal re-validates the queue index after the network resolve
+ *     and re-checks the player instance under lock before touching it.
+ *   - addTracks probes every picked URI so one corrupt/unreadable file
+ *     can't fail the batch ("X dari Y track gagal ditambahkan").
+ *   - restoreState validates every entry and resets a corrupt snapshot to
+ *     a safe empty state instead of crashing.
+ *   - onPlayerError can never crash: online tracks get one fresh-URL retry,
+ *     otherwise the failed track is skipped with a clear message; when no
+ *     track is left, playback stops safely.
  *
  * Plays audio files from device storage both outside and inside a stream. Uses
  * ExoPlayer (Media3, already a dependency) with audio-focus handling DISABLED so
@@ -180,7 +193,7 @@ object NanaMusicPlayer {
             block()
         } catch (t: Throwable) {
             logCrashToFile(context.applicationContext, tag, t)
-            _lastError.value = "Something went wrong ($tag). Please try again."
+            _lastError.value = context.getString(R.string.music_err_generic, tag)
         }
     }
 
@@ -253,66 +266,111 @@ object NanaMusicPlayer {
      * (the stream URL is resolved lazily at play time, so restore never does
      * network I/O and can never fail the whole playlist).
      * ExoPlayer is intentionally NOT touched here.
+     *
+     * 1.0.43: hardened — every entry is validated before use (blank ids,
+     * blank/unparseable URIs, and lost SAF permissions are skipped
+     * per-track). A corrupt snapshot (bad JSON, wrong types) resets to a
+     * safe empty state: the bad snapshot is deleted, the failure is logged
+     * to a crash file, and restore never throws.
      */
     private suspend fun restoreState(context: Context) {
-        val jsonStr = context.getSharedPreferences(MUSIC_PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_STATE_JSON, null) ?: return
-        val state = runCatching { JSONObject(jsonStr) }.getOrNull() ?: return
-        val arr = state.optJSONArray("tracks") ?: return
-        if (arr.length() == 0) return
-
-        val rebuilt = ArrayList<NanaTrack>()
-        for (i in 0 until arr.length()) {
-            val o = arr.optJSONObject(i) ?: continue
-            if (o.optBoolean("isOnline", false)) {
-                // 1.0.31: JioSaavn ids. Legacy "videoId" entries are YouTube
-                // ids from 1.0.26–1.0.30 — they can't resolve on JioSaavn, so
-                // they're skipped gracefully below.
-                val saavnId = o.optString("saavnId").takeIf { it.isNotBlank() }
-                    ?: o.optString("videoId").takeIf { it.isNotBlank() }
-                    ?: continue
-                rebuilt.add(
-                    NanaTrack(
-                        uri = Uri.parse("$PLACEHOLDER_SCHEME://track/$saavnId"),
-                        title = o.optString("title", "Unknown"),
-                        artist = o.optString("artist").takeIf { it.isNotBlank() },
-                        thumbnailUrl = o.optString("thumbnailUrl").takeIf { it.isNotBlank() },
-                        isOnline = true,
-                        saavnId = saavnId,
-                    ),
-                )
-            } else {
-                val uriStr = o.optString("uri").takeIf { it.isNotBlank() } ?: continue
-                val uri = Uri.parse(uriStr)
-                if (uri.scheme == "content" && !hasPersistedReadPermission(context, uri)) continue
-                rebuilt.add(
-                    NanaTrack(
-                        uri = uri,
-                        title = o.optString("title", "Unknown"),
-                    ),
-                )
-            }
+        val prefs = context.getSharedPreferences(MUSIC_PREFS, Context.MODE_PRIVATE)
+        val jsonStr = prefs.getString(KEY_STATE_JSON, null) ?: return
+        val state = try {
+            JSONObject(jsonStr)
+        } catch (t: Throwable) {
+            // Corrupt snapshot — drop it and start clean instead of crashing.
+            logCrashToFile(context, "restoreState", t)
+            resetToEmptyState(context)
+            _lastError.value = context.getString(R.string.music_err_restore_failed)
+            return
         }
-        if (rebuilt.isEmpty()) return
+        try {
+            val arr = state.optJSONArray("tracks")
+            if (arr == null || arr.length() == 0) return
 
-        val positionMs = state.optLong("positionMs", 0L)
-        val currentUri = state.optString("currentUri").takeIf { it.isNotBlank() }
-        val currentSaavnId = state.optString("currentSaavnId").takeIf { it.isNotBlank() }
-            ?: state.optString("currentVideoId").takeIf { it.isNotBlank() }
+            val rebuilt = ArrayList<NanaTrack>()
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                if (o.optBoolean("isOnline", false)) {
+                    // 1.0.31: JioSaavn ids. Legacy "videoId" entries are YouTube
+                    // ids from 1.0.26–1.0.30 — they can't resolve on JioSaavn, so
+                    // they're skipped gracefully below.
+                    val saavnId = o.optString("saavnId").takeIf { it.isNotBlank() }
+                        ?: o.optString("videoId").takeIf { it.isNotBlank() }
+                        ?: continue
+                    rebuilt.add(
+                        NanaTrack(
+                            uri = Uri.parse("$PLACEHOLDER_SCHEME://track/$saavnId"),
+                            title = o.optString("title").takeIf { it.isNotBlank() } ?: "Unknown",
+                            artist = o.optString("artist").takeIf { it.isNotBlank() },
+                            thumbnailUrl = o.optString("thumbnailUrl").takeIf { it.isNotBlank() },
+                            isOnline = true,
+                            saavnId = saavnId,
+                        ),
+                    )
+                } else {
+                    val uriStr = o.optString("uri").takeIf { it.isNotBlank() } ?: continue
+                    // Reject unparseable / scheme-less URIs before they reach the queue.
+                    val uri = runCatching { Uri.parse(uriStr) }.getOrNull()
+                        ?.takeIf { it.scheme?.isNotBlank() == true } ?: continue
+                    if (uri.scheme == "content" && !hasPersistedReadPermission(context, uri)) continue
+                    rebuilt.add(
+                        NanaTrack(
+                            uri = uri,
+                            title = o.optString("title").takeIf { it.isNotBlank() } ?: "Unknown",
+                        ),
+                    )
+                }
+            }
+            if (rebuilt.isEmpty()) return
+
+            val positionMs = state.optLong("positionMs", 0L).coerceAtLeast(0L)
+            val currentUri = state.optString("currentUri").takeIf { it.isNotBlank() }
+            val currentSaavnId = state.optString("currentSaavnId").takeIf { it.isNotBlank() }
+                ?: state.optString("currentVideoId").takeIf { it.isNotBlank() }
+            synchronized(this) {
+                // Don't clobber a playlist the user already built this session
+                // (e.g. they added tracks while restore was in flight).
+                if (_tracks.value.isNotEmpty()) return
+                _tracks.value = rebuilt
+                // indexOfFirst only ever returns a valid index or -1; the
+                // coerceIn is a final guard so a corrupt snapshot can never
+                // park the cursor out of range.
+                val idx = when {
+                    currentSaavnId != null ->
+                        rebuilt.indexOfFirst { it.isOnline && it.saavnId == currentSaavnId }
+                    currentUri != null ->
+                        rebuilt.indexOfFirst { !it.isOnline && it.uri.toString() == currentUri }
+                    else -> 0
+                }.coerceIn(0, rebuilt.size - 1)
+                _currentIndex.value = idx
+                pendingSeekMs = positionMs
+            }
+        } catch (t: Throwable) {
+            logCrashToFile(context, "restoreState", t)
+            resetToEmptyState(context)
+            _lastError.value = context.getString(R.string.music_err_restore_failed)
+        }
+    }
+
+    /**
+     * 1.0.43: drop a corrupt/partial restore — delete the bad snapshot so it
+     * can't poison the next launch, and leave playback state safely empty.
+     * Never clears a playlist the user built in the meantime.
+     */
+    private fun resetToEmptyState(context: Context) {
+        runCatching {
+            context.getSharedPreferences(MUSIC_PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .remove(KEY_STATE_JSON)
+                .apply()
+        }
         synchronized(this) {
-            // Don't clobber a playlist the user already built this session
-            // (e.g. they added tracks while restore was in flight).
-            if (_tracks.value.isNotEmpty()) return
-            _tracks.value = rebuilt
-            val idx = when {
-                currentSaavnId != null ->
-                    rebuilt.indexOfFirst { it.isOnline && it.saavnId == currentSaavnId }
-                currentUri != null ->
-                    rebuilt.indexOfFirst { !it.isOnline && it.uri.toString() == currentUri }
-                else -> 0
-            }.coerceAtLeast(0)
-            _currentIndex.value = idx
-            pendingSeekMs = positionMs.coerceAtLeast(0L)
+            if (_tracks.value.isEmpty()) {
+                _currentIndex.value = -1
+                pendingSeekMs = 0L
+            }
         }
     }
 
@@ -392,55 +450,14 @@ object NanaMusicPlayer {
                 }
 
                 override fun onPlayerError(error: PlaybackException) {
-                    android.util.Log.e("NanaMusicPlayer", "playback error", error)
-                    // Surface the HTTP status when the source was rejected to
-                    // make future diagnosis easier. The message from ExoPlayer
-                    // usually already contains the code.
-                    val httpCode: Int? = generateSequence<Throwable>(error) { it.cause }
-                        .filterIsInstance<androidx.media3.datasource.HttpDataSource.HttpDataSourceException>()
-                        .mapNotNull { ex ->
-                            runCatching {
-                                val field = ex.javaClass.getField("responseCode")
-                                (field.get(ex) as? Int)?.takeIf { code -> code > 0 }
-                            }.getOrNull()
-                        }
-                        .firstOrNull()
-                    _lastError.value = buildString {
-                        append(error.message ?: "Playback error")
-                        if (httpCode != null) append(" (HTTP $httpCode)")
-                    }
-                    // 1.0.36: one automatic retry with a freshly resolved URL.
-                    // JioSaavn CDN URLs can expire mid-playback ("song dies by
-                    // itself"); re-resolving usually brings it back without
-                    // the user having to do anything.
-                    val saavnId = synchronized(this@NanaMusicPlayer) {
-                        currentTrack?.takeIf { it.isOnline }?.saavnId
-                    }?.takeIf { it != lastRetrySaavnId } ?: return
-                    lastRetrySaavnId = saavnId
-                    persistScope.launch {
-                        val freshUrl = try {
-                            NanaSaavnApi.resolveAudioUrl(saavnId)
-                        } catch (e: Exception) {
-                            null
-                        } ?: return@launch
-                        playMutex.withLock {
-                            ensureActive()
-                            val idx = synchronized(this@NanaMusicPlayer) { _currentIndex.value }
-                            val cur = synchronized(this@NanaMusicPlayer) { _tracks.value.getOrNull(idx) }
-                            // Only retry if the user hasn't moved on meanwhile.
-                            if (cur?.saavnId != saavnId) return@withLock
-                            val updated = cur.copy(uri = Uri.parse(freshUrl))
-                            synchronized(this@NanaMusicPlayer) {
-                                _tracks.value = _tracks.value.toMutableList().also { it[idx] = updated }
-                            }
-                            val retryExo = player ?: return@withLock
-                            val pos = retryExo.currentPosition.coerceAtLeast(0L)
-                            retryExo.setMediaItem(MediaItem.fromUri(updated.uri))
-                            retryExo.prepare()
-                            if (pos > 1000L) retryExo.seekTo(pos)
-                            _lastError.value = null
-                            retryExo.play()
-                        }
+                    // 1.0.43: this callback must NEVER crash the app (ExoPlayer
+                    // invokes it on the main thread). All failure handling
+                    // lives in handlePlayerError, itself fully guarded — this
+                    // is one extra net on top.
+                    try {
+                        handlePlayerError(appContext, error)
+                    } catch (t: Throwable) {
+                        runCatching { logCrashToFile(appContext, "onPlayerError", t) }
                     }
                 }
 
@@ -471,22 +488,198 @@ object NanaMusicPlayer {
     }
 
     /**
+     * 1.0.43: hardened playback-error path. Called from the ExoPlayer
+     * listener; never throws (the listener adds one more net on top).
+     * - The technical detail (message + HTTP status when the source was
+     *   rejected) goes to a crash file for diagnostics; the UI gets a
+     *   short, clear message instead of raw exception text.
+     * - Online tracks get ONE automatic retry with a freshly resolved URL
+     *   (JioSaavn CDN URLs can expire mid-playback — "song dies by itself").
+     * - Any other failure skips to the next queued track with a clear
+     *   message; when nothing is left to try, playback stops safely.
+     */
+    private fun handlePlayerError(appContext: Context, error: PlaybackException) {
+        try {
+            // Surface the HTTP status when the source was rejected to make
+            // future diagnosis easier. The message from ExoPlayer usually
+            // already contains the code.
+            val httpCode: Int? = generateSequence<Throwable>(error) { it.cause }
+                .filterIsInstance<androidx.media3.datasource.HttpDataSource.HttpDataSourceException>()
+                .mapNotNull { ex ->
+                    runCatching {
+                        val field = ex.javaClass.getField("responseCode")
+                        (field.get(ex) as? Int)?.takeIf { code -> code > 0 }
+                    }.getOrNull()
+                }
+                .firstOrNull()
+            val failedTitle = (synchronized(this) { currentTrack?.title } ?: "lagu ini")
+                .replace('\n', ' ').take(80)
+            // Technical detail -> crash file (diagnostics). Never the raw
+            // exception text in the UI.
+            logCrashToFile(appContext, "onPlayerError: $failedTitle", error)
+            if (httpCode != null) {
+                android.util.Log.w("NanaMusicPlayer", "playback error HTTP $httpCode for \"$failedTitle\"")
+            }
+
+            // 1.0.36: one automatic retry with a freshly resolved URL.
+            val retrySaavnId = synchronized(this) {
+                currentTrack?.takeIf { it.isOnline }?.saavnId
+            }?.takeIf { it != lastRetrySaavnId }
+
+            if (retrySaavnId != null) {
+                lastRetrySaavnId = retrySaavnId
+                _lastError.value = appContext.getString(R.string.music_err_retrying, failedTitle)
+                persistScope.launch {
+                    try {
+                        val freshUrl = try {
+                            NanaSaavnApi.resolveAudioUrl(retrySaavnId)
+                        } catch (e: Exception) {
+                            logCrashToFile(appContext, "onPlayerError-retry", e)
+                            null
+                        }
+                        // Decide whether to skip only AFTER the mutex is
+                        // released (Mutex is not reentrant — the skip path
+                        // takes it too).
+                        var skipInstead = freshUrl.isNullOrBlank()
+                        if (!skipInstead) {
+                            playMutex.withLock {
+                                ensureActive()
+                                val idx = synchronized(this@NanaMusicPlayer) { _currentIndex.value }
+                                val cur = synchronized(this@NanaMusicPlayer) { _tracks.value.getOrNull(idx) }
+                                val retryExo = synchronized(this@NanaMusicPlayer) { player }
+                                if (cur?.saavnId != retrySaavnId || retryExo == null) {
+                                    // The user moved on, or the player was
+                                    // released meanwhile — don't resurrect it.
+                                    skipInstead = true
+                                } else {
+                                    val updated = cur.copy(uri = Uri.parse(freshUrl!!))
+                                    synchronized(this@NanaMusicPlayer) {
+                                        if (idx in _tracks.value.indices) {
+                                            _tracks.value = _tracks.value.toMutableList()
+                                                .also { list -> list[idx] = updated }
+                                        }
+                                    }
+                                    val pos = retryExo.currentPosition.coerceAtLeast(0L)
+                                    retryExo.setMediaItem(MediaItem.fromUri(updated.uri))
+                                    retryExo.prepare()
+                                    if (pos > 1000L) retryExo.seekTo(pos)
+                                    _lastError.value = null
+                                    retryExo.play()
+                                }
+                            }
+                        }
+                        if (skipInstead) skipToNextAfterError(appContext, failedTitle)
+                    } catch (t: Throwable) {
+                        if (t is CancellationException) throw t
+                        logCrashToFile(appContext, "onPlayerError-retry", t)
+                        try {
+                            skipToNextAfterError(appContext, failedTitle)
+                        } catch (t2: Throwable) {
+                            if (t2 is CancellationException) throw t2
+                            logCrashToFile(appContext, "onPlayerError-skip", t2)
+                        }
+                    }
+                }
+                return
+            }
+
+            // No retry available (local track, or the one retry already
+            // failed): skip the failed track.
+            persistScope.launch {
+                try {
+                    skipToNextAfterError(appContext, failedTitle)
+                } catch (t: Throwable) {
+                    if (t is CancellationException) throw t
+                    logCrashToFile(appContext, "onPlayerError-skip", t)
+                }
+            }
+        } catch (t: Throwable) {
+            // Absolute last net: a playback-error callback must never crash.
+            runCatching { logCrashToFile(appContext, "onPlayerError", t) }
+        }
+    }
+
+    /**
+     * 1.0.43: advance past a failed track — play the next queued track, or
+     * stop safely when none is left. Takes [playMutex]; callers must not
+     * already hold it. Never throws (except coroutine cancellation).
+     */
+    private suspend fun skipToNextAfterError(appContext: Context, failedTitle: String) {
+        playMutex.withLock {
+            ensureActive()
+            val nextIdx = synchronized(this@NanaMusicPlayer) {
+                val cand = _currentIndex.value + 1
+                if (cand in _tracks.value.indices) cand else -1
+            }
+            if (nextIdx >= 0) {
+                _lastError.value = appContext.getString(R.string.music_err_play_failed_next, failedTitle)
+                // playInternal is fully guarded; if it fails too, its own
+                // onPlayerError will advance further — progress is monotonic,
+                // so this always terminates at the end of the queue.
+                playInternal(appContext, nextIdx)
+            } else {
+                // Every track failed (or the queue is empty) — stop safely.
+                val exo = synchronized(this@NanaMusicPlayer) { player }
+                runCatching { exo?.stop() }
+                runCatching { exo?.clearMediaItems() }
+                _lastError.value =
+                    appContext.getString(R.string.music_err_play_failed_end, failedTitle)
+            }
+        }
+    }
+
+    /**
      * 1.0.36: resolve [track] to something ExoPlayer can actually play.
      * Local tracks are returned as-is. Online tracks whose URI is still the
      * restore placeholder get a fresh JioSaavn CDN URL; already-resolved
      * tracks are reused (expiry is handled by the onPlayerError retry).
      * Returns null when the URL cannot be resolved.
+     *
+     * 1.0.43: hardened — the resolve is fully guarded. Blank/missing ids and
+     * blank/unparseable stream URLs return null (with a log entry and a
+     * user-facing message) instead of letting a bad URI reach ExoPlayer.
      */
-    private suspend fun resolvePlayable(track: NanaTrack): NanaTrack? {
+    private suspend fun resolvePlayable(appContext: Context, track: NanaTrack): NanaTrack? {
         if (!track.isOnline) return track
-        val saavnId = track.saavnId ?: return null
+        val saavnId = track.saavnId?.takeIf { it.isNotBlank() }
+        if (saavnId == null) {
+            android.util.Log.w("NanaMusicPlayer", "resolvePlayable: online track \"${track.title}\" has no saavnId")
+            _lastError.value = appContext.getString(R.string.music_err_online_unavailable)
+            return null
+        }
         if (!isPlaceholderUri(track)) return track
         val url = try {
             NanaSaavnApi.resolveAudioUrl(saavnId)
-        } catch (e: Exception) {
+        } catch (t: Throwable) {
+            if (t is CancellationException) throw t
+            logCrashToFile(appContext, "resolvePlayable", t)
             null
-        } ?: return null
-        return track.copy(uri = Uri.parse(url))
+        }
+        if (url.isNullOrBlank()) {
+            // Expired/dead CDN URL or a service hiccup — the caller surfaces
+            // the friendly message; this is worth a diagnostics entry.
+            logCrashToFile(
+                appContext,
+                "resolvePlayable",
+                IllegalStateException("empty stream URL for saavnId=$saavnId"),
+            )
+            _lastError.value = appContext.getString(R.string.music_err_online_unavailable)
+            return null
+        }
+        // Uri.parse itself doesn't throw, but a scheme-less/blank result
+        // would only fail later inside ExoPlayer — reject it here instead.
+        val parsed = runCatching { Uri.parse(url) }.getOrNull()
+            ?.takeIf { it.scheme?.isNotBlank() == true }
+        if (parsed == null) {
+            logCrashToFile(
+                appContext,
+                "resolvePlayable",
+                IllegalStateException("unparseable stream URL for saavnId=$saavnId"),
+            )
+            _lastError.value = appContext.getString(R.string.music_err_online_unavailable)
+            return null
+        }
+        return track.copy(uri = parsed)
     }
 
     /**
@@ -495,51 +688,91 @@ object NanaMusicPlayer {
      * applies any pending restore seek, and plays. Always calls prepare()
      * (the old replace-without-prepare path is what made tapping search
      * results feel unresponsive). Returns false when the track can't play.
+     *
+     * 1.0.43: hardened — never throws (except coroutine cancellation, which
+     * is rethrown so structured concurrency keeps working):
+     * - the index is validated before AND after the (network) resolve,
+     *   because the queue can shrink while we wait — removeTrack racing a
+     *   resolve used to crash on `list[index] = ...`;
+     * - the ExoPlayer instance is re-checked under lock right before use,
+     *   so a concurrent release() can't leave us touching a dead player;
+     * - any unexpected throwable is logged to a crash file and reported as
+     *   a short user-facing message instead of force-closing (an uncaught
+     *   throw here used to escape through serializedPlay's launch).
      */
     private suspend fun playInternal(appContext: Context, index: Int): Boolean {
-        restoreJob?.join()
-        val track = synchronized(this) { _tracks.value.getOrNull(index) } ?: return false
-        val playable = resolvePlayable(track) ?: run {
-            _lastError.value = "Online music temporarily unavailable"
-            return false
-        }
-        if (playable.uri != track.uri) {
+        try {
+            restoreJob?.join()
+            // Guard 1: the index must be valid at entry.
+            val track = synchronized(this) {
+                if (index !in _tracks.value.indices) return false
+                _tracks.value[index]
+            }
+            val playable = resolvePlayable(appContext, track) ?: run {
+                _lastError.value = appContext.getString(R.string.music_err_online_unavailable)
+                return false
+            }
+            // Guard 2: the queue may have changed during the resolve — only
+            // overwrite the entry when the index is still valid and it's
+            // still the same track we resolved.
             synchronized(this) {
-                _tracks.value.getOrNull(index)?.let { cur ->
-                    if (cur.saavnId == playable.saavnId || cur.uri == track.uri) {
-                        _tracks.value = _tracks.value.toMutableList().also { it[index] = playable }
-                    }
+                val cur = _tracks.value.getOrNull(index) ?: return false
+                if (playable.uri != track.uri &&
+                    (cur.saavnId == playable.saavnId || cur.uri == track.uri)
+                ) {
+                    _tracks.value = _tracks.value.toMutableList().also { it[index] = playable }
                 }
             }
+            val exo = ensurePlayer(appContext)
+            // Guard 3: release() may have run while we were resolving — never
+            // touch a player that is no longer the live instance.
+            val liveExo = synchronized(this) { if (player === exo) exo else null }
+                ?: run {
+                    _lastError.value = appContext.getString(R.string.music_err_cannot_play)
+                    return false
+                }
+            // Single-item mode: the queue lives in _tracks; ExoPlayer only ever
+            // holds the current track. This kills the old add/replace races.
+            liveExo.setMediaItem(MediaItem.fromUri(playable.uri))
+            liveExo.prepare()
+            val seekTo = synchronized(this) {
+                _currentIndex.value = index
+                pendingSeekMs.also { pendingSeekMs = 0L }
+            }
+            if (seekTo > 1000L) liveExo.seekTo(seekTo)
+            _lastError.value = null
+            lastRetrySaavnId = null
+            liveExo.play()
+            return true
+        } catch (t: Throwable) {
+            if (t is CancellationException) throw t
+            logCrashToFile(appContext, "playInternal", t)
+            _lastError.value = appContext.getString(R.string.music_err_cannot_play)
+            return false
         }
-        val exo = ensurePlayer(appContext)
-        // Single-item mode: the queue lives in _tracks; ExoPlayer only ever
-        // holds the current track. This kills the old add/replace races.
-        exo.setMediaItem(MediaItem.fromUri(playable.uri))
-        exo.prepare()
-        val seekTo = synchronized(this) {
-            _currentIndex.value = index
-            pendingSeekMs.also { pendingSeekMs = 0L }
-        }
-        if (seekTo > 1000L) exo.seekTo(seekTo)
-        _lastError.value = null
-        lastRetrySaavnId = null
-        exo.play()
-        return true
     }
 
     /**
      * 1.0.36: run [indexProvider] after restore and play the resulting index,
      * serialized against every other play request.
+     *
+     * 1.0.43: the launch body is crash-netted — a throw here used to escape
+     * as an uncaught coroutine exception (force close).
      */
     private fun serializedPlay(context: Context, indexProvider: () -> Int) {
         ensureRestored(context)
         persistScope.launch {
-            playMutex.withLock {
-                ensureActive()
-                restoreJob?.join()
-                val idx = synchronized(this@NanaMusicPlayer) { indexProvider() }
-                if (idx >= 0) playInternal(context.applicationContext, idx)
+            try {
+                playMutex.withLock {
+                    ensureActive()
+                    restoreJob?.join()
+                    val idx = synchronized(this@NanaMusicPlayer) { indexProvider() }
+                    if (idx >= 0) playInternal(context.applicationContext, idx)
+                }
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                logCrashToFile(context.applicationContext, "serializedPlay", t)
+                _lastError.value = context.getString(R.string.music_err_cannot_play)
             }
         }
     }
@@ -553,6 +786,11 @@ object NanaMusicPlayer {
      *   jank/ANR here.
      * - The whole body is crash-netted: any failure surfaces via [lastError]
      *   instead of force-closing the app (member report 1.0.37).
+     *
+     * 1.0.43: per-track hardening — every URI is probed for readability
+     * (catches corrupt files, dead providers, and revoked SAF grants) so one
+     * bad file can't fail the whole batch. Failures are counted and reported
+     * as "X dari Y track gagal ditambahkan".
      */
     fun addTracks(context: Context, uris: List<Uri>) {
         if (uris.isEmpty()) return
@@ -562,28 +800,80 @@ object NanaMusicPlayer {
             runCatching { uri.scheme?.isNotBlank() == true }.getOrDefault(false)
         }
         if (valid.isEmpty()) {
-            _lastError.value = "Couldn't add songs: no valid files selected."
+            _lastError.value = context.getString(R.string.music_err_no_valid_files)
             return
         }
         persistScope.launch {
-            runCatching {
+            try {
                 ensureRestored(appContext)
                 restoreJob?.join()
-                val newTracks = valid.map { uri ->
-                    NanaTrack(uri = uri, title = resolveTitle(appContext, uri))
+                val added = ArrayList<NanaTrack>()
+                var failed = 0
+                for (uri in valid) {
+                    val track = runCatching {
+                        probeTrackReadable(appContext, uri)
+                        NanaTrack(uri = uri, title = resolveTitle(appContext, uri))
+                    }.getOrNull()
+                    if (track != null) {
+                        added.add(track)
+                    } else {
+                        failed++
+                    }
                 }
-                val (startIndex, shouldAutoPlay) = synchronized(this@NanaMusicPlayer) {
-                    val start = _tracks.value.size
-                    _tracks.value = _tracks.value + newTracks
-                    start to (_currentIndex.value < 0 && !_isPlaying.value)
+                if (added.isNotEmpty()) {
+                    val (startIndex, shouldAutoPlay) = synchronized(this@NanaMusicPlayer) {
+                        val start = _tracks.value.size
+                        _tracks.value = _tracks.value + added
+                        start to (_currentIndex.value < 0 && !_isPlaying.value)
+                    }
+                    persistScope.launch { appContextRef?.let { saveState(it) } }
+                    // Auto-start playing the first newly added track when nothing was playing.
+                    if (shouldAutoPlay) serializedPlay(appContext) { startIndex }
                 }
-                persistScope.launch { appContextRef?.let { saveState(it) } }
-                // Auto-start playing the first newly added track when nothing was playing.
-                if (shouldAutoPlay) serializedPlay(appContext) { startIndex }
-            }.onFailure { t ->
+                if (failed > 0) {
+                    // One aggregate log entry per batch (not one per file) so
+                    // the crash folder isn't spammed when many bad files are picked.
+                    logCrashToFile(
+                        appContext,
+                        "addTracks",
+                        IllegalStateException("$failed of ${valid.size} picked tracks unreadable"),
+                    )
+                    _lastError.value =
+                        appContext.getString(R.string.music_err_add_tracks, failed, valid.size)
+                }
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 logCrashToFile(appContext, "addTracks", t)
-                _lastError.value = "Couldn't add songs. Please try again."
+                _lastError.value = context.getString(R.string.music_err_add_failed)
             }
+        }
+    }
+
+    /**
+     * 1.0.43: verify a picked URI is actually readable before it enters the
+     * queue. Throws when the file is corrupt/gone, the provider is dead, or
+     * the persisted SAF read grant was revoked — the caller counts the
+     * failure instead of letting it poison the batch.
+     */
+    private fun probeTrackReadable(context: Context, uri: Uri) {
+        when (uri.scheme?.lowercase(java.util.Locale.US)) {
+            "content" -> {
+                // Throws SecurityException / FileNotFoundException (and
+                // friends) when the grant is gone or the provider can't
+                // serve the file.
+                context.contentResolver.openFileDescriptor(uri, "r")?.close()
+                    ?: throw java.io.FileNotFoundException("unreadable content URI: $uri")
+            }
+            "file" -> {
+                val f = uri.path?.let { java.io.File(it) }
+                    ?: throw java.io.FileNotFoundException("unreadable file URI: $uri")
+                if (!f.isFile || !f.canRead()) {
+                    throw java.io.FileNotFoundException("unreadable file: ${f.path}")
+                }
+            }
+            // Other schemes (http/https, …): nothing cheap to probe — accept
+            // and let playback report any failure per-track.
+            else -> Unit
         }
     }
 

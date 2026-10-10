@@ -15,7 +15,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -471,7 +471,7 @@ object NanaMusicPlayer {
                         val appCtx = appContextRef ?: return
                         persistScope.launch {
                             playMutex.withLock {
-                                ensureActive()
+                                currentCoroutineContext().ensureActive()
                                 val nextIdx = synchronized(this@NanaMusicPlayer) {
                                     val size = _tracks.value.size
                                     val cand = _currentIndex.value + 1
@@ -544,7 +544,7 @@ object NanaMusicPlayer {
                         var skipInstead = freshUrl.isNullOrBlank()
                         if (!skipInstead) {
                             playMutex.withLock {
-                                ensureActive()
+                                currentCoroutineContext().ensureActive()
                                 val idx = synchronized(this@NanaMusicPlayer) { _currentIndex.value }
                                 val cur = synchronized(this@NanaMusicPlayer) { _tracks.value.getOrNull(idx) }
                                 val retryExo = synchronized(this@NanaMusicPlayer) { player }
@@ -607,7 +607,7 @@ object NanaMusicPlayer {
      */
     private suspend fun skipToNextAfterError(appContext: Context, failedTitle: String) {
         playMutex.withLock {
-            ensureActive()
+            currentCoroutineContext().ensureActive()
             val nextIdx = synchronized(this@NanaMusicPlayer) {
                 val cand = _currentIndex.value + 1
                 if (cand in _tracks.value.indices) cand else -1
@@ -765,7 +765,7 @@ object NanaMusicPlayer {
         persistScope.launch {
             try {
                 playMutex.withLock {
-                    ensureActive()
+                    currentCoroutineContext().ensureActive()
                     restoreJob?.join()
                     val idx = synchronized(this@NanaMusicPlayer) { indexProvider() }
                     if (idx >= 0) playInternal(context.applicationContext, idx)

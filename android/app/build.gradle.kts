@@ -76,13 +76,16 @@ android {
 
     signingConfigs {
         create("nanaplay") {
-            // CI override: set NANAPLAY_KEYSTORE_PATH when building on GitHub Actions.
-            // Defaults keep local sandbox builds working exactly as before.
+            // Keystore config via env vars (set in CI secrets / local shell).
+            // No hardcoded credentials in source.
             storeFile = file(System.getenv("NANAPLAY_KEYSTORE_PATH")
-                ?: "/home/hatch/workspace/opennow/keystore/nanaplay.keystore")
-            storePassword = System.getenv("NANAPLAY_KEYSTORE_PASSWORD") ?: "nanaplay2026"
-            keyAlias = System.getenv("NANAPLAY_KEY_ALIAS") ?: "nanaplay"
-            keyPassword = System.getenv("NANAPLAY_KEY_PASSWORD") ?: "nanaplay2026"
+                ?: error("NANAPLAY_KEYSTORE_PATH not set"))
+            storePassword = System.getenv("NANAPLAY_KEYSTORE_PASSWORD")
+                ?: error("NANAPLAY_KEYSTORE_PASSWORD not set")
+            keyAlias = System.getenv("NANAPLAY_KEY_ALIAS")
+                ?: error("NANAPLAY_KEY_ALIAS not set")
+            keyPassword = System.getenv("NANAPLAY_KEY_PASSWORD")
+                ?: error("NANAPLAY_KEY_PASSWORD not set")
         }
     }
 

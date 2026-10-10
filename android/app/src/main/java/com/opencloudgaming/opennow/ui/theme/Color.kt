@@ -11,10 +11,11 @@ import com.opencloudgaming.opennow.StreamQualityLevel
  * `Color(0x..)` literals were scattered inline. Anything that appears more than once belongs here.
  */
 object OpenNowPalette {
-    // Core surfaces
-    val Background = Color(0xff090b0d)
-    val Panel = Color(0xff11161a)
-    val PanelAlt = Color(0xff171d22)
+    // Core surfaces — Neon-Noir Nightscape (1.0.48)
+    // Deep navy/midnight-blue base instead of near-black
+    val Background = Color(0xff0a0f1e)
+    val Panel = Color(0xff111832)
+    val PanelAlt = Color(0xff1a2340)
 
     // Text
     val TextPrimary = Color(0xffeef3f5)
@@ -23,13 +24,18 @@ object OpenNowPalette {
     /** Sits on top of the accent — near-black so bright accents stay legible. */
     val OnAccent = Color(0xff08090c)
 
-    // Accents (mirrors UiAccent in Models.kt)
-    val AccentDefault = Color(0xff1fa2ff)
+    // Accents — Neon-Noir: electric cyan primary, violet secondary
+    val AccentDefault = Color(0xff00e5ff)  // electric cyan
     val AccentPixel = Color(0xff8ab4f8)
     val AccentHotPink = Color(0xffff4fb8)
     val AccentLime = Color(0xffc7ef6b)
     val AccentCoral = Color(0xffff8d7a)
-    val AccentViolet = Color(0xffc7a4ff)
+    val AccentViolet = Color(0xff8b5cf6)  // vibrant violet
+
+    // Neon-Noir aurora washes (for hero areas)
+    val AuroraCyan = Color(0xff00e5ff).copy(alpha = 0.08f)
+    val AuroraViolet = Color(0xff8b5cf6).copy(alpha = 0.06f)
+    val AuroraDeep = Color(0xff1e1b4b).copy(alpha = 0.4f)
 
     // Chrome
     /** Translucent wash behind the top bar so content scrolls under it legibly. */

@@ -3059,6 +3059,19 @@ private fun HomeScreen(
         modifier = Modifier.fillMaxSize(),
     ) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
+            // Neon-Noir aurora wash (1.0.48): subtle cyan/violet gradient at top
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(280.dp)
+                    .background(
+                        androidx.compose.ui.graphics.Brush.verticalGradient(
+                            0f to OpenNowPalette.AuroraCyan,
+                            0.5f to OpenNowPalette.AuroraViolet,
+                            1f to androidx.compose.ui.graphics.Color.Transparent,
+                        )
+                    ),
+            )
             Column(
                 Modifier
                     .fillMaxSize()

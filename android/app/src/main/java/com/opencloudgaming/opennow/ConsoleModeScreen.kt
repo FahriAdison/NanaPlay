@@ -134,6 +134,10 @@ internal fun ConsoleModeScreen(
     }
 
     var selectedIndex by remember { mutableIntStateOf(0) }
+    // Game Hub state (1.0.48): press Down to open game details
+    var showGameHub by remember { mutableStateOf(false) }
+    // Control Center state (1.0.48): quick actions overlay
+    var showControlCenter by remember { mutableStateOf(false) }
     LaunchedEffect(games) {
         if (selectedIndex >= games.size) selectedIndex = 0
     }
@@ -184,11 +188,24 @@ internal fun ConsoleModeScreen(
                 if (event.type != KeyEventType.KeyDown || games.isEmpty()) return@onPreviewKeyEvent false
                 when (event.key) {
                     Key.DirectionLeft, Key.DirectionUp -> {
-                        selectedIndex = (selectedIndex - 1).coerceAtLeast(0)
+                        if (showGameHub) {
+                            showGameHub = false
+                        } else {
+                            selectedIndex = (selectedIndex - 1).coerceAtLeast(0)
+                        }
                         true
                     }
-                    Key.DirectionRight, Key.DirectionDown -> {
+                    Key.DirectionRight -> {
                         selectedIndex = (selectedIndex + 1).coerceAtMost(games.size - 1)
+                        true
+                    }
+                    Key.DirectionDown -> {
+                        // PS5-style: Down opens Game Hub
+                        if (!showGameHub && selectedGame != null) {
+                            showGameHub = true
+                        } else {
+                            selectedIndex = (selectedIndex + 1).coerceAtMost(games.size - 1)
+                        }
                         true
                     }
                     Key.Enter, Key.NumPadEnter, Key.DirectionCenter -> {
@@ -242,9 +259,18 @@ internal fun ConsoleModeScreen(
             // PS5-style top header: time + quick actions (1.0.47)
             ConsoleTopHeader(
                 onSearchClick = { onConsoleSearchQueryChange("") /* trigger search */ },
+                onControlCenterClick = { showControlCenter = true },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = if (isLandscape) 4.dp else 8.dp),
+            )
+            // PS5-style ribbon tabs (1.0.48): quick page switching
+            ConsoleRibbon(
+                currentPage = page,
+                onTabSelected = { viewModel.setPage(it) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
             )
             if (showSearch) {
                     NativeSearchField(
@@ -413,6 +439,159 @@ internal fun ConsoleModeScreen(
                 Spacer(Modifier.height(if (isLandscape) 6.dp else 12.dp))
             }
         }
+
+        // Game Hub overlay (1.0.48): PS5-style detail view on Down press
+        if (showGameHub && selectedGame != null) {
+            val hubGame = selectedGame!!
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.75f))
+                    .clickable { showGameHub = false },
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(
+                    Modifier
+                        .fillMaxWidth(0.9f)
+                        .background(OpenNowPalette.Panel, RoundedCornerShape(16.dp))
+                        .border(1.dp, OpenNowPalette.AccentDefault.copy(alpha = 0.3f), RoundedCornerShape(16.dp))
+                        .padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        hubGame.title,
+                        color = OpenNowPalette.TextPrimary,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    val meta = buildList {
+                        hubGame.publisherName?.takeIf { it.isNotBlank() }?.let(::add)
+                        addAll(hubGame.genres.take(3).map { it.trim() }.filter { it.isNotBlank() })
+                    }.joinToString("  •  ")
+                    if (meta.isNotBlank()) {
+                        Text(
+                            meta,
+                            color = OpenNowPalette.TextMuted,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                    hubGame.description?.takeIf { it.isNotBlank() }?.let { desc ->
+                        Text(
+                            desc,
+                            color = OpenNowPalette.TextPrimary.copy(alpha = 0.85f),
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 4,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Button(
+                            onClick = {
+                                showGameHub = false
+                                viewModel.play(hubGame)
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = OpenNowPalette.AccentDefault,
+                                contentColor = OpenNowPalette.OnAccent,
+                            ),
+                        ) {
+                            Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Play", fontWeight = FontWeight.Bold)
+                        }
+                        TextButton(onClick = { showGameHub = false }) {
+                            Text("Close", color = OpenNowPalette.TextMuted)
+                        }
+                    }
+                    Text(
+                        "↑ Back to browse",
+                        color = OpenNowPalette.TextMuted.copy(alpha = 0.6f),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        }
+
+        // Control Center overlay (1.0.48): PS5-style quick actions
+        if (showControlCenter) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.7f))
+                    .clickable { showControlCenter = false },
+                contentAlignment = Alignment.BottomCenter,
+            ) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(
+                            OpenNowPalette.Panel,
+                            RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+                        )
+                        .border(
+                            1.dp,
+                            OpenNowPalette.AccentDefault.copy(alpha = 0.25f),
+                            RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+                        )
+                        .padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    Text(
+                        "Control Center",
+                        color = OpenNowPalette.TextPrimary,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    // Quick action rows
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                    ) {
+                        ControlCenterButton(
+                            icon = androidx.compose.material.icons.Icons.Filled.Home,
+                            label = "Home",
+                            onClick = {
+                                showControlCenter = false
+                                viewModel.setPage(AppPage.Home)
+                            }
+                        )
+                        ControlCenterButton(
+                            icon = androidx.compose.material.icons.Icons.Filled.CollectionsBookmark,
+                            label = "Library",
+                            onClick = {
+                                showControlCenter = false
+                                viewModel.setPage(AppPage.Library)
+                            }
+                        )
+                        ControlCenterButton(
+                            icon = androidx.compose.material.icons.Icons.Filled.MusicNote,
+                            label = "Music",
+                            onClick = {
+                                showControlCenter = false
+                                viewModel.setPage(AppPage.Music)
+                            }
+                        )
+                        ControlCenterButton(
+                            icon = androidx.compose.material.icons.Icons.Filled.Settings,
+                            label = "Settings",
+                            onClick = {
+                                showControlCenter = false
+                                viewModel.setPage(AppPage.Settings)
+                            }
+                        )
+                    }
+                    TextButton(
+                        onClick = { showControlCenter = false },
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    ) {
+                        Text("Close", color = OpenNowPalette.TextMuted)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -422,8 +601,95 @@ private fun consoleBackgroundUrl(game: GameInfo): String? =
         ?: game.imageUrl?.takeIf { it.isNotBlank() }
 
 @Composable
+private fun ControlCenterButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(
+            Modifier
+                .size(56.dp)
+                .background(OpenNowPalette.PanelAlt, androidx.compose.foundation.shape.CircleShape)
+                .border(
+                    1.dp,
+                    OpenNowPalette.AccentDefault.copy(alpha = 0.3f),
+                    androidx.compose.foundation.shape.CircleShape
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = OpenNowPalette.AccentDefault,
+                modifier = Modifier.size(26.dp),
+            )
+        }
+        Text(
+            label,
+            color = OpenNowPalette.TextPrimary.copy(alpha = 0.85f),
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+}
+
+@Composable
+private fun ConsoleRibbon(
+    currentPage: AppPage,
+    onTabSelected: (AppPage) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    // PS5 2026-style ribbon: icon tabs for main sections
+    val tabs = listOf(
+        AppPage.Home to androidx.compose.material.icons.Icons.Filled.Home,
+        AppPage.Library to androidx.compose.material.icons.Icons.Filled.CollectionsBookmark,
+        AppPage.Music to androidx.compose.material.icons.Icons.Filled.MusicNote,
+        AppPage.Settings to androidx.compose.material.icons.Icons.Filled.Settings,
+    )
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        tabs.forEach { (tabPage, icon) ->
+            val selected = tabPage == currentPage
+            IconButton(
+                onClick = { if (!selected) onTabSelected(tabPage) },
+                modifier = Modifier
+                    .size(44.dp)
+                    .background(
+                        if (selected) OpenNowPalette.AccentDefault.copy(alpha = 0.18f)
+                        else androidx.compose.ui.graphics.Color.Transparent,
+                        androidx.compose.foundation.shape.CircleShape,
+                    )
+                    .border(
+                        1.dp,
+                        if (selected) OpenNowPalette.AccentDefault
+                        else OpenNowPalette.TextPrimary.copy(alpha = 0.15f),
+                        androidx.compose.foundation.shape.CircleShape,
+                    ),
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = tabPage.name,
+                    tint = if (selected) OpenNowPalette.AccentDefault
+                           else OpenNowPalette.TextPrimary.copy(alpha = 0.7f),
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun ConsoleTopHeader(
     onSearchClick: () -> Unit,
+    onControlCenterClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // PS5-style: compact overlay header — live clock + search
@@ -456,6 +722,14 @@ private fun ConsoleTopHeader(
             Icon(
                 painter = painterResource(R.drawable.ic_search),
                 contentDescription = "Search",
+                tint = OpenNowPalette.TextPrimary.copy(alpha = 0.75f),
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        IconButton(onClick = onControlCenterClick, modifier = Modifier.size(36.dp)) {
+            Icon(
+                imageVector = androidx.compose.material.icons.Icons.Filled.Tune,
+                contentDescription = "Control Center",
                 tint = OpenNowPalette.TextPrimary.copy(alpha = 0.75f),
                 modifier = Modifier.size(20.dp),
             )

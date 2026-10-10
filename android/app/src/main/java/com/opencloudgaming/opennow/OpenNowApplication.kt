@@ -20,9 +20,9 @@ class OpenNowApplication : Application() {
 
     override fun attachBaseContext(base: Context) {
         // Apply the user's chosen app language before any resource is loaded.
-        // `base` (not `this`) must be used here: the base context is the only
-        // functional Context before super.attachBaseContext() runs.
-        val localized = AppLocale.applyAppLocale(base, SettingsStore(base).settings.value)
+        // Uses applyAppLocaleSafe: SettingsStore is not safe here (it touches
+        // PackageManager during attachBaseContext which crashes on launch).
+        val localized = AppLocale.applyAppLocaleSafe(base)
         super.attachBaseContext(localized)
     }
 

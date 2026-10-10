@@ -55,7 +55,8 @@ class MainActivity : ComponentActivity() {
     override fun attachBaseContext(newBase: Context) {
         // Wrap with the user's chosen app language so every resource loaded by
         // this activity (layouts, stringResource, dialogs) uses it.
-        super.attachBaseContext(AppLocale.applyAppLocale(newBase, SettingsStore(newBase).settings.value))
+        // Uses applyAppLocaleSafe: SettingsStore is not safe during attachBaseContext.
+        super.attachBaseContext(AppLocale.applyAppLocaleSafe(newBase))
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

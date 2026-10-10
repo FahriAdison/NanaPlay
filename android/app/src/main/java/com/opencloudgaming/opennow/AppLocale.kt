@@ -53,4 +53,26 @@ object AppLocale {
     /** Convenience overload that reads the language straight from settings. */
     fun applyAppLocale(base: Context, settings: AppSettings): Context =
         applyAppLocale(base, getAppLanguage(settings))
+
+    /**
+     * Safe for use in attachBaseContext: reads the stored language directly from
+     * SharedPreferences without initializing SettingsStore (which touches
+     * PackageManager/resources that aren't ready during attachBaseContext).
+     * Any failure falls back to English.
+     */
+    fun applyAppLocaleSafe(base: Context): Context =
+        applyAppLocale(base, readStoredLanguage(base))
+
+    private fun readStoredLanguage(base: Context): String {
+        return try {
+            val prefs = base.getSharedPreferences("opennow_native", Context.MODE_PRIVATE)
+            val json = prefs.getString("settings", null) ?: return LANGUAGE_ENGLISH
+            // Minimal parse: find "appLanguage":"xx" without full JSON deserialization
+            val match = Regex("\"appLanguage\"\\s*:\\s*\"([^\"]+)\"").find(json)
+            val lang = match?.groupValues?.get(1)
+            if (lang == LANGUAGE_INDONESIAN) LANGUAGE_INDONESIAN else LANGUAGE_ENGLISH
+        } catch (_: Exception) {
+            LANGUAGE_ENGLISH
+        }
+    }
 }

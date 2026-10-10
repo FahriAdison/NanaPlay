@@ -239,6 +239,13 @@ internal fun ConsoleModeScreen(
         // column — including the field's clear button — trapping the user in
         // the empty state with no way to clear the query.
         Column(Modifier.fillMaxSize()) {
+            // PS5-style top header: time + quick actions (1.0.47)
+            ConsoleTopHeader(
+                onSearchClick = { onConsoleSearchQueryChange("") /* trigger search */ },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = if (isLandscape) 4.dp else 8.dp),
+            )
             if (showSearch) {
                     NativeSearchField(
                         query = searchQuery,
@@ -413,6 +420,43 @@ private fun consoleBackgroundUrl(game: GameInfo): String? =
     game.tvBannerUrl?.takeIf { it.isNotBlank() }
         ?: game.screenshotUrl?.takeIf { it.isNotBlank() }
         ?: game.imageUrl?.takeIf { it.isNotBlank() }
+
+@Composable
+private fun ConsoleTopHeader(
+    onSearchClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    // PS5-style: time on left, quick actions on right
+    val timeText = remember {
+        val fmt = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+        fmt.format(java.util.Date())
+    }
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = timeText,
+            color = OpenNowPalette.TextPrimary.copy(alpha = 0.9f),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onSearchClick, modifier = Modifier.size(40.dp)) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_search),
+                    contentDescription = "Search",
+                    tint = OpenNowPalette.TextPrimary.copy(alpha = 0.85f),
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
+    }
+}
 
 @Composable
 private fun ConsoleGenreChip(

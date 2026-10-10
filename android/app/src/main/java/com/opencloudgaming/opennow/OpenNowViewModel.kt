@@ -1639,11 +1639,11 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 showPrintedWasteSelector(game)
                 return@launch
             }
-            val requestedSettings = streamSettingsBeforeDeviceAdjustment()
+            val requestedSettings = streamSettingsBeforeDeviceAdjustment(game.id)
             val settings = requestedSettings.adjustedForDevice(state.value.codecReport)
             prepareSessionReport(
                 gameTitle = game.title,
-                selectedSettings = state.value.settings.stream,
+                selectedSettings = state.value.settings.streamSettingsFor(game.id),
                 eligibleSettings = requestedSettings,
                 initialSettings = settings,
             )
@@ -2151,8 +2151,8 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             val pendingSession = pending.activeSession.toPendingSession(zone = "prod")
             prepareSessionReport(
                 gameTitle = gameForActiveSession(pending.activeSession)?.title ?: pending.game.title,
-                selectedSettings = state.value.settings.stream,
-                eligibleSettings = streamSettingsBeforeDeviceAdjustment(),
+                selectedSettings = state.value.settings.streamSettingsFor(pending.game.id),
+                eligibleSettings = streamSettingsBeforeDeviceAdjustment(pending.game.id),
                 initialSettings = resumeSettings,
             )
             _state.update {
@@ -2244,9 +2244,10 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     game.variants.any { variant -> variant.id == active.appId.toString() }
             }
 
-    private fun streamSettingsBeforeDeviceAdjustment(): StreamSettings {
+    private fun streamSettingsBeforeDeviceAdjustment(gameId: String? = null): StreamSettings {
         val snapshot = state.value
-        return snapshot.settings.stream
+        val base = if (gameId != null) snapshot.settings.streamSettingsFor(gameId) else snapshot.settings.stream
+        return base
             .withResolutionAllowed(snapshot.subscriptionInfo, snapshot.authSession?.user?.membershipTier)
             .withFpsAllowed(snapshot.subscriptionInfo, snapshot.authSession?.user?.membershipTier)
             .withHdrAllowed(snapshot.subscriptionInfo, snapshot.authSession?.user?.membershipTier)

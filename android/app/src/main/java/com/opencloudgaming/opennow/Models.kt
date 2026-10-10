@@ -366,6 +366,14 @@ data class AppSettings(
     val quickAccessFabY: Float = 0.45f,
     /** Visibility of the combined quick-access status bar during streams. */
     val quickAccessBarVisible: Boolean = true,
+    /** App UI language: "en" (default) or "in" (Bahasa Indonesia). Added in 1.0.43. */
+    val appLanguage: String = "en",
+    /**
+     * Per-game stream settings overrides, keyed by game ID. When launching a game,
+     * the stored StreamSettings for that game ID replace the global stream settings.
+     * Added in 1.0.43.
+     */
+    val perGameSettings: Map<String, StreamSettings> = emptyMap(),
 )
 
 internal const val MIN_GAME_CARD_SCALE = 0.75f

@@ -1,4 +1,5 @@
 package com.opencloudgaming.opennow
+import com.papahchan.nanaplay.R
 
 import android.content.Context
 import android.net.Uri

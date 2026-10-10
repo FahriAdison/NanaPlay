@@ -732,13 +732,6 @@ private fun SettingsContent(
                     viewModel.updateStreamSettings { s -> s.copy(persistentReconnect = enabled) }
                 }
                 SettingSwitch(
-                    label = stringResource(R.string.settings_dynamic_network_adjustment),
-                    checked = settings.stream.experimentalDynamicNetworkAdjustment,
-                    description = stringResource(R.string.settings_dynamic_network_adjustment_desc),
-                ) { enabled ->
-                    viewModel.updateStreamSettings { s -> s.copy(experimentalDynamicNetworkAdjustment = enabled) }
-                }
-                SettingSwitch(
                     label = stringResource(R.string.settings_native_streamer),
                     checked = settings.nativeLowLatencyDecoder,
                     description = stringResource(R.string.settings_native_streamer_desc),

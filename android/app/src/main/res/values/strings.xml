@@ -682,6 +682,4 @@
     <string name="toast_app_id_copied">App ID copied</string>
     <string name="store_not_owned">Not owned</string>
     <string name="store_owned_on_store">Owned on %1$s</string>
-    <string name="settings_dynamic_network_adjustment">Adjust for network conditions</string>
-    <string name="settings_dynamic_network_adjustment_desc">Lets the server lower stream resolution when the connection degrades. Your selected FPS remains the target. Applies to new sessions.</string>
 </resources>

@@ -187,7 +187,6 @@ data class StreamSettings(
     val microphoneDeviceId: String = "",
     val mouseScrollSensitivity: Int = 30,
     val persistentReconnect: Boolean = false,
-    val experimentalDynamicNetworkAdjustment: Boolean = false,
 )
 
 internal fun StreamSettings.withMicrophoneSettingsFrom(source: StreamSettings): StreamSettings =

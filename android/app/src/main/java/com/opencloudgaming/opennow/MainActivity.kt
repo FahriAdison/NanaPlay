@@ -2,6 +2,7 @@ package com.opencloudgaming.opennow
 
 import android.Manifest
 import android.app.PictureInPictureParams
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
@@ -50,6 +51,12 @@ class MainActivity : ComponentActivity() {
     private var phoneStreamOrientationLocked = false
     private var streamPictureInPictureReady = false
     private var streamPictureInPictureAspectRatio = Rational(16, 9)
+
+    override fun attachBaseContext(newBase: Context) {
+        // Wrap with the user's chosen app language so every resource loaded by
+        // this activity (layouts, stringResource, dialogs) uses it.
+        super.attachBaseContext(AppLocale.applyAppLocale(newBase, SettingsStore(newBase).settings.value))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

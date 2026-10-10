@@ -1,6 +1,7 @@
 package com.opencloudgaming.opennow
 
 import android.app.Application
+import android.content.Context
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import kotlinx.coroutines.CoroutineScope
@@ -16,6 +17,14 @@ class OpenNowApplication : Application() {
     internal val authStore by lazy { AuthStore(this) }
     internal val authRepository by lazy { GfnAuthRepository(this, authStore, httpClient) }
     internal val localTvConnector by lazy { LocalTvConnector() }
+
+    override fun attachBaseContext(base: Context) {
+        // Apply the user's chosen app language before any resource is loaded.
+        // `base` (not `this`) must be used here: the base context is the only
+        // functional Context before super.attachBaseContext() runs.
+        val localized = AppLocale.applyAppLocale(base, SettingsStore(base).settings.value)
+        super.attachBaseContext(localized)
+    }
 
     override fun onCreate() {
         super.onCreate()

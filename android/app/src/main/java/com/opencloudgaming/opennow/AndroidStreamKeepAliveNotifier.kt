@@ -241,10 +241,10 @@ private fun ensureStreamNotificationChannel(context: Context) {
     val notificationManager = context.applicationContext.getSystemService(NotificationManager::class.java)
     val channel = NotificationChannel(
         STREAM_CHANNEL_ID,
-        "Active stream",
+        context.getString(R.string.notif_stream_channel_name),
         NotificationManager.IMPORTANCE_LOW,
     ).apply {
-        description = "Keeps an active NanaPlay stream connected while the screen is off."
+        description = context.getString(R.string.notif_stream_channel_desc)
         lockscreenVisibility = Notification.VISIBILITY_PUBLIC
         setShowBadge(false)
     }
@@ -273,7 +273,7 @@ private fun buildStreamNotification(context: Context, title: String): Notificati
     return builder
         .setSmallIcon(R.drawable.ic_tab_stream)
         .setContentTitle(title)
-        .setContentText("Streaming continues while the screen is off")
+        .setContentText(appContext.getString(R.string.notif_stream_text))
         .setSubText("NanaPlay")
         .setCategory(Notification.CATEGORY_TRANSPORT)
         .setVisibility(Notification.VISIBILITY_PUBLIC)

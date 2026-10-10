@@ -2,6 +2,7 @@ package com.opencloudgaming.opennow
 import com.papahchan.nanaplay.R
 
 import android.Manifest
+import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -160,6 +161,12 @@ private val keyboardLayoutOptions = listOf(
     SettingsChoiceOption("ko-KR", "Korean"),
     SettingsChoiceOption("zh-CN", "Chinese (Simplified)"),
     SettingsChoiceOption("zh-TW", "Chinese (Traditional)"),
+)
+
+/** App interface language options. Labels stay in their own language by convention. */
+private val appLanguageOptions = listOf(
+    SettingsChoiceOption(AppLocale.LANGUAGE_ENGLISH, "English"),
+    SettingsChoiceOption(AppLocale.LANGUAGE_INDONESIAN, "Bahasa Indonesia"),
 )
 
 private val gameLanguageOptions = listOf(
@@ -462,6 +469,20 @@ private fun SettingsContent(
         }
     }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    CategorySettingsSection(selectedCategory, SettingsCategory.General, searchQuery, stringResource(R.string.settings_app_language), "language", "bahasa", "app language", "locale", "indonesia", "english") {
+                val activity = context as? Activity
+                ChoiceOptionRow(
+                    label = stringResource(R.string.settings_app_language),
+                    options = appLanguageOptions,
+                    selectedValue = AppLocale.getAppLanguage(settings),
+                ) { language ->
+                    if (language == AppLocale.getAppLanguage(settings)) return@ChoiceOptionRow
+                    viewModel.updateSettings(settings.copy(appLanguage = language))
+                    // Recreate so every resource (including the settings list
+                    // itself) reloads with the new locale.
+                    activity?.recreate()
+                }
+            }
     CategorySettingsSection(selectedCategory, SettingsCategory.General, searchQuery, "App updates", "update", "updates", "disable update checking", "checking", "check", "download", "install", "apk") {
                 if (state.androidUpdate.apkUpdatesAllowed) {
                     SettingSwitch(stringResource(R.string.settings_disable_update_checking), !settings.autoCheckForUpdates) { disabled ->

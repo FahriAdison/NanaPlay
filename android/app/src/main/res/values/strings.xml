@@ -230,6 +230,11 @@
     <string name="store_selector_default_launch_notice">Proceeding with default store: %1$s</string>
     <string name="store_selector_long_press_tip">Tip: long press Play to choose a different store later.</string>
     <string name="store_selector_play_long_press">Long press Play to choose a store</string>
+    <string name="game_settings_save_default">Save as default for this game</string>
+    <string name="game_settings_saved">Settings saved for this game</string>
+    <string name="game_settings_custom">Custom settings</string>
+    <string name="game_settings_reset">Reset to global</string>
+    <string name="game_settings_reset_done">Back to global settings</string>
     <string name="settings_section_stream">Stream</string>
     <string name="settings_section_interface">Interface</string>
     <string name="settings_section_nerd_tools">Advanced tools</string>
@@ -341,4 +346,340 @@
     <string name="stream_screenshot_saved">Screenshot saved</string>
     <string name="stream_screenshot_unavailable">Screenshots are available once the stream is showing video; HDR streams are not supported yet.</string>
     <string name="stream_screenshot_failed">Could not save the screenshot.</string>
+
+    <!-- App language (NanaPlay 1.0.43) -->
+    <string name="settings_app_language">App language</string>
+
+    <!-- In-app browser -->
+    <string name="browser_address_hint">Enter URL</string>
+
+    <!-- App data (cache / reset dialogs) -->
+    <string name="settings_appdata_clear_cache_title">Clear game cache?</string>
+    <string name="settings_appdata_clear_cache_body">Cached store, library, and search results will be removed. Your account and settings stay unchanged.</string>
+    <string name="settings_appdata_clear_cache_button">Clear cache</string>
+    <string name="settings_appdata_reset_title">Reset settings and app data?</string>
+    <string name="settings_appdata_reset_body">Accounts, settings, cached games, tutorial state, and local app files will be removed. NanaPlay will relaunch like a fresh install.</string>
+    <string name="settings_appdata_reset_confirm">Reset and relaunch</string>
+    <string name="settings_appdata_reset_tutorial">Reset tutorial</string>
+    <string name="settings_appdata_reset_settings">Reset settings</string>
+    <string name="settings_appdata_reset_note">Reset tutorial only makes the stream guide appear again. Reset settings is destructive: it clears local app data and relaunches NanaPlay.</string>
+
+    <!-- Android update panel -->
+    <string name="update_button_check">Check</string>
+    <string name="update_button_checking">Checking...</string>
+    <string name="update_button_update">Update</string>
+    <string name="update_button_download">Download</string>
+    <string name="update_button_install">Install</string>
+    <string name="update_status_available">Update available</string>
+    <string name="update_status_downloading">Downloading update</string>
+    <string name="update_status_downloaded">Ready to install</string>
+    <string name="update_status_up_to_date">NanaPlay is up to date</string>
+    <string name="update_status_checking">Checking for updates</string>
+    <string name="update_status_error">Update check failed</string>
+    <string name="update_status_idle">App updates</string>
+    <string name="update_subtitle_version_available">Version %1$s is available.</string>
+    <string name="update_subtitle_new_build">A new build is available.</string>
+    <string name="update_subtitle_keep_open">Keep NanaPlay open while the APK downloads.</string>
+    <string name="update_subtitle_downloaded_version">Version %1$s has been downloaded.</string>
+    <string name="update_subtitle_downloaded">The update has been downloaded.</string>
+    <string name="update_subtitle_checking_play">Checking Google Play.</string>
+    <string name="update_subtitle_checking_source">Contacting the update source.</string>
+    <string name="update_checks_off">Automatic checks are off.</string>
+    <string name="update_checks_paused">Checks pause while streaming.</string>
+    <string name="update_unavailable_play_title">Updates managed by Google Play</string>
+    <string name="update_unavailable_apk_title">APK updates unavailable</string>
+    <string name="update_badge_play">PLAY</string>
+    <string name="update_badge_locked">LOCKED</string>
+    <string name="update_info_current">Current</string>
+    <string name="update_info_available">Available</string>
+    <string name="update_info_source">Source</string>
+    <string name="update_last_checked">Last checked %1$s</string>
+    <string name="update_release_notes">Release notes</string>
+    <string name="update_progress_downloading">Downloading</string>
+    <string name="update_ready_title">Update ready</string>
+    <string name="update_ready_downloading">Downloading NanaPlay</string>
+    <string name="update_ready_available">NanaPlay update available</string>
+    <string name="update_ready_version">Version %1$s is ready for this device.</string>
+
+    <!-- Accounts -->
+    <string name="account_badge_active">Active</string>
+    <string name="account_switch">Switch</string>
+    <string name="account_add">Add account</string>
+    <string name="account_sign_out">Sign out</string>
+    <string name="account_sign_out_all">Sign out all accounts</string>
+    <string name="account_provider_title">Choose provider</string>
+    <string name="account_provider_body">Select the GeForce NOW provider to use for the new account.</string>
+    <string name="account_provider_selected">Selected</string>
+
+    <!-- Play time stats -->
+    <string name="playtime_title">Play time stats</string>
+    <string name="playtime_session">Session</string>
+    <string name="playtime_mode_countdown">countdown</string>
+    <string name="playtime_mode_stopwatch">stopwatch</string>
+    <string name="playtime_monthly_left">Monthly left</string>
+    <string name="playtime_of_value">of %1$s</string>
+    <string name="playtime_paid_plans">paid plans</string>
+    <string name="playtime_refresh_account">refresh account</string>
+    <string name="playtime_used_value">%1$s used</string>
+    <string name="playtime_progress_value">%1$s of %2$s</string>
+    <string name="playtime_paid_note">Paid plans show monthly play-time usage here when NVIDIA reports it.</string>
+    <string name="playtime_refresh_note">Refresh Account settings after sign-in to load monthly play-time usage.</string>
+
+    <!-- Cloud storage -->
+    <string name="storage_title">Cloud storage</string>
+    <string name="storage_no_addon">No persistent storage add-on is active for this account.</string>
+    <string name="storage_add">Add storage</string>
+    <string name="storage_total">Total %1$s</string>
+    <string name="storage_used">Used %1$s</string>
+    <string name="storage_available">Available %1$s</string>
+    <string name="storage_usage_title">Storage usage</string>
+    <string name="storage_location">Location: %1$s</string>
+    <string name="storage_manage">Manage</string>
+    <string name="storage_reset">Reset</string>
+    <string name="storage_change_location">Change storage location</string>
+
+    <!-- Game store connectors -->
+    <string name="connector_disconnect_title">Disconnect %1$s?</string>
+    <string name="connector_disconnect_body">This removes the linked %1$s account from GeForce NOW. You can connect it again later.</string>
+    <string name="connector_disconnect_button">Disconnect</string>
+    <string name="connector_section_title">Game store connections</string>
+    <string name="connector_refreshing">Refreshing...</string>
+    <string name="connector_refresh">Refresh</string>
+    <string name="connector_loading">Loading connected stores...</string>
+    <string name="connector_empty_body">Connect Steam, Epic, Xbox, and other supported stores to sync your GeForce NOW library.</string>
+    <string name="connector_help">Connection help</string>
+
+    <!-- About -->
+    <string name="about_app_title">NanaPlay Android</string>
+    <string name="about_version">Version %1$s</string>
+    <string name="about_build">Build %1$s</string>
+    <string name="about_repo_title">NanaPlay Repository</string>
+    <string name="about_repo_owner">FahriAdison</string>
+    <string name="about_github_button">GitHub</string>
+    <string name="about_developer_role">Developer</string>
+    <string name="about_github_copied">GitHub link copied</string>
+
+    <!-- Diagnostics / logs -->
+    <string name="logs_export_description">Exports launch state, queue state, stream updates, recovery events, settings, codec capabilities, and recent sanitized CloudMatch JSON responses.</string>
+    <string name="logs_upload_qr">Upload logs and show QR</string>
+    <string name="logs_upload_note">Sensitive values are removed before an unlisted, temporary paste is created. Scan the QR code with your phone to share it.</string>
+    <string name="logs_copy">Copy logs</string>
+    <string name="logs_copied">Copied logs</string>
+    <string name="logs_export">Export logs</string>
+    <string name="logs_exported">Exported</string>
+    <string name="logs_copy_error">Copy error</string>
+    <string name="logs_save_failed">Could not save logs</string>
+
+    <!-- Battery optimization -->
+    <string name="battery_description">Android battery optimization restricts the app\'s background activity, which can cause connection timeouts or pause GFN queue progress when the app is minimized.</string>
+    <string name="battery_title">Background activity</string>
+    <string name="battery_unlimited">Unlimited (Allowed in background)</string>
+    <string name="battery_optimized">Optimized (May timeout in background)</string>
+    <string name="battery_allow">Allow</string>
+
+    <!-- System notifications -->
+    <string name="notif_queue_channel_name">Queue status</string>
+    <string name="notif_queue_channel_desc">Shows NanaPlay queue and session startup progress.</string>
+    <string name="notif_queue_ready_channel_name">Queue ready alert</string>
+    <string name="notif_queue_ready_channel_desc">Alerts when a GFN queue finishes and the game is about to launch.</string>
+    <string name="notif_queue_ready_title">%1$s is ready to play!</string>
+    <string name="notif_queue_ready_text">Your GFN queue is done. Tap to return to the app.</string>
+    <string name="notif_stream_channel_name">Active stream</string>
+    <string name="notif_stream_channel_desc">Keeps an active NanaPlay stream connected while the screen is off.</string>
+    <string name="notif_stream_text">Streaming continues while the screen is off</string>
+
+    <!-- Update status badges -->
+    <string name="update_badge_new">NEW</string>
+    <string name="update_badge_downloading">DOWNLOADING</string>
+    <string name="update_badge_ready">READY</string>
+    <string name="update_badge_current">CURRENT</string>
+    <string name="update_badge_checking">CHECKING</string>
+    <string name="update_badge_error">ERROR</string>
+    <string name="update_badge_idle">IDLE</string>
+
+    <!-- Browser / account fallbacks -->
+    <string name="browser_unavailable">No browser available</string>
+    <string name="account_fallback_name">NVIDIA Account</string>
+
+    <!-- Connector rows -->
+    <string name="connector_removing">Removing...</string>
+    <string name="connector_opening">Opening...</string>
+    <string name="connector_connect">Connect</string>
+    <string name="connector_required">Required for some games</string>
+    <string name="connector_available">Available to connect</string>
+    <string name="connector_synced_games">%1$d synced games</string>
+    <string name="connector_connected">Connected</string>
+
+    <!-- Codec diagnostics -->
+    <string name="codec_chip_realtime_decoders">real-time decoders</string>
+    <string name="codec_chip_device_profile">device profile</string>
+    <string name="codec_chip_shell">shell</string>
+    <string name="codec_profile_low_power">Low power</string>
+    <string name="codec_profile_standard">Standard</string>
+    <string name="codec_shell_tv">TV</string>
+    <string name="codec_shell_mobile">Mobile</string>
+    <string name="codec_status_ready">Ready</string>
+    <string name="codec_status_webrtc">WebRTC ready</string>
+    <string name="codec_status_platform">Platform only</string>
+    <string name="codec_status_unavailable">Unavailable</string>
+    <string name="codec_webrtc_decoder">WebRTC: %1$s</string>
+    <string name="codec_hardware_decode">Hardware decode %1$s - native %2$s - platform %3$s</string>
+    <string name="codec_yes">yes</string>
+    <string name="codec_no">no</string>
+    <string name="codec_diagnostics_header">NanaPlay Android codec diagnostics</string>
+    <!-- NanaPlay 1.0.43: music player error messages (localizable) -->
+    <string name="music_err_generic">Something went wrong (%1$s). Please try again.</string>
+    <string name="music_err_restore_failed">Failed to restore last playlist.</string>
+    <string name="music_err_retrying">Retrying: %1$s…</string>
+    <string name="music_err_play_failed_next">Couldn\'t play: %1$s, skipping to next</string>
+    <string name="music_err_play_failed_end">Couldn\'t play: %1$s. No more songs to play.</string>
+    <string name="music_err_cannot_play">Can\'t play this song. Try again.</string>
+    <string name="music_err_add_tracks">%1$d of %2$d tracks couldn\'t be added</string>
+    <string name="music_err_online_unavailable">Online music temporarily unavailable</string>
+    <string name="music_err_no_valid_files">Couldn\'t add songs: no valid files selected.</string>
+    <string name="music_err_add_failed">Couldn\'t add songs. Please try again.</string>
+    <!-- NanaPlay 1.0.43: music screen tabs -->
+    <string name="music_tab_my_music">My Music</string>
+    <string name="music_tab_online">Online</string>
+    <string name="music_add">Add</string>
+    <string name="music_search_hint">Search songs, artists…</string>
+    <string name="action_done">Done</string>
+    <string name="action_send">Send</string>
+    <string name="action_ok">OK</string>
+    <string name="action_undo">Undo</string>
+    <string name="action_skip">Skip</string>
+    <string name="action_refresh">Refresh</string>
+    <string name="action_view">View</string>
+    <string name="action_details">Details</string>
+    <string name="action_next">Next</string>
+    <string name="dlg_session_report">Session report</string>
+    <string name="dlg_session_short_notice">This was a short session, so the score is based on limited samples and may vary more than usual.</string>
+    <string name="dlg_delivered_profile">Delivered profile</string>
+    <string name="dlg_why_profile_changed">Why the profile changed</string>
+    <string name="dlg_what_to_do_next">What to do next</string>
+    <string name="dlg_report_it">Report it</string>
+    <string name="dlg_experienced_bug">Experienced a bug? </string>
+    <string name="dlg_preparing_diagnostics">Preparing diagnostics</string>
+    <string name="dlg_removing_sensitive">Removing sensitive values and creating a temporary paste…</string>
+    <string name="dlg_scan_qr_paste">Scan this QR code on your phone. The sanitized paste expires within 24 hours.</string>
+    <string name="dlg_qr_create_failed">Could not create the QR code. Close this dialog and try again.</string>
+    <string name="dlg_diagnostics_copied_body">Device, account type, stream profile, current status, and the temporary paste URL were copied to the clipboard.</string>
+    <string name="dlg_diagnostics_copied">Diagnostics copied</string>
+    <string name="dlg_scan_diagnostics_link">Scan diagnostics link</string>
+    <string name="dlg_create_diagnostics_paste">Create temporary diagnostics paste?</string>
+    <string name="dlg_diagnostics_sanitize_info">NanaPlay will remove tokens, account identifiers, email addresses, session IDs, and network addresses before uploading.</string>
+    <string name="dlg_diagnostics_unlisted_info">The randomized link is unlisted but not encrypted, and the paste service deletes uploads within 24 hours.</string>
+    <string name="dlg_share_diagnostics">Share diagnostics?</string>
+    <string name="dlg_share_analytics">Share analytics</string>
+    <string name="dlg_share_anonymous_desc">Share anonymous diagnostics to help us find patterns in bugs, crashes, and performance problems. Sensitive data is removed, and we do not sell your data.</string>
+    <string name="dlg_sharing_off_warning">If sharing is off during a crash, we may not have enough information to investigate your report. It is off by default and can be changed in Privacy settings.</string>
+    <string name="dlg_keep_off">Keep off</string>
+    <string name="dlg_got_it">Got it</string>
+    <string name="dlg_use_code_signin">Use code sign-in</string>
+    <string name="dlg_signin_tools">Sign-in tools</string>
+    <string name="dlg_signin_tools_desc">Use a token to sign in without the browser, or export diagnostics before signing in.</string>
+    <string name="dlg_sign_in_with_token">Sign in with token</string>
+    <string name="dlg_token_signin_desc">Paste an NVIDIA access token or token-response JSON. NanaPlay verifies the access token before saving the account.</string>
+    <string name="dlg_token_own_account_warning">Only use credentials for an account you control.</string>
+    <string name="dlg_access_token_label">Access token</string>
+    <string name="dlg_sign_in">Sign in</string>
+    <string name="dlg_sanitize_and_upload">Sanitize and upload</string>
+    <string name="dlg_export_logs">Export logs</string>
+    <string name="dlg_export_logs_qr">Export logs with QR</string>
+    <string name="dlg_cloud_session_active">Cloud session already active</string>
+    <string name="dlg_terminate_start_new">Terminate and start new</string>
+    <string name="dlg_resume_or_terminate">Resume the existing session, or terminate it and start %1$s.</string>
+    <string name="dlg_controller_detected">Controller detected</string>
+    <string name="dlg_dont_show_again">Don\'t show again</string>
+    <string name="dlg_onscreen_hidden_controller">The on-screen controller was hidden because a physical controller is connected.</string>
+    <string name="dlg_go_back">Go back</string>
+    <string name="dlg_before_you_report">Before you report</string>
+    <string name="dlg_live_checks_title">Live checks from this device and session</string>
+    <string name="dlg_matched_suggestions">MATCHED SUGGESTIONS</string>
+    <string name="dlg_no_suggestions">No irrelevant fixes are being suggested for this check.</string>
+    <string name="dlg_still_happening">Still happening after any matched suggestion? Continue and the measured evidence will be attached automatically.</string>
+    <string name="dlg_bug_report_sent">Bug report sent</string>
+    <string name="dlg_send_another">Send another</string>
+    <string name="dlg_checking_session">Checking this session…</string>
+    <string name="dlg_report_stream_bug">Report a stream bug</string>
+    <string name="dlg_describe_problem">Describe the problem without leaving your game.</string>
+    <string name="dlg_checks">Checks</string>
+    <string name="dlg_issue_title">Issue title</string>
+    <string name="dlg_issue_placeholder">Stream froze after reconnecting</string>
+    <string name="dlg_what_happened">What happened?</string>
+    <string name="dlg_description_placeholder">What were you doing, what went wrong, and can you reproduce it?</string>
+    <string name="dlg_consent_upload">I understand what will be uploaded and consent to send it to PrintedWaste.</string>
+    <string name="dlg_uploading_report">Uploading report…</string>
+    <string name="dlg_send_bug_report">Send bug report</string>
+    <string name="dlg_upload_bug_report">Upload bug report?</string>
+    <string name="dlg_upload_to_printedwaste">Upload to PrintedWaste</string>
+    <string name="dlg_report_uploaded_info">Your report will be uploaded to the PrintedWaste API and may be viewed by PrintedWaste and NanaPlay maintainers.</string>
+    <string name="dlg_report_includes_info">It includes your title and description exactly as written, the API\'s app/build fields, and the same redacted log file available from Settings &gt; Advanced &gt; Debug Logs. No other files are uploaded.</string>
+    <string name="dlg_data_not_sold">This data is not sold. It is used only to investigate and fix bugs.</string>
+    <string name="dlg_bugreport_upload_info">This uploads to %1$s. PrintedWaste and NanaPlay maintainers may view the report text, app version/build, device model, Android version, provider and membership category, current game, stream status/settings, and a redacted diagnostic log.</string>
+    <string name="dlg_bugreport_log_info">The automatic log removes account names, credentials, session IDs, and network addresses before upload.</string>
+    <string name="dlg_bugreport_typed_info">Your typed title and description are sent exactly as written, so do not include personal or sensitive information.</string>
+    <string name="dlg_bugreport_data_info">Your data is not sold and is used only to investigate and fix bugs.</string>
+    <string name="dlg_bugreport_log_attached">The same timestamped log available from Settings &gt; Advanced &gt; Debug Logs is attached automatically. No other files are added.</string>
+    <string name="dlg_bugreport_english_only">Bug reports are currently supported only in English. Be as detailed and descriptive as possible. Non-English or non-descriptive reports will be ignored.</string>
+    <string name="dlg_send_to_developer">Send to developer</string>
+    <string name="dlg_stream_profile_changed">Stream profile changed</string>
+    <string name="dlg_profile_change_send_info">This sends the profile-change summary and likely cause to PrintedWaste and NanaPlay maintainers so they can investigate it.</string>
+    <string name="dlg_sending">Sending…</string>
+    <string name="dlg_send_stream_diagnostics">Send stream diagnostics?</string>
+    <string name="dlg_send_diagnostics">Send diagnostics</string>
+    <string name="dlg_filters">Filters</string>
+    <string name="dlg_filters_count">Filters %1$d</string>
+    <string name="dlg_sort_format">Sort: %1$s</string>
+    <string name="dlg_screenshots">Screenshots</string>
+    <string name="dlg_description">Description</string>
+    <string name="dlg_about_native_client">Native Android GeForce NOW client</string>
+    <string name="dlg_about_recode_by">Recode by Papah Chan</string>
+    <string name="dlg_update_ready">Update ready</string>
+    <string name="dlg_update_available">NanaPlay update available</string>
+    <string name="dlg_update_version">Version %1$s</string>
+    <string name="dlg_update_build">Build %1$s</string>
+    <string name="dlg_update_new_build">A new build</string>
+    <string name="dlg_update_downloaded_desc">%1$s is downloaded and ready to install.</string>
+    <string name="dlg_update_play_desc">You are on build %1$d. Google Play has %2$s.</string>
+    <string name="dlg_update_available_desc">%1$s is available for this device.</string>
+    <string name="osd_resume_cloud_session">Resume cloud session</string>
+    <string name="osd_play_on_tv">Play on TV</string>
+    <string name="osd_session_timer">Session timer</string>
+    <string name="osd_no_active_stream">No active stream</string>
+    <string name="osd_no_local_stream">NanaPlay does not have a local stream attached right now.</string>
+    <string name="osd_back_to_library">Back to library</string>
+    <string name="osd_end_cloud_session">End cloud session</string>
+    <string name="osd_minimize">Minimize</string>
+    <string name="osd_type_into_stream">Type into stream</string>
+    <string name="osd_controls">Controls</string>
+    <string name="osd_default">Default</string>
+    <string name="osd_launch">Launch</string>
+    <string name="osd_selected">Selected</string>
+    <string name="osd_advertisement">Advertisement</string>
+    <string name="osd_drag">Drag</string>
+    <string name="osd_tagline">Your cloud games, one tap away</string>
+    <string name="pair_pairing_code">PAIRING CODE</string>
+    <string name="pair_step_2_of_2">Step 2 of 2</string>
+    <string name="pair_press_done">Press Done</string>
+    <string name="pair_pair_your_phone">Pair your phone</string>
+    <string name="pair_phone_connected">Phone connected</string>
+    <string name="pair_tv_phone_wifi_info">Your TV and phone must be on the same Wi-Fi. Scan the QR code with your phone camera; the pairing code expires after five minutes.</string>
+    <string name="pair_device_can_launch">%1$s can launch games. Approve trust below for settings, overlays, sessions, and account switching.</string>
+    <string name="pair_starting_phone_pairing">Starting phone pairing…</string>
+    <string name="pair_sign_in_from_phone">Sign in from NanaPlay on phone</string>
+    <string name="pair_cancel_pairing">Cancel pairing</string>
+    <string name="pair_disconnect_phone">Disconnect phone</string>
+    <string name="queue_free_tier_routing">Free tier queue routing</string>
+    <string name="queue_checking_queues">Checking PrintedWaste queues and latency</string>
+    <string name="queue_stuck_warning">Queue seems stuck — your position hasn\'t moved for a while.</string>
+    <string name="queue_title">Queue</string>
+    <string name="queue_live_position">Live position</string>
+    <string name="queue_other_regions">Other regions</string>
+    <string name="queue_recommended">RECOMMENDED</string>
+    <string name="toast_logs_exported">Logs exported</string>
+    <string name="toast_logs_export_failed">Could not export logs</string>
+    <string name="toast_app_id_copied">App ID copied</string>
+    <string name="store_not_owned">Not owned</string>
+    <string name="store_owned_on_store">Owned on %1$s</string>
 </resources>

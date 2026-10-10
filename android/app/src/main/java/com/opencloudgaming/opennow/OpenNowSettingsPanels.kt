@@ -76,8 +76,8 @@ internal fun AppDataSettingsPanel(viewModel: OpenNowViewModel) {
     if (clearCacheConfirmOpen) {
         AlertDialog(
             onDismissRequest = { clearCacheConfirmOpen = false },
-            title = { Text("Clear game cache?") },
-            text = { Text("Cached store, library, and search results will be removed. Your account and settings stay unchanged.") },
+            title = { Text(stringResource(R.string.settings_appdata_clear_cache_title)) },
+            text = { Text(stringResource(R.string.settings_appdata_clear_cache_body)) },
             confirmButton = {
                 Button(
                     onClick = {
@@ -85,7 +85,7 @@ internal fun AppDataSettingsPanel(viewModel: OpenNowViewModel) {
                         viewModel.clearCatalogCache()
                     },
                 ) {
-                    Text("Clear cache")
+                    Text(stringResource(R.string.settings_appdata_clear_cache_button))
                 }
             },
             dismissButton = {
@@ -98,8 +98,8 @@ internal fun AppDataSettingsPanel(viewModel: OpenNowViewModel) {
     if (resetSettingsConfirmOpen) {
         AlertDialog(
             onDismissRequest = { resetSettingsConfirmOpen = false },
-            title = { Text("Reset settings and app data?") },
-            text = { Text("Accounts, settings, cached games, tutorial state, and local app files will be removed. NanaPlay will relaunch like a fresh install.") },
+            title = { Text(stringResource(R.string.settings_appdata_reset_title)) },
+            text = { Text(stringResource(R.string.settings_appdata_reset_body)) },
             confirmButton = {
                 Button(
                     onClick = {
@@ -107,7 +107,7 @@ internal fun AppDataSettingsPanel(viewModel: OpenNowViewModel) {
                         viewModel.resetSettings()
                     },
                 ) {
-                    Text("Reset and relaunch")
+                    Text(stringResource(R.string.settings_appdata_reset_confirm))
                 }
             },
             dismissButton = {
@@ -119,21 +119,21 @@ internal fun AppDataSettingsPanel(viewModel: OpenNowViewModel) {
     }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(
-            "Reset tutorial only makes the stream guide appear again. Reset settings is destructive: it clears local app data and relaunches NanaPlay.",
+            stringResource(R.string.settings_appdata_reset_note),
             color = SettingsTextMuted,
             style = MaterialTheme.typography.bodySmall,
         )
         Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 OutlinedButton(onClick = { clearCacheConfirmOpen = true }, modifier = Modifier.weight(1f)) {
-                    Text("Clear cache", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(stringResource(R.string.settings_appdata_clear_cache_button), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 OutlinedButton(onClick = viewModel::resetStreamTutorial, modifier = Modifier.weight(1f)) {
-                    Text("Reset tutorial", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(stringResource(R.string.settings_appdata_reset_tutorial), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
             OutlinedButton(onClick = { resetSettingsConfirmOpen = true }, modifier = Modifier.fillMaxWidth()) {
-                Text("Reset settings", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(stringResource(R.string.settings_appdata_reset_settings), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }
@@ -155,8 +155,8 @@ internal fun AndroidUpdatePanel(state: OpenNowUiState, viewModel: OpenNowViewMod
         else -> true
     }
     val statusMessage = when {
-        updateCheckingDisabled -> "Automatic checks are off."
-        showCheckPauseMessage -> "Checks pause while streaming."
+        updateCheckingDisabled -> stringResource(R.string.update_checks_off)
+        showCheckPauseMessage -> stringResource(R.string.update_checks_paused)
         else -> updateStatusSubtitle(update)
     }
     Surface(
@@ -212,7 +212,15 @@ internal fun AndroidUpdatePanel(state: OpenNowUiState, viewModel: OpenNowViewMod
                     enabled = update.canCheck && !checkBlockedByStream && !updateCheckingDisabled,
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text(if (update.status == AndroidUpdateStatus.Checking) "Checking..." else "Check", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        if (update.status == AndroidUpdateStatus.Checking) {
+                            stringResource(R.string.update_button_checking)
+                        } else {
+                            stringResource(R.string.update_button_check)
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
                 when {
                     update.status == AndroidUpdateStatus.Available -> {
@@ -222,7 +230,11 @@ internal fun AndroidUpdatePanel(state: OpenNowUiState, viewModel: OpenNowViewMod
                             modifier = Modifier.weight(1f),
                         ) {
                             Text(
-                                if (update.installSource.isGooglePlay) "Update" else "Download",
+                                if (update.installSource.isGooglePlay) {
+                                    stringResource(R.string.update_button_update)
+                                } else {
+                                    stringResource(R.string.update_button_download)
+                                },
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -234,7 +246,7 @@ internal fun AndroidUpdatePanel(state: OpenNowUiState, viewModel: OpenNowViewMod
                             enabled = update.canInstall,
                             modifier = Modifier.weight(1f),
                         ) {
-                            Text("Install", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(stringResource(R.string.update_button_install), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
@@ -257,7 +269,11 @@ private fun AndroidUpdateUnavailablePanel(update: AndroidUpdateState) {
             ) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text(
-                        if (update.installSource.isGooglePlay) "Updates managed by Google Play" else "APK updates unavailable",
+                        if (update.installSource.isGooglePlay) {
+                            stringResource(R.string.update_unavailable_play_title)
+                        } else {
+                            stringResource(R.string.update_unavailable_apk_title)
+                        },
                         color = SettingsText,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
@@ -277,7 +293,11 @@ private fun AndroidUpdateUnavailablePanel(update: AndroidUpdateState) {
                     color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.16f),
                 ) {
                     Text(
-                        if (update.installSource.isGooglePlay) "PLAY" else "LOCKED",
+                        if (update.installSource.isGooglePlay) {
+                            stringResource(R.string.update_badge_play)
+                        } else {
+                            stringResource(R.string.update_badge_locked)
+                        },
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                         color = MaterialTheme.colorScheme.secondary,
                         style = MaterialTheme.typography.labelMedium,
@@ -292,8 +312,8 @@ private fun AndroidUpdateUnavailablePanel(update: AndroidUpdateState) {
                 color = MaterialTheme.colorScheme.surface.copy(alpha = 0.52f),
             ) {
                 Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    UpdateInfoValue("Current", formatCurrentUpdateVersion(update), Modifier.weight(1f))
-                    UpdateInfoValue("Source", update.installSource.displayName, Modifier.weight(1f))
+                    UpdateInfoValue(stringResource(R.string.update_info_current), formatCurrentUpdateVersion(update), Modifier.weight(1f))
+                    UpdateInfoValue(stringResource(R.string.update_info_source), update.installSource.displayName, Modifier.weight(1f))
                 }
             }
         }
@@ -336,14 +356,14 @@ private fun UpdateVersionSummary(update: AndroidUpdateState) {
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                UpdateInfoValue("Current", formatCurrentUpdateVersion(update), Modifier.weight(1f))
+                UpdateInfoValue(stringResource(R.string.update_info_current), formatCurrentUpdateVersion(update), Modifier.weight(1f))
                 availableVersion?.let {
-                    UpdateInfoValue("Available", it, Modifier.weight(1f))
+                    UpdateInfoValue(stringResource(R.string.update_info_available), it, Modifier.weight(1f))
                 }
             }
             checked?.let {
                 Text(
-                    "Last checked $it",
+                    stringResource(R.string.update_last_checked, it),
                     color = SettingsTextMuted,
                     style = MaterialTheme.typography.labelSmall,
                     maxLines = 1,
@@ -385,7 +405,7 @@ private fun UpdateReleaseNotes(notes: String?) {
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
-                "Release notes",
+                stringResource(R.string.update_release_notes),
                 color = SettingsText,
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.SemiBold,
@@ -415,41 +435,50 @@ private fun formatCurrentUpdateVersion(update: AndroidUpdateState): String =
         "build ${update.currentVersionCode}",
     ).joinToString(" ")
 
+@Composable
 private fun updateStatusTitle(update: AndroidUpdateState): String =
     when (update.status) {
-        AndroidUpdateStatus.Available -> "Update available"
-        AndroidUpdateStatus.Downloading -> "Downloading update"
-        AndroidUpdateStatus.Downloaded -> "Ready to install"
-        AndroidUpdateStatus.NotAvailable -> "NanaPlay is up to date"
-        AndroidUpdateStatus.Checking -> "Checking for updates"
-        AndroidUpdateStatus.Error -> "Update check failed"
-        AndroidUpdateStatus.Idle -> "App updates"
+        AndroidUpdateStatus.Available -> stringResource(R.string.update_status_available)
+        AndroidUpdateStatus.Downloading -> stringResource(R.string.update_status_downloading)
+        AndroidUpdateStatus.Downloaded -> stringResource(R.string.update_status_downloaded)
+        AndroidUpdateStatus.NotAvailable -> stringResource(R.string.update_status_up_to_date)
+        AndroidUpdateStatus.Checking -> stringResource(R.string.update_status_checking)
+        AndroidUpdateStatus.Error -> stringResource(R.string.update_status_error)
+        AndroidUpdateStatus.Idle -> stringResource(R.string.update_status_idle)
     }
 
+@Composable
 private fun updateStatusSubtitle(update: AndroidUpdateState): String =
     when (update.status) {
         AndroidUpdateStatus.Available -> if (update.installSource.isGooglePlay) {
             update.message
         } else {
-            update.availableVersionName?.let { "Version $it is available." } ?: "A new build is available."
+            update.availableVersionName?.let { stringResource(R.string.update_subtitle_version_available, it) }
+                ?: stringResource(R.string.update_subtitle_new_build)
         }
-        AndroidUpdateStatus.Downloading -> "Keep NanaPlay open while the APK downloads."
-        AndroidUpdateStatus.Downloaded -> update.availableVersionName?.let { "Version $it has been downloaded." } ?: "The update has been downloaded."
+        AndroidUpdateStatus.Downloading -> stringResource(R.string.update_subtitle_keep_open)
+        AndroidUpdateStatus.Downloaded -> update.availableVersionName?.let { stringResource(R.string.update_subtitle_downloaded_version, it) }
+            ?: stringResource(R.string.update_subtitle_downloaded)
         AndroidUpdateStatus.NotAvailable -> update.message
-        AndroidUpdateStatus.Checking -> if (update.installSource.isGooglePlay) "Checking Google Play." else "Contacting the update source."
+        AndroidUpdateStatus.Checking -> if (update.installSource.isGooglePlay) {
+            stringResource(R.string.update_subtitle_checking_play)
+        } else {
+            stringResource(R.string.update_subtitle_checking_source)
+        }
         AndroidUpdateStatus.Error -> update.message
         AndroidUpdateStatus.Idle -> update.message
     }
 
+@Composable
 private fun updateStatusBadgeText(status: AndroidUpdateStatus): String =
     when (status) {
-        AndroidUpdateStatus.Available -> "NEW"
-        AndroidUpdateStatus.Downloading -> "DOWNLOADING"
-        AndroidUpdateStatus.Downloaded -> "READY"
-        AndroidUpdateStatus.NotAvailable -> "CURRENT"
-        AndroidUpdateStatus.Checking -> "CHECKING"
-        AndroidUpdateStatus.Error -> "ERROR"
-        AndroidUpdateStatus.Idle -> "IDLE"
+        AndroidUpdateStatus.Available -> stringResource(R.string.update_badge_new)
+        AndroidUpdateStatus.Downloading -> stringResource(R.string.update_badge_downloading)
+        AndroidUpdateStatus.Downloaded -> stringResource(R.string.update_badge_ready)
+        AndroidUpdateStatus.NotAvailable -> stringResource(R.string.update_badge_current)
+        AndroidUpdateStatus.Checking -> stringResource(R.string.update_badge_checking)
+        AndroidUpdateStatus.Error -> stringResource(R.string.update_badge_error)
+        AndroidUpdateStatus.Idle -> stringResource(R.string.update_badge_idle)
     }
 
 @Composable
@@ -487,6 +516,8 @@ internal fun AccountSettingsPanel(state: OpenNowUiState, viewModel: OpenNowViewM
     val currentSession = state.authSession
     val currentUserId = currentSession?.user?.userId
     val context = LocalContext.current
+    val noBrowserAvailable = stringResource(R.string.browser_unavailable)
+    val fallbackAccountName = stringResource(R.string.account_fallback_name)
     var addAccountPromptOpen by remember { mutableStateOf(false) }
     val addAccountProviders = remember(state.providers, state.selectedProvider) {
         accountProviderOptions(state.providers, state.selectedProvider)
@@ -526,7 +557,7 @@ internal fun AccountSettingsPanel(state: OpenNowUiState, viewModel: OpenNowViewM
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text(account.displayName.ifBlank { "NVIDIA Account" }, color = SettingsText, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(account.displayName.ifBlank { fallbackAccountName }, color = SettingsText, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(
                             listOfNotNull(account.email?.takeIf { it.isNotBlank() }, account.providerCode, membershipTier).joinToString(" - "),
                             color = SettingsTextMuted,
@@ -536,10 +567,10 @@ internal fun AccountSettingsPanel(state: OpenNowUiState, viewModel: OpenNowViewM
                         )
                     }
                     if (selected) {
-                        Text("Active", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.account_badge_active), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                     } else {
                         OutlinedButton(onClick = { viewModel.switchAccount(account.userId) }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)) {
-                            Text("Switch")
+                            Text(stringResource(R.string.account_switch))
                         }
                     }
                 }
@@ -561,10 +592,10 @@ internal fun AccountSettingsPanel(state: OpenNowUiState, viewModel: OpenNowViewM
             )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            Button(onClick = { addAccountPromptOpen = true }, modifier = Modifier.weight(1f)) { Text("Add account") }
-            OutlinedButton(onClick = viewModel::logout, modifier = Modifier.weight(1f)) { Text("Sign out") }
+            Button(onClick = { addAccountPromptOpen = true }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.account_add)) }
+            OutlinedButton(onClick = viewModel::logout, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.account_sign_out)) }
         }
-        OutlinedButton(onClick = viewModel::logoutAll, modifier = Modifier.fillMaxWidth()) { Text("Sign out all accounts") }
+        OutlinedButton(onClick = viewModel::logoutAll, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.account_sign_out_all)) }
         AccountPlayTimeStatsPanel(
             subscriptionInfo = state.subscriptionInfo,
             fallbackMembershipTier = state.authSession?.user?.membershipTier,
@@ -573,7 +604,7 @@ internal fun AccountSettingsPanel(state: OpenNowUiState, viewModel: OpenNowViewM
             storageAddon = state.subscriptionInfo?.storageAddon,
             openExternal = { url ->
                 if (!openExternalUrl(context, url)) {
-                    Toast.makeText(context, "No browser available", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, noBrowserAvailable, Toast.LENGTH_SHORT).show()
                 }
             },
         )
@@ -585,7 +616,7 @@ internal fun AccountSettingsPanel(state: OpenNowUiState, viewModel: OpenNowViewM
             onConnect = { connector ->
                 viewModel.connectAccountConnector(connector.store) { url ->
                     if (!openExternalUrl(context, url)) {
-                        Toast.makeText(context, "No browser available", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, noBrowserAvailable, Toast.LENGTH_SHORT).show()
                     }
                 }
             },
@@ -594,7 +625,7 @@ internal fun AccountSettingsPanel(state: OpenNowUiState, viewModel: OpenNowViewM
             },
             openExternal = { url ->
                 if (!openExternalUrl(context, url)) {
-                    Toast.makeText(context, "No browser available", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, noBrowserAvailable, Toast.LENGTH_SHORT).show()
                 }
             },
         )
@@ -613,7 +644,7 @@ private fun AddAccountProviderDialog(
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Choose provider") },
+        title = { Text(stringResource(R.string.account_provider_title)) },
         text = {
             Column(
                 Modifier
@@ -622,7 +653,7 @@ private fun AddAccountProviderDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    "Select the GeForce NOW provider to use for the new account.",
+                    stringResource(R.string.account_provider_body),
                     color = SettingsTextMuted,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -637,7 +668,7 @@ private fun AddAccountProviderDialog(
         },
         confirmButton = {
             Button(onClick = { onProviderSelected(providerChoice) }) {
-                Text("Continue")
+                Text(stringResource(R.string.action_continue))
             }
         },
         dismissButton = {
@@ -684,7 +715,7 @@ private fun ProviderChoiceRow(provider: LoginProvider, selected: Boolean, onClic
                 )
             }
             if (selected) {
-                Text("Selected", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.account_provider_selected), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -708,21 +739,26 @@ private fun AccountPlayTimeStatsPanel(subscriptionInfo: SubscriptionInfo?, fallb
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.76f),
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Play time stats", color = SettingsText, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.playtime_title), color = SettingsText, fontWeight = FontWeight.SemiBold)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 UsageMetricTile(
-                    label = "Session",
+                    label = stringResource(R.string.playtime_session),
                     value = "${sessionLimit.limitHours}h",
                     detail = when (sessionLimit.mode) {
-                        SessionTimerMode.Countdown -> "countdown"
-                        SessionTimerMode.Stopwatch -> "stopwatch"
+                        SessionTimerMode.Countdown -> stringResource(R.string.playtime_mode_countdown)
+                        SessionTimerMode.Stopwatch -> stringResource(R.string.playtime_mode_stopwatch)
                     },
                     modifier = Modifier.weight(1f),
                 )
                 UsageMetricTile(
-                    label = "Monthly left",
+                    label = stringResource(R.string.playtime_monthly_left),
                     value = monthlyRemaining?.let(::formatPlayTimeHours) ?: "--",
-                    detail = monthlyLimit?.let { "of ${formatPlayTimeHours(it)}" } ?: if (freePlan) "paid plans" else "refresh account",
+                    detail = monthlyLimit?.let { stringResource(R.string.playtime_of_value, formatPlayTimeHours(it)) }
+                        ?: if (freePlan) {
+                            stringResource(R.string.playtime_paid_plans)
+                        } else {
+                            stringResource(R.string.playtime_refresh_account)
+                        },
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -730,13 +766,17 @@ private fun AccountPlayTimeStatsPanel(subscriptionInfo: SubscriptionInfo?, fallb
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                         Text(
-                            "${formatPlayTimeHours(usedHours ?: 0.0)} used",
+                            stringResource(R.string.playtime_used_value, formatPlayTimeHours(usedHours ?: 0.0)),
                             color = SettingsTextMuted,
                             style = MaterialTheme.typography.labelSmall,
                             modifier = Modifier.weight(1f),
                         )
                         Text(
-                            "${formatPlayTimePercent(progressFraction)} of ${formatPlayTimeHours(monthlyLimit)}",
+                            stringResource(
+                                R.string.playtime_progress_value,
+                                formatPlayTimePercent(progressFraction),
+                                formatPlayTimeHours(monthlyLimit),
+                            ),
                             color = SettingsTextMuted,
                             style = MaterialTheme.typography.labelSmall,
                         )
@@ -769,9 +809,9 @@ private fun AccountPlayTimeStatsPanel(subscriptionInfo: SubscriptionInfo?, fallb
             } else {
                 Text(
                     if (freePlan) {
-                        "Paid plans show monthly play-time usage here when NVIDIA reports it."
+                        stringResource(R.string.playtime_paid_note)
                     } else {
-                        "Refresh Account settings after sign-in to load monthly play-time usage."
+                        stringResource(R.string.playtime_refresh_note)
                     },
                     color = SettingsTextMuted,
                     style = MaterialTheme.typography.bodySmall,
@@ -842,7 +882,7 @@ internal fun AndroidUpdateNoticeRow(
 
 @Composable
 private fun CircularUpdateProgress(progress: AndroidUpdateProgress?) {
-    val label = progress?.let(::formatAndroidUpdateProgress) ?: "Downloading"
+    val label = progress?.let(::formatAndroidUpdateProgress) ?: stringResource(R.string.update_progress_downloading)
     Text(
         label,
         color = SettingsTextMuted,
@@ -852,15 +892,17 @@ private fun CircularUpdateProgress(progress: AndroidUpdateProgress?) {
     )
 }
 
+@Composable
 private fun accountUpdateTitle(update: AndroidUpdateState): String =
     when (update.status) {
-        AndroidUpdateStatus.Downloaded -> "Update ready"
-        AndroidUpdateStatus.Downloading -> "Downloading NanaPlay"
-        else -> "NanaPlay update available"
+        AndroidUpdateStatus.Downloaded -> stringResource(R.string.update_ready_title)
+        AndroidUpdateStatus.Downloading -> stringResource(R.string.update_ready_downloading)
+        else -> stringResource(R.string.update_ready_available)
     }
 
+@Composable
 private fun accountUpdateSubtitle(update: AndroidUpdateState): String =
-    update.availableVersionName?.let { "Version $it is ready for this device." }
+    update.availableVersionName?.let { stringResource(R.string.update_ready_version, it) }
         ?: update.message
 
 @Composable
@@ -871,11 +913,11 @@ private fun StorageAddonPanel(storageAddon: StorageAddon?, openExternal: (String
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.76f),
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Cloud storage", color = SettingsText, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.storage_title), color = SettingsText, fontWeight = FontWeight.SemiBold)
             if (storageAddon == null) {
-                Text("No persistent storage add-on is active for this account.", color = SettingsTextMuted, style = MaterialTheme.typography.bodySmall)
+                Text(stringResource(R.string.storage_no_addon), color = SettingsTextMuted, style = MaterialTheme.typography.bodySmall)
                 OutlinedButton(onClick = { openExternal(GFN_ADD_STORAGE_URL) }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Add storage", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(stringResource(R.string.storage_add), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             } else {
                 val used = storageAddon.usedGb
@@ -883,9 +925,13 @@ private fun StorageAddonPanel(storageAddon: StorageAddon?, openExternal: (String
                 val usageFraction = storageUsageFraction(used, total)
                 Text(
                     listOfNotNull(
-                        total?.let { "Total ${formatStorageGb(it)}" },
-                        used?.let { "Used ${formatStorageGb(it)}" },
-                        if (used != null && total != null) "Available ${formatStorageGb((total - used).coerceAtLeast(0.0))}" else null,
+                        total?.let { stringResource(R.string.storage_total, formatStorageGb(it)) },
+                        used?.let { stringResource(R.string.storage_used, formatStorageGb(it)) },
+                        if (used != null && total != null) {
+                            stringResource(R.string.storage_available, formatStorageGb((total - used).coerceAtLeast(0.0)))
+                        } else {
+                            null
+                        },
                     ).joinToString(" - "),
                     color = SettingsTextMuted,
                     style = MaterialTheme.typography.bodySmall,
@@ -894,14 +940,14 @@ private fun StorageAddonPanel(storageAddon: StorageAddon?, openExternal: (String
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                             Text(
-                                "Storage usage",
+                                stringResource(R.string.storage_usage_title),
                                 color = SettingsText,
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.weight(1f),
                             )
                             Text(
-                                "${formatStoragePercent(usageFraction)} used",
+                                stringResource(R.string.playtime_used_value, formatStoragePercent(usageFraction)),
                                 color = SettingsTextMuted,
                                 style = MaterialTheme.typography.labelSmall,
                             )
@@ -932,18 +978,18 @@ private fun StorageAddonPanel(storageAddon: StorageAddon?, openExternal: (String
                     }
                 }
                 storageAddon.regionName?.takeIf { it.isNotBlank() }?.let { region ->
-                    Text("Location: $region", color = SettingsTextMuted, style = MaterialTheme.typography.bodySmall)
+                    Text(stringResource(R.string.storage_location, region), color = SettingsTextMuted, style = MaterialTheme.typography.bodySmall)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     Button(onClick = { openExternal(GFN_STORAGE_MANAGEMENT_URL) }, modifier = Modifier.weight(1f)) {
-                        Text("Manage", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(stringResource(R.string.storage_manage), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     OutlinedButton(onClick = { openExternal(GFN_STORAGE_RESET_URL) }, modifier = Modifier.weight(1f)) {
-                        Text("Reset", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(stringResource(R.string.storage_reset), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
                 OutlinedButton(onClick = { openExternal(GFN_STORAGE_MANAGEMENT_URL) }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Change storage location", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(stringResource(R.string.storage_change_location), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
@@ -964,8 +1010,8 @@ private fun AccountConnectorsPanel(
     disconnecting?.let { connector ->
         AlertDialog(
             onDismissRequest = { disconnecting = null },
-            title = { Text("Disconnect ${connector.label}?") },
-            text = { Text("This removes the linked ${connector.label} account from GeForce NOW. You can connect it again later.") },
+            title = { Text(stringResource(R.string.connector_disconnect_title, connector.label)) },
+            text = { Text(stringResource(R.string.connector_disconnect_body, connector.label)) },
             confirmButton = {
                 Button(
                     onClick = {
@@ -973,7 +1019,7 @@ private fun AccountConnectorsPanel(
                         onDisconnect(connector)
                     },
                 ) {
-                    Text("Disconnect")
+                    Text(stringResource(R.string.connector_disconnect_button))
                 }
             },
             dismissButton = {
@@ -990,14 +1036,24 @@ private fun AccountConnectorsPanel(
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Game store connections", color = SettingsText, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text(stringResource(R.string.connector_section_title), color = SettingsText, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 TextButton(onClick = onRefresh, enabled = !loading) {
-                    Text(if (loading) "Refreshing..." else "Refresh")
+                    Text(
+                        if (loading) {
+                            stringResource(R.string.connector_refreshing)
+                        } else {
+                            stringResource(R.string.connector_refresh)
+                        },
+                    )
                 }
             }
             if (connectors.isEmpty()) {
                 Text(
-                    if (loading) "Loading connected stores..." else "Connect Steam, Epic, Xbox, and other supported stores to sync your GeForce NOW library.",
+                    if (loading) {
+                        stringResource(R.string.connector_loading)
+                    } else {
+                        stringResource(R.string.connector_empty_body)
+                    },
                     color = SettingsTextMuted,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -1012,7 +1068,7 @@ private fun AccountConnectorsPanel(
                 }
             }
             OutlinedButton(onClick = { openExternal(GFN_ACCOUNT_HELP_URL) }, modifier = Modifier.fillMaxWidth()) {
-                Text("Connection help", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(stringResource(R.string.connector_help), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }
@@ -1043,11 +1099,23 @@ private fun ConnectorRow(
         }
         if (connector.isLinked) {
             OutlinedButton(onClick = onDisconnect, enabled = !busy, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)) {
-                Text(if (busy) "Removing..." else "Disconnect")
+                Text(
+                    if (busy) {
+                        stringResource(R.string.connector_removing)
+                    } else {
+                        stringResource(R.string.connector_disconnect_button)
+                    },
+                )
             }
         } else {
             Button(onClick = onConnect, enabled = connector.supported && !busy, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)) {
-                Text(if (busy) "Opening..." else "Connect")
+                Text(
+                    if (busy) {
+                        stringResource(R.string.connector_opening)
+                    } else {
+                        stringResource(R.string.connector_connect)
+                    },
+                )
             }
         }
     }
@@ -1135,17 +1203,24 @@ private fun formatPlayTimeHours(value: Double): String =
 private fun formatPlayTimePercent(fraction: Float): String =
     "${(fraction * 100).roundToInt().coerceIn(0, 100)}%"
 
+@Composable
 private fun connectorStatusText(connector: AccountConnector): String {
-    if (!connector.isLinked) return if (connector.required) "Required for some games" else "Available to connect"
+    if (!connector.isLinked) {
+        return if (connector.required) {
+            stringResource(R.string.connector_required)
+        } else {
+            stringResource(R.string.connector_available)
+        }
+    }
     val identity = connector.userDisplayName?.takeIf { it.isNotBlank() }
         ?: connector.userIdentifier?.takeIf { it.isNotBlank() }
     val sync = when {
-        connector.syncedGameCount != null -> "${connector.syncedGameCount} synced games"
+        connector.syncedGameCount != null -> stringResource(R.string.connector_synced_games, connector.syncedGameCount!!)
         !connector.syncState.isNullOrBlank() -> connector.syncState.replace('_', ' ').lowercase(Locale.US)
             .replaceFirstChar { it.titlecase(Locale.US) }
         else -> null
     }
-    return listOfNotNull(identity, sync).joinToString(" - ").ifBlank { "Connected" }
+    return listOfNotNull(identity, sync).joinToString(" - ").ifBlank { stringResource(R.string.connector_connected) }
 }
 
 @Composable
@@ -1157,10 +1232,11 @@ internal fun CodecDiagnosticsPanel(report: RuntimeCodecReport?) {
     val clipboard = LocalClipboardManager.current
     var copied by remember(report) { mutableStateOf(false) }
     val safeDecoders = report.capabilities.count { it.streamingRealtimeSafe() }
+    val codecDiagnosticsHeader = stringResource(R.string.codec_diagnostics_header)
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Button(
             onClick = {
-                clipboard.setText(AnnotatedString(formatCodecDiagnosticReport(report)))
+                clipboard.setText(AnnotatedString(formatCodecDiagnosticReport(codecDiagnosticsHeader, report)))
                 copied = true
             },
             modifier = Modifier.fillMaxWidth(),
@@ -1176,9 +1252,26 @@ internal fun CodecDiagnosticsPanel(report: RuntimeCodecReport?) {
             )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            CodecSummaryChip("${safeDecoders}/${report.capabilities.size}", "real-time decoders")
-            CodecSummaryChip(if (report.lowPowerGpuProfile) "Low power" else "Standard", "device profile")
-            CodecSummaryChip(if (report.androidTvProfile) "TV" else "Mobile", "shell")
+            CodecSummaryChip(
+                "${safeDecoders}/${report.capabilities.size}",
+                stringResource(R.string.codec_chip_realtime_decoders),
+            )
+            CodecSummaryChip(
+                if (report.lowPowerGpuProfile) {
+                    stringResource(R.string.codec_profile_low_power)
+                } else {
+                    stringResource(R.string.codec_profile_standard)
+                },
+                stringResource(R.string.codec_chip_device_profile),
+            )
+            CodecSummaryChip(
+                if (report.androidTvProfile) {
+                    stringResource(R.string.codec_shell_tv)
+                } else {
+                    stringResource(R.string.codec_shell_mobile)
+                },
+                stringResource(R.string.codec_chip_shell),
+            )
         }
         report.capabilities.forEach { capability ->
             CodecCapabilityRow(capability)
@@ -1193,8 +1286,8 @@ internal fun CodecDiagnosticsPanel(report: RuntimeCodecReport?) {
     }
 }
 
-private fun formatCodecDiagnosticReport(report: RuntimeCodecReport): String = buildString {
-    appendLine("NanaPlay Android codec diagnostics")
+private fun formatCodecDiagnosticReport(header: String, report: RuntimeCodecReport): String = buildString {
+    appendLine(header)
     appendLine("nativeRuntimeSummary=${report.nativeRuntimeSummary}")
     appendLine("androidTvProfile=${report.androidTvProfile}")
     appendLine("lowPowerGpuProfile=${report.lowPowerGpuProfile}")
@@ -1236,10 +1329,10 @@ private fun CodecCapabilityRow(capability: CodecCapability) {
     val streamingReady = capability.streamingDecoderAvailable()
     val healthy = capability.streamingRealtimeSafe()
     val status = when {
-        healthy -> "Ready"
-        streamingReady -> "WebRTC ready"
-        capability.decoderAvailable -> "Platform only"
-        else -> "Unavailable"
+        healthy -> stringResource(R.string.codec_status_ready)
+        streamingReady -> stringResource(R.string.codec_status_webrtc)
+        capability.decoderAvailable -> stringResource(R.string.codec_status_platform)
+        else -> stringResource(R.string.codec_status_unavailable)
     }
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -1257,14 +1350,19 @@ private fun CodecCapabilityRow(capability: CodecCapability) {
                 )
             }
             Text(
-                "WebRTC: ${capability.streamingDecoderName() ?: "none"}",
+                stringResource(R.string.codec_webrtc_decoder, capability.streamingDecoderName() ?: "none"),
                 color = SettingsTextMuted,
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                "Hardware decode ${yesNo(capability.streamingHardwareDecoderAvailable())} - native ${capability.nativeDecoderAvailable ?: "unknown"} - platform ${capability.decoderName ?: "none"}",
+                stringResource(
+                    R.string.codec_hardware_decode,
+                    yesNo(capability.streamingHardwareDecoderAvailable()),
+                    capability.nativeDecoderAvailable?.toString() ?: "unknown",
+                    capability.decoderName ?: "none",
+                ),
                 color = SettingsTextMuted,
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 1,
@@ -1274,7 +1372,9 @@ private fun CodecCapabilityRow(capability: CodecCapability) {
     }
 }
 
-private fun yesNo(value: Boolean): String = if (value) "yes" else "no"
+@Composable
+private fun yesNo(value: Boolean): String =
+    if (value) stringResource(R.string.codec_yes) else stringResource(R.string.codec_no)
 
 internal val StreamStatsStyle.label: String
     get() = when (this) {
@@ -1314,10 +1414,10 @@ internal fun AppVersionPanel() {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text("NanaPlay Android", color = SettingsText, fontWeight = FontWeight.SemiBold)
-            Text("Version ${BuildConfig.VERSION_NAME}", color = SettingsTextMuted, style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(R.string.about_app_title), color = SettingsText, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.about_version, BuildConfig.VERSION_NAME), color = SettingsTextMuted, style = MaterialTheme.typography.bodySmall)
         }
-        Text("Build ${BuildConfig.VERSION_CODE}", color = SettingsTextMuted, style = MaterialTheme.typography.labelMedium)
+        Text(stringResource(R.string.about_build, BuildConfig.VERSION_CODE), color = SettingsTextMuted, style = MaterialTheme.typography.labelMedium)
     }
 }
 
@@ -1335,11 +1435,11 @@ internal fun OpenNowGitHubPanel() {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text("NanaPlay Repository", color = SettingsText, fontWeight = FontWeight.SemiBold)
-            Text("FahriAdison", color = SettingsTextMuted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(stringResource(R.string.about_repo_title), color = SettingsText, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.about_repo_owner), color = SettingsTextMuted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        OutlinedButton(onClick = { openExternalUrlOrCopy(context, clipboard, OPENNOW_GITHUB_URL, "GitHub link copied") }) {
-            Text("GitHub", maxLines = 1, overflow = TextOverflow.Ellipsis)
+        OutlinedButton(onClick = { openExternalUrlOrCopy(context, clipboard, OPENNOW_GITHUB_URL, context.getString(R.string.about_github_copied)) }) {
+            Text(stringResource(R.string.about_github_button), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -1368,10 +1468,10 @@ internal fun DeveloperPanel() {
                 }
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(developer.name, color = SettingsText, fontWeight = FontWeight.SemiBold)
-                    Text("Developer", color = SettingsTextMuted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(stringResource(R.string.about_developer_role), color = SettingsTextMuted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                OutlinedButton(onClick = { openExternalUrlOrCopy(context, clipboard, developer.githubUrl, "GitHub link copied") }) {
-                    Text("GitHub", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                OutlinedButton(onClick = { openExternalUrlOrCopy(context, clipboard, developer.githubUrl, context.getString(R.string.about_github_copied)) }) {
+                    Text(stringResource(R.string.about_github_button), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
@@ -1431,6 +1531,7 @@ internal fun DebugLogsPanel(state: OpenNowUiState, viewModel: OpenNowViewModel) 
     var saved by remember { mutableStateOf(false) }
     var saveError by remember { mutableStateOf<String?>(null) }
     var pendingLogText by remember { mutableStateOf("") }
+    val couldNotSaveLogs = stringResource(R.string.logs_save_failed)
     val saveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         runCatching {
@@ -1441,11 +1542,11 @@ internal fun DebugLogsPanel(state: OpenNowUiState, viewModel: OpenNowViewModel) 
             saved = true
             saveError = null
         }.onFailure { error ->
-            saveError = error.message ?: "Could not save logs"
+            saveError = error.message ?: couldNotSaveLogs
         }
     }
     Text(
-        "Exports launch state, queue state, stream updates, recovery events, settings, codec capabilities, and recent sanitized CloudMatch JSON responses.",
+        stringResource(R.string.logs_export_description),
         color = SettingsTextMuted,
     )
     if (state.androidTvProfile) {
@@ -1453,10 +1554,10 @@ internal fun DebugLogsPanel(state: OpenNowUiState, viewModel: OpenNowViewModel) 
             onClick = viewModel::uploadDiagnosticShare,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Upload logs and show QR", maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(stringResource(R.string.logs_upload_qr), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Text(
-            "Sensitive values are removed before an unlisted, temporary paste is created. Scan the QR code with your phone to share it.",
+            stringResource(R.string.logs_upload_note),
             color = SettingsTextMuted,
             style = MaterialTheme.typography.bodySmall,
         )
@@ -1469,7 +1570,11 @@ internal fun DebugLogsPanel(state: OpenNowUiState, viewModel: OpenNowViewModel) 
                 },
                 modifier = Modifier.weight(1f),
             ) {
-                Text(if (copied) "Copied logs" else "Copy logs", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    if (copied) stringResource(R.string.logs_copied) else stringResource(R.string.logs_copy),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
             OutlinedButton(
                 onClick = {
@@ -1480,7 +1585,11 @@ internal fun DebugLogsPanel(state: OpenNowUiState, viewModel: OpenNowViewModel) 
                 },
                 modifier = Modifier.weight(1f),
             ) {
-                Text(if (saved) "Exported" else "Export logs", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    if (saved) stringResource(R.string.logs_exported) else stringResource(R.string.logs_export),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }
@@ -1491,7 +1600,7 @@ internal fun DebugLogsPanel(state: OpenNowUiState, viewModel: OpenNowViewModel) 
                 copied = true
             },
         ) {
-            Text("Copy error")
+            Text(stringResource(R.string.logs_copy_error))
         }
     }
     saveError?.let {
@@ -1543,7 +1652,7 @@ internal fun BatteryOptimizationPanel() {
         modifier = Modifier.fillMaxWidth()
     ) {
         Text(
-            text = "Android battery optimization restricts the app's background activity, which can cause connection timeouts or pause GFN queue progress when the app is minimized.",
+            text = stringResource(R.string.battery_description),
             style = MaterialTheme.typography.bodyMedium,
             color = SettingsTextMuted
         )
@@ -1555,12 +1664,16 @@ internal fun BatteryOptimizationPanel() {
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Background activity",
+                    text = stringResource(R.string.battery_title),
                     fontWeight = FontWeight.Bold,
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Text(
-                    text = if (isIgnoring) "Unlimited (Allowed in background)" else "Optimized (May timeout in background)",
+                    text = if (isIgnoring) {
+                        stringResource(R.string.battery_unlimited)
+                    } else {
+                        stringResource(R.string.battery_optimized)
+                    },
                     color = if (isIgnoring) Color(0xff81c784) else Color(0xffffb74d),
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -1580,7 +1693,7 @@ internal fun BatteryOptimizationPanel() {
                         }
                     }
                 ) {
-                    Text("Allow")
+                    Text(stringResource(R.string.battery_allow))
                 }
             } else {
                 OutlinedButton(
@@ -1590,7 +1703,7 @@ internal fun BatteryOptimizationPanel() {
                         } catch (_: Exception) {}
                     }
                 ) {
-                    Text("Settings")
+                    Text(stringResource(R.string.nav_settings))
                 }
             }
         }

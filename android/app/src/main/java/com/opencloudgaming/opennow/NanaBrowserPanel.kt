@@ -1,5 +1,7 @@
 package com.opencloudgaming.opennow
 
+import com.papahchan.nanaplay.R
+
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.webkit.WebChromeClient
@@ -54,6 +56,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -269,7 +272,7 @@ fun NanaBrowserPanel(
                                 .onFocusChanged { isAddressEditing = it.isFocused },
                             singleLine = true,
                             textStyle = MaterialTheme.typography.bodySmall,
-                            placeholder = { Text("Enter URL", style = MaterialTheme.typography.bodySmall) },
+                            placeholder = { Text(stringResource(R.string.browser_address_hint), style = MaterialTheme.typography.bodySmall) },
                             // 1.0.33: clear (X) button — was missing entirely.
                             trailingIcon = {
                                 if (addressText.isNotEmpty()) {

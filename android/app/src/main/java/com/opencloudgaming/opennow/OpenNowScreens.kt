@@ -670,7 +670,7 @@ private fun SessionReportDialog(
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Session report") },
+        title = { Text(stringResource(R.string.dlg_session_report)) },
         text = {
             Column(
                 modifier = Modifier
@@ -712,7 +712,7 @@ private fun SessionReportDialog(
                 }
                 if (report.limitedData) {
                     Text(
-                        "This was a short session, so the score is based on limited samples and may vary more than usual.",
+                        stringResource(R.string.dlg_session_short_notice),
                         color = TextMuted,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -778,7 +778,7 @@ private fun SessionReportDialog(
                     color = TextMuted,
                     style = MaterialTheme.typography.bodySmall,
                 )
-                Text("Delivered profile", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.dlg_delivered_profile), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                 Text(
                     buildString {
                         append(formatRuntimeResolution(report.deliveredResolution ?: report.requestedResolution))
@@ -796,25 +796,25 @@ private fun SessionReportDialog(
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 if (report.downgrades.isNotEmpty()) {
-                    Text("Why the profile changed", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.dlg_why_profile_changed), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                     report.downgrades.forEach { finding -> SessionReportFindingRow(finding) }
                 }
-                Text("What to do next", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.dlg_what_to_do_next), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                 report.recommendations.forEach { finding -> SessionReportFindingRow(finding) }
                 TextButton(
                     onClick = onReportBug,
                     contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp),
                 ) {
-                    Text("Experienced a bug? ", color = TextMuted)
+                    Text(stringResource(R.string.dlg_experienced_bug), color = TextMuted)
                     Text(
-                        "Report it",
+                        stringResource(R.string.dlg_report_it),
                         color = MaterialTheme.colorScheme.primary,
                         textDecoration = TextDecoration.Underline,
                     )
                 }
             }
         },
-        confirmButton = { Button(onClick = onDismiss) { Text("Done") } },
+        confirmButton = { Button(onClick = onDismiss) { Text(stringResource(R.string.action_done)) } },
     )
 }
 
@@ -951,11 +951,11 @@ private fun DiagnosticShareDialog(
     when {
         share.uploading -> AlertDialog(
             onDismissRequest = {},
-            title = { Text("Preparing diagnostics") },
+            title = { Text(stringResource(R.string.dlg_preparing_diagnostics)) },
             text = {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     CircularProgressIndicator(Modifier.size(28.dp))
-                    Text("Removing sensitive values and creating a temporary paste…")
+                    Text(stringResource(R.string.dlg_removing_sensitive))
                 }
             },
             confirmButton = {},
@@ -964,7 +964,7 @@ private fun DiagnosticShareDialog(
             val qrCode = remember(share.pasteUrl) { QrCode.encodeText(share.pasteUrl) }
             AlertDialog(
                 onDismissRequest = onDismiss,
-                title = { Text(if (state.androidTvProfile) "Scan diagnostics link" else "Diagnostics copied") },
+                title = { Text(if (state.androidTvProfile) stringResource(R.string.dlg_scan_diagnostics_link) else stringResource(R.string.dlg_diagnostics_copied)) },
                 text = {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -973,12 +973,12 @@ private fun DiagnosticShareDialog(
                         if (state.androidTvProfile) {
                             if (qrCode != null) {
                                 QrCodeView(qrCode, Modifier.size(240.dp))
-                                Text("Scan this QR code on your phone. The sanitized paste expires within 24 hours.")
+                                Text(stringResource(R.string.dlg_scan_qr_paste))
                             } else {
-                                Text("Could not create the QR code. Close this dialog and try again.")
+                                Text(stringResource(R.string.dlg_qr_create_failed))
                             }
                         } else {
-                            Text("Device, account type, stream profile, current status, and the temporary paste URL were copied to the clipboard.")
+                            Text(stringResource(R.string.dlg_diagnostics_copied_body))
                             Text(
                                 share.pasteUrl,
                                 color = MaterialTheme.colorScheme.primary,
@@ -988,21 +988,21 @@ private fun DiagnosticShareDialog(
                         }
                     }
                 },
-                confirmButton = { Button(onClick = onDismiss) { Text("Done") } },
+                confirmButton = { Button(onClick = onDismiss) { Text(stringResource(R.string.action_done)) } },
             )
         }
         else -> AlertDialog(
             onDismissRequest = onDismiss,
-            title = { Text("Create temporary diagnostics paste?") },
+            title = { Text(stringResource(R.string.dlg_create_diagnostics_paste)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("NanaPlay will remove tokens, account identifiers, email addresses, session IDs, and network addresses before uploading.")
-                    Text("The randomized link is unlisted but not encrypted, and the paste service deletes uploads within 24 hours.", color = TextMuted)
+                    Text(stringResource(R.string.dlg_diagnostics_sanitize_info))
+                    Text(stringResource(R.string.dlg_diagnostics_unlisted_info), color = TextMuted)
                     share.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 }
             },
-            confirmButton = { Button(onClick = onUpload) { Text(if (share.error == null) "Sanitize and upload" else "Retry") } },
-            dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+            confirmButton = { Button(onClick = onUpload) { Text(if (share.error == null) stringResource(R.string.dlg_sanitize_and_upload) else stringResource(R.string.action_retry)) } },
+            dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
         )
     }
 }
@@ -1018,7 +1018,7 @@ private fun AnnouncementDialog(
         text = { Text(announcement.message) },
         confirmButton = {
             Button(onClick = onDismiss) {
-                Text("Got it")
+                Text(stringResource(R.string.dlg_got_it))
             }
         },
     )
@@ -1031,14 +1031,14 @@ private fun AnalyticsConsentDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDecline,
-        title = { Text("Share diagnostics?") },
+        title = { Text(stringResource(R.string.dlg_share_diagnostics)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    "Share anonymous diagnostics to help us find patterns in bugs, crashes, and performance problems. Sensitive data is removed, and we do not sell your data.",
+                    stringResource(R.string.dlg_share_anonymous_desc),
                 )
                 Text(
-                    "If sharing is off during a crash, we may not have enough information to investigate your report. It is off by default and can be changed in Privacy settings.",
+                    stringResource(R.string.dlg_sharing_off_warning),
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -1046,12 +1046,12 @@ private fun AnalyticsConsentDialog(
         },
         confirmButton = {
             Button(onClick = onAllow) {
-                Text("Share analytics")
+                Text(stringResource(R.string.dlg_share_analytics))
             }
         },
         dismissButton = {
             TextButton(onClick = onDecline) {
-                Text("Keep off")
+                Text(stringResource(R.string.dlg_keep_off))
             }
         },
     )
@@ -1064,21 +1064,21 @@ private fun AndroidUpdatePromptDialog(
     onDetails: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val version = update.availableVersionName?.let { "Version $it" }
-        ?: update.availableVersionCode?.let { "Build $it" }
-        ?: "A new build"
+    val version = update.availableVersionName?.let { stringResource(R.string.dlg_update_version, it) }
+        ?: update.availableVersionCode?.let { stringResource(R.string.dlg_update_build, it) }
+        ?: stringResource(R.string.dlg_update_new_build)
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (update.status == AndroidUpdateStatus.Downloaded) "Update ready" else "NanaPlay update available") },
+        title = { Text(if (update.status == AndroidUpdateStatus.Downloaded) stringResource(R.string.dlg_update_ready) else stringResource(R.string.dlg_update_available)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     if (update.status == AndroidUpdateStatus.Downloaded) {
-                        "$version is downloaded and ready to install."
+                        stringResource(R.string.dlg_update_downloaded_desc, version)
                     } else if (update.installSource.isGooglePlay) {
-                        "You are on build ${update.currentVersionCode}. Google Play has ${version.lowercase()}."
+                        stringResource(R.string.dlg_update_play_desc, update.currentVersionCode, version.lowercase())
                     } else {
-                        "$version is available for this device."
+                        stringResource(R.string.dlg_update_available_desc, version)
                     },
                 )
                 update.releaseNotes?.trim()?.takeIf { it.isNotBlank() }?.let { notes ->
@@ -1096,9 +1096,9 @@ private fun AndroidUpdatePromptDialog(
             Button(onClick = onPrimary) {
                 Text(
                     when {
-                        update.status == AndroidUpdateStatus.Downloaded -> "Install"
-                        update.installSource.isGooglePlay -> "Update"
-                        else -> "Download"
+                        update.status == AndroidUpdateStatus.Downloaded -> stringResource(R.string.update_button_install)
+                        update.installSource.isGooglePlay -> stringResource(R.string.update_button_update)
+                        else -> stringResource(R.string.update_button_download)
                     },
                 )
             }
@@ -1106,7 +1106,7 @@ private fun AndroidUpdatePromptDialog(
         dismissButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = onDetails) {
-                    Text("Details")
+                    Text(stringResource(R.string.action_details))
                 }
                 TextButton(onClick = onDismiss) {
                     Text(stringResource(R.string.action_cancel))
@@ -1141,9 +1141,9 @@ private fun LoginScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                 output.write(pendingLogText.toByteArray(Charsets.UTF_8))
             } ?: error("Could not open log file")
         }.onSuccess {
-            Toast.makeText(context, "Logs exported", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, context.getString(R.string.toast_logs_exported), Toast.LENGTH_SHORT).show()
         }.onFailure { error ->
-            Toast.makeText(context, error.message ?: "Could not export logs", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, error.message ?: context.getString(R.string.toast_logs_export_failed), Toast.LENGTH_LONG).show()
         }
     }
     val tvLogin = state.androidTvProfile
@@ -1200,12 +1200,12 @@ private fun LoginScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    "Native Android GeForce NOW client",
+                    stringResource(R.string.dlg_about_native_client),
                     color = TextMuted,
                     style = if (compactForPhonePairing) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodyLarge,
                 )
                 Text(
-                    "Recode by Papah Chan",
+                    stringResource(R.string.dlg_about_recode_by),
                     color = TextMuted,
                     style = if (compactForPhonePairing) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
                 )
@@ -1242,7 +1242,7 @@ private fun LoginScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                     }
                     if (!tvLogin && deviceCodeLoginAvailable) {
                         TextButton(onClick = { viewModel.loginWithCode() }, enabled = !normalLoginBusy) {
-                            Text("Use code sign-in")
+                            Text(stringResource(R.string.dlg_use_code_signin))
                         }
                     }
                     if (tvLogin) {
@@ -1260,10 +1260,10 @@ private fun LoginScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
     if (state.loginToolsVisible) {
         AlertDialog(
             onDismissRequest = viewModel::dismissLoginTools,
-            title = { Text("Sign-in tools") },
+            title = { Text(stringResource(R.string.dlg_signin_tools)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Use a token to sign in without the browser, or export diagnostics before signing in.")
+                    Text(stringResource(R.string.dlg_signin_tools_desc))
                     Button(
                         onClick = {
                             viewModel.dismissLoginTools()
@@ -1272,7 +1272,7 @@ private fun LoginScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                         enabled = !normalLoginBusy,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text("Sign in with token")
+                        Text(stringResource(R.string.dlg_sign_in_with_token))
                     }
                     OutlinedButton(
                         onClick = {
@@ -1286,7 +1286,7 @@ private fun LoginScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                         },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text(if (tvLogin) "Export logs with QR" else "Export logs")
+                        Text(if (tvLogin) stringResource(R.string.dlg_export_logs_qr) else stringResource(R.string.dlg_export_logs))
                     }
                 }
             },
@@ -1311,15 +1311,15 @@ private fun LoginScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                 tokenInput = ""
                 tokenDialogVisible = false
             },
-            title = { Text("Sign in with token") },
+            title = { Text(stringResource(R.string.dlg_sign_in_with_token)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Paste an NVIDIA access token or token-response JSON. NanaPlay verifies the access token before saving the account.")
+                    Text(stringResource(R.string.dlg_token_signin_desc))
                     OutlinedTextField(
                         value = tokenInput,
                         onValueChange = { tokenInput = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Access token") },
+                        label = { Text(stringResource(R.string.dlg_access_token_label)) },
                         minLines = 3,
                         maxLines = 6,
                         visualTransformation = PasswordVisualTransformation(),
@@ -1333,7 +1333,7 @@ private fun LoginScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                         singleLine = false,
                     )
                     Text(
-                        "Only use credentials for an account you control.",
+                        stringResource(R.string.dlg_token_own_account_warning),
                         color = TextMuted,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -1344,7 +1344,7 @@ private fun LoginScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                     onClick = submitToken,
                     enabled = tokenInput.isNotBlank() && !normalLoginBusy,
                 ) {
-                    Text("Sign in")
+                    Text(stringResource(R.string.dlg_sign_in))
                 }
             },
             dismissButton = {
@@ -1382,7 +1382,7 @@ private fun TvPhoneSignInConnector(
             enabled = !connector.busy,
             modifier = modifier,
         ) {
-            Text(if (connector.busy) "Starting phone pairing…" else "Sign in from NanaPlay on phone")
+            Text(if (connector.busy) stringResource(R.string.pair_starting_phone_pairing) else stringResource(R.string.pair_sign_in_from_phone))
         }
     } else {
         val qrCode = remember(connector.pairUri) { connector.pairUri?.let(QrCode::encodeText) }
@@ -1420,16 +1420,16 @@ private fun TvPhoneSignInConnector(
                     }
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(if (dedicated) 10.dp else 8.dp)) {
                         Text(
-                            if (connector.pairedDeviceName == null) "Pair your phone" else "Phone connected",
+                            if (connector.pairedDeviceName == null) stringResource(R.string.pair_pair_your_phone) else stringResource(R.string.pair_phone_connected),
                             color = TextPrimary,
                             style = if (dedicated) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
                             if (connector.pairedDeviceName == null) {
-                                "Your TV and phone must be on the same Wi-Fi. Scan the QR code with your phone camera; the pairing code expires after five minutes."
+                                stringResource(R.string.pair_tv_phone_wifi_info)
                             } else {
-                                "${connector.pairedDeviceName} can launch games. Approve trust below for settings, overlays, sessions, and account switching."
+                                stringResource(R.string.pair_device_can_launch, connector.pairedDeviceName)
                             },
                             color = TextMuted,
                             style = if (dedicated) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodySmall,
@@ -1447,7 +1447,7 @@ private fun TvPhoneSignInConnector(
                             ) { trusted -> viewModel.setLocalTvDeviceTrusted(trusted) }
                         }
                         OutlinedButton(onClick = viewModel::stopLocalTvConnector) {
-                            Text(if (connector.pairedDeviceName == null) "Cancel pairing" else "Disconnect phone")
+                            Text(if (connector.pairedDeviceName == null) stringResource(R.string.pair_cancel_pairing) else stringResource(R.string.pair_disconnect_phone))
                         }
                     }
                 }
@@ -1461,7 +1461,7 @@ private fun TvPhoneSignInConnector(
 private fun PairingCodeDisplay(code: String?, compact: Boolean) {
     val digits = code?.takeIf { it.length == 4 && it.all(Char::isDigit) } ?: "----"
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("PAIRING CODE", color = TextMuted, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+        Text(stringResource(R.string.pair_pairing_code), color = TextMuted, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
         Row(horizontalArrangement = Arrangement.spacedBy(if (compact) 5.dp else 8.dp)) {
             digits.forEach { digit ->
                 Surface(
@@ -2275,11 +2275,29 @@ private fun MainShell(
                             game = game,
                             favorite = game.id in state.settings.favoriteGameIds,
                             defaultVariantId = state.settings.defaultGameVariantIds[game.id],
+                            perGameSettings = state.settings.perGameSettings,
                             fullScreen = tvProfile,
                             safeAreaPadding = screenEdgePadding,
                             onPlay = viewModel::play,
                             onChooseStore = viewModel::chooseStore,
                             onFavorite = viewModel::updateFavorites,
+                            onSavePerGameSettings = { gameToSave ->
+                                val current = viewModel.state.value.settings
+                                viewModel.updateSettings(
+                                    current.copy(
+                                        perGameSettings = current.perGameSettings +
+                                            (gameToSave.id to current.stream),
+                                    ),
+                                )
+                            },
+                            onResetPerGameSettings = { gameToReset ->
+                                val current = viewModel.state.value.settings
+                                viewModel.updateSettings(
+                                    current.copy(
+                                        perGameSettings = current.perGameSettings - gameToReset.id,
+                                    ),
+                                )
+                            },
                             connectedTvName = state.localTvConnector.connectedTvName,
                             onPlayOnTv = viewModel::playOnLocalTv,
                             onDismiss = viewModel::clearSelectedGame,
@@ -3587,7 +3605,7 @@ private fun ActiveSessionResumeCard(
                     .clip(RoundedCornerShape(10.dp)),
             )
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("Resume cloud session", color = TextPrimary, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(stringResource(R.string.osd_resume_cloud_session), color = TextPrimary, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
                     game?.title ?: "App ${active.appId}",
                     color = TextMuted,
@@ -4240,7 +4258,7 @@ private fun NanaPlayHomeHeader(
                 maxLines = 1,
             )
             Text(
-                "Your cloud games, one tap away",
+                stringResource(R.string.osd_tagline),
                 color = Color.White.copy(alpha = 0.82f),
                 style = MaterialTheme.typography.bodyMedium,
                 maxLines = 1,
@@ -5549,11 +5567,14 @@ private fun GameDetailsSheet(
     game: GameInfo,
     favorite: Boolean,
     defaultVariantId: String?,
+    perGameSettings: Map<String, StreamSettings>,
     fullScreen: Boolean,
     safeAreaPadding: Dp,
     onPlay: (GameInfo) -> Unit,
     onChooseStore: (GameInfo) -> Unit,
     onFavorite: (String) -> Unit,
+    onSavePerGameSettings: (GameInfo) -> Unit,
+    onResetPerGameSettings: (GameInfo) -> Unit,
     connectedTvName: String?,
     onPlayOnTv: (GameInfo) -> Unit,
     onDismiss: () -> Unit,
@@ -5645,9 +5666,12 @@ private fun GameDetailsSheet(
                         game = game,
                         favorite = favorite,
                         defaultVariantId = defaultVariantId,
+                        hasPerGameSettings = perGameSettings.containsKey(game.id),
                         onPlay = onPlay,
                         onChooseStore = onChooseStore,
                         onFavorite = onFavorite,
+                        onSavePerGameSettings = { onSavePerGameSettings(game) },
+                        onResetPerGameSettings = { onResetPerGameSettings(game) },
                         connectedTvName = connectedTvName,
                         onPlayOnTv = onPlayOnTv,
                         onDismiss = onDismiss,
@@ -5661,9 +5685,12 @@ private fun GameDetailsSheet(
                         game = game,
                         favorite = favorite,
                         defaultVariantId = defaultVariantId,
+                        hasPerGameSettings = perGameSettings.containsKey(game.id),
                         onPlay = onPlay,
                         onChooseStore = onChooseStore,
                         onFavorite = onFavorite,
+                        onSavePerGameSettings = { onSavePerGameSettings(game) },
+                        onResetPerGameSettings = { onResetPerGameSettings(game) },
                         connectedTvName = connectedTvName,
                         onPlayOnTv = onPlayOnTv,
                         onDismiss = onDismiss,
@@ -5689,9 +5716,12 @@ private fun GameDetailsLandscapeContent(
     game: GameInfo,
     favorite: Boolean,
     defaultVariantId: String?,
+    hasPerGameSettings: Boolean,
     onPlay: (GameInfo) -> Unit,
     onChooseStore: (GameInfo) -> Unit,
     onFavorite: (String) -> Unit,
+    onSavePerGameSettings: () -> Unit,
+    onResetPerGameSettings: () -> Unit,
     connectedTvName: String?,
     onPlayOnTv: (GameInfo) -> Unit,
     onDismiss: () -> Unit,
@@ -5761,7 +5791,7 @@ private fun GameDetailsLandscapeContent(
                             },
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            Text("Play on TV", maxLines = 1)
+                            Text(stringResource(R.string.osd_play_on_tv), maxLines = 1)
                         }
                     }
                     LongPressPlayButton(
@@ -5798,6 +5828,9 @@ private fun GameDetailsLandscapeContent(
                         game = game,
                         defaultVariantId = defaultVariantId,
                         description = description,
+                        hasPerGameSettings = hasPerGameSettings,
+                        onSavePerGameSettings = onSavePerGameSettings,
+                        onResetPerGameSettings = onResetPerGameSettings,
                     )
                 }
             } else {
@@ -5812,6 +5845,9 @@ private fun GameDetailsLandscapeContent(
                         game = game,
                         defaultVariantId = defaultVariantId,
                         description = description,
+                        hasPerGameSettings = hasPerGameSettings,
+                        onSavePerGameSettings = onSavePerGameSettings,
+                        onResetPerGameSettings = onResetPerGameSettings,
                     )
                 }
                 Row(
@@ -5830,7 +5866,7 @@ private fun GameDetailsLandscapeContent(
                             .onFocusChanged { dismissFocused = it.isFocused }
                     ) {
                         Text(
-                            "Dismiss",
+                            stringResource(R.string.action_dismiss),
                             color = if (dismissFocused) accent else TextPrimary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -5857,7 +5893,7 @@ private fun GameDetailsLandscapeContent(
                             },
                             modifier = Modifier.weight(1f).height(48.dp),
                         ) {
-                            Text("Play on TV", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(stringResource(R.string.osd_play_on_tv), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
@@ -5871,6 +5907,9 @@ private fun GameDetailsCompactInfoContent(
     game: GameInfo,
     defaultVariantId: String?,
     description: String?,
+    hasPerGameSettings: Boolean,
+    onSavePerGameSettings: () -> Unit,
+    onResetPerGameSettings: () -> Unit,
 ) {
     OwnershipStatusRow(game = game, compact = true)
     GameGenreChips(game = game, compact = true)
@@ -5882,6 +5921,11 @@ private fun GameDetailsCompactInfoContent(
         defaultVariantId = defaultVariantId,
         compact = true,
     )
+    PerGameSettingsSection(
+        hasCustomSettings = hasPerGameSettings,
+        onSave = onSavePerGameSettings,
+        onReset = onResetPerGameSettings,
+    )
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -5890,9 +5934,12 @@ private fun GameDetailsScrollableContent(
     game: GameInfo,
     favorite: Boolean,
     defaultVariantId: String?,
+    hasPerGameSettings: Boolean,
     onPlay: (GameInfo) -> Unit,
     onChooseStore: (GameInfo) -> Unit,
     onFavorite: (String) -> Unit,
+    onSavePerGameSettings: () -> Unit,
+    onResetPerGameSettings: () -> Unit,
     connectedTvName: String?,
     onPlayOnTv: (GameInfo) -> Unit,
     onDismiss: () -> Unit,
@@ -5964,6 +6011,11 @@ private fun GameDetailsScrollableContent(
                         game = game,
                         defaultVariantId = defaultVariantId,
                         compact = false,
+                    )
+                    PerGameSettingsSection(
+                        hasCustomSettings = hasPerGameSettings,
+                        onSave = onSavePerGameSettings,
+                        onReset = onResetPerGameSettings,
                     )
                 }
             }
@@ -6078,6 +6130,81 @@ private fun LaunchOptionsList(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Per-game stream settings controls shown at the bottom of the game details sheet.
+ *
+ * "Save as default for this game" snapshots the current global stream settings ([AppSettings.stream])
+ * into [AppSettings.perGameSettings] for this game; future launches of this game use that snapshot
+ * instead of the global settings. When an override exists, a "Custom settings" badge is shown with a
+ * small "Reset to global" action that deletes the override.
+ */
+@Composable
+private fun PerGameSettingsSection(
+    hasCustomSettings: Boolean,
+    onSave: () -> Unit,
+    onReset: () -> Unit,
+) {
+    val context = LocalContext.current
+    val accent = MaterialTheme.colorScheme.primary
+    Column(
+        Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (hasCustomSettings) {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = accent.copy(alpha = 0.18f),
+                    contentColor = accent,
+                ) {
+                    Text(
+                        stringResource(R.string.game_settings_custom),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    )
+                }
+                TextButton(
+                    onClick = {
+                        onReset()
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.game_settings_reset_done),
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    },
+                ) {
+                    Text(
+                        stringResource(R.string.game_settings_reset),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+            }
+        }
+        OutlinedButton(
+            onClick = {
+                onSave()
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.game_settings_saved),
+                    Toast.LENGTH_SHORT,
+                ).show()
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(
+                stringResource(R.string.game_settings_save_default),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -6359,7 +6486,7 @@ private fun OwnershipStatusRow(game: GameInfo, compact: Boolean) {
             tonalElevation = 0.dp,
         ) {
             Text(
-                "Not owned",
+                stringResource(R.string.store_not_owned),
                 color = OpenNowPalette.OnErrorContainer,
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Bold,
@@ -6385,7 +6512,7 @@ private fun OwnershipStatusRow(game: GameInfo, compact: Boolean) {
                 ) {
                     ConnectorStoreIcon(badge)
                     Text(
-                        "Owned on $store",
+                        stringResource(R.string.store_owned_on_store, store),
                         color = TextPrimary,
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.SemiBold,
@@ -6438,7 +6565,7 @@ private fun GameScreenshotGallery(game: GameInfo, compact: Boolean) {
         verticalArrangement = Arrangement.spacedBy(if (compact) 7.dp else 9.dp),
     ) {
         Text(
-            "Screenshots",
+            stringResource(R.string.dlg_screenshots),
             color = TextPrimary,
             style = if (compact) MaterialTheme.typography.labelLarge else MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
@@ -6492,7 +6619,7 @@ private fun GameDescriptionDisclosure(description: String?, compact: Boolean) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = if (compact) 8.dp else 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "Description",
+                    stringResource(R.string.dlg_description),
                     color = TextPrimary,
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
@@ -6616,7 +6743,7 @@ private fun DetailRow(row: GameDetailRow, compact: Boolean) {
                 onLongClick = row.copyValue?.let { value ->
                     {
                         clipboard.setText(AnnotatedString(value))
-                        Toast.makeText(context, "App ID copied", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.toast_app_id_copied), Toast.LENGTH_SHORT).show()
                     }
                 },
             )
@@ -7699,7 +7826,7 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            "Done",
+                            stringResource(R.string.action_done),
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.SemiBold,
                         )
@@ -8444,7 +8571,7 @@ private fun StreamSessionTimerMenuRow(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.weight(1f)) {
-                Text("Session timer", fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.osd_session_timer), fontWeight = FontWeight.SemiBold)
                 Text(display.label, color = TextMuted, style = MaterialTheme.typography.labelSmall)
             }
             Text(
@@ -8932,7 +9059,7 @@ private fun ActiveSessionDecisionScreen(
                             .clip(RoundedCornerShape(10.dp)),
                     )
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("Cloud session already active", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.dlg_cloud_session_active), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         Text(
                             activeGame?.title ?: "App ${active.appId}",
                             color = TextPrimary,
@@ -8949,7 +9076,7 @@ private fun ActiveSessionDecisionScreen(
                     }
                 }
                 Text(
-                    "Resume the existing session, or terminate it and start ${decision.requestedGameTitle}.",
+                    stringResource(R.string.dlg_resume_or_terminate, decision.requestedGameTitle),
                     color = TextMuted,
                     style = MaterialTheme.typography.bodyMedium,
                 )
@@ -8958,8 +9085,8 @@ private fun ActiveSessionDecisionScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    TextButton(onClick = onCancel) { Text("Cancel") }
-                    OutlinedButton(onClick = onReplaceSession) { Text("Terminate and start new") }
+                    TextButton(onClick = onCancel) { Text(stringResource(R.string.action_cancel)) }
+                    OutlinedButton(onClick = onReplaceSession) { Text(stringResource(R.string.dlg_terminate_start_new)) }
                     Button(onClick = onResumeSession) { Text(stringResource(R.string.action_resume)) }
                 }
             }
@@ -8982,21 +9109,21 @@ private fun NoActiveStreamScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Text("No active stream", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text(stringResource(R.string.osd_no_active_stream), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
         Text(
-            "NanaPlay does not have a local stream attached right now.",
+            stringResource(R.string.osd_no_local_stream),
             color = TextMuted,
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(18.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedButton(onClick = onBack) { Text("Back to library") }
+            OutlinedButton(onClick = onBack) { Text(stringResource(R.string.osd_back_to_library)) }
             if (canResumeSession) {
                 Button(onClick = onResumeSession) { Text(stringResource(R.string.action_resume)) }
             }
             if (canEndSession) {
-                Button(onClick = onEndSession) { Text("End cloud session") }
+                Button(onClick = onEndSession) { Text(stringResource(R.string.osd_end_cloud_session)) }
             }
         }
     }
@@ -9042,10 +9169,10 @@ private fun StreamControlLauncher(
             }
         }
         Button(onClick = onToggle, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
-            Text(if (controlsOpen) "Close" else "Controls")
+            Text(if (controlsOpen) stringResource(R.string.action_close) else stringResource(R.string.osd_controls))
         }
         OutlinedButton(onClick = onExit, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
-            Text("Exit")
+            Text(stringResource(R.string.stream_panel_exit))
         }
     }
 
@@ -9206,14 +9333,14 @@ private fun StreamGuideDoneCallout(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                Text("Step 2 of 2", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                Text("Press Done", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(stringResource(R.string.pair_step_2_of_2), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.pair_press_done), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             TextButton(
                 onClick = onSkip,
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
             ) {
-                Text("Skip", maxLines = 1)
+                Text(stringResource(R.string.action_skip), maxLines = 1)
             }
             if (!controlsOpen) {
                 Button(
@@ -9221,7 +9348,7 @@ private fun StreamGuideDoneCallout(
                     modifier = Modifier.focusRequester(primaryFocusRequester),
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
                 ) {
-                    Text("Open", maxLines = 1)
+                    Text(stringResource(R.string.action_open), maxLines = 1)
                 }
             }
         }
@@ -9237,11 +9364,11 @@ private fun PhysicalControllerTouchControlsDialog(
 ) {
     AlertDialog(
         onDismissRequest = onOk,
-        title = { Text("Controller detected") },
+        title = { Text(stringResource(R.string.dlg_controller_detected)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    "The on-screen controller was hidden because a physical controller is connected.",
+                    stringResource(R.string.dlg_onscreen_hidden_controller),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Row(
@@ -9257,18 +9384,18 @@ private fun PhysicalControllerTouchControlsDialog(
                         checked = doNotShowAgain,
                         onCheckedChange = onDoNotShowAgainChange,
                     )
-                    Text("Don't show again", color = MaterialTheme.colorScheme.onSurface)
+                    Text(stringResource(R.string.dlg_dont_show_again), color = MaterialTheme.colorScheme.onSurface)
                 }
             }
         },
         confirmButton = {
             TextButton(onClick = onOk) {
-                Text("OK")
+                Text(stringResource(R.string.action_ok))
             }
         },
         dismissButton = {
             TextButton(onClick = onUndo) {
-                Text("Undo")
+                Text(stringResource(R.string.action_undo))
             }
         },
     )
@@ -9308,7 +9435,7 @@ private fun StreamGuideEdgeCue(modifier: Modifier = Modifier) {
                     tint = MaterialTheme.colorScheme.onPrimary,
                     modifier = Modifier.size(18.dp),
                 )
-                Text("Back", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.action_back), color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -9845,32 +9972,32 @@ private fun BugReportDataDisclosure(
                 style = MaterialTheme.typography.labelLarge,
             )
             Text(
-                "This uploads to $ANDROID_BUG_REPORT_ENDPOINT. PrintedWaste and NanaPlay maintainers may view the report text, app version/build, device model, Android version, provider and membership category, current game, stream status/settings, and a redacted diagnostic log.",
+                stringResource(R.string.dlg_bugreport_upload_info, ANDROID_BUG_REPORT_ENDPOINT),
                 color = TextMuted,
                 style = MaterialTheme.typography.bodySmall,
             )
             Text(
-                "The automatic log removes account names, credentials, session IDs, and network addresses before upload.",
+                stringResource(R.string.dlg_bugreport_log_info),
                 color = TextPrimary,
                 style = MaterialTheme.typography.bodySmall,
                 fontWeight = FontWeight.SemiBold,
             )
             if (includeTypedTextWarning) {
                 Text(
-                    "Your typed title and description are sent exactly as written, so do not include personal or sensitive information.",
+                    stringResource(R.string.dlg_bugreport_typed_info),
                     color = TextPrimary,
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.SemiBold,
                 )
             }
             Text(
-                "Your data is not sold and is used only to investigate and fix bugs.",
+                stringResource(R.string.dlg_bugreport_data_info),
                 color = TextPrimary,
                 style = MaterialTheme.typography.bodySmall,
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                "The same timestamped log available from Settings > Advanced > Debug Logs is attached automatically. No other files are added.",
+                stringResource(R.string.dlg_bugreport_log_attached),
                 color = TextMuted,
                 style = MaterialTheme.typography.labelSmall,
             )
@@ -10086,7 +10213,7 @@ private fun streamPanelPageTransition(
 @Composable
 private fun BugReportSubmissionRequirements(modifier: Modifier = Modifier) {
     Text(
-        "Bug reports are currently supported only in English. Be as detailed and descriptive as possible. Non-English or non-descriptive reports will be ignored.",
+        stringResource(R.string.dlg_bugreport_english_only),
         modifier = modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.error,
         fontWeight = FontWeight.Bold,
@@ -10117,9 +10244,9 @@ private fun BugReportPreflightDeckView(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("Before you report", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.dlg_before_you_report), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Live checks from this device and session",
+                    stringResource(R.string.dlg_live_checks_title),
                     color = TextMuted,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -10206,7 +10333,7 @@ private fun BugReportPreflightDeckView(
                     }
                     if (targetCard.recommendations.isNotEmpty()) {
                         Text(
-                            "MATCHED SUGGESTIONS",
+                            stringResource(R.string.dlg_matched_suggestions),
                             color = targetAccent,
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
@@ -10239,7 +10366,7 @@ private fun BugReportPreflightDeckView(
                         }
                     } else {
                         Text(
-                            "No irrelevant fixes are being suggested for this check.",
+                            stringResource(R.string.dlg_no_suggestions),
                             color = targetAccent,
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.SemiBold,
@@ -10250,7 +10377,7 @@ private fun BugReportPreflightDeckView(
         }
 
         Text(
-            "Still happening after any matched suggestion? Continue and the measured evidence will be attached automatically.",
+            stringResource(R.string.dlg_still_happening),
             color = TextMuted,
             style = MaterialTheme.typography.labelSmall,
         )
@@ -10261,14 +10388,14 @@ private fun BugReportPreflightDeckView(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TextButton(onClick = onRefresh) {
-                Text("Refresh")
+                Text(stringResource(R.string.action_refresh))
             }
             Spacer(Modifier.weight(1f))
             OutlinedButton(onClick = if (page == 0) onCancel else onPrevious) {
-                Text(if (page == 0) "Cancel" else "Back")
+                Text(if (page == 0) stringResource(R.string.action_cancel) else stringResource(R.string.action_back))
             }
             Button(onClick = onNext) {
-                Text(if (page == deck.cards.lastIndex) "Continue" else "Next")
+                Text(if (page == deck.cards.lastIndex) stringResource(R.string.action_continue) else stringResource(R.string.action_next))
             }
         }
     }
@@ -10333,7 +10460,7 @@ private fun StreamBugReporter(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Icon(Icons.Rounded.Check, contentDescription = null, tint = Green)
-                        Text("Bug report sent", fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.dlg_bug_report_sent), fontWeight = FontWeight.Bold)
                     }
                     Text(
                         submission.reference?.let { "PrintedWaste reference: $it" }
@@ -10355,7 +10482,7 @@ private fun StreamBugReporter(
                                 onReset()
                             },
                         ) {
-                            Text("Send another")
+                            Text(stringResource(R.string.dlg_send_another))
                         }
                         TextButton(
                             onClick = {
@@ -10367,7 +10494,7 @@ private fun StreamBugReporter(
                                 onExpandedClose()
                             },
                         ) {
-                            Text("Close")
+                            Text(stringResource(R.string.action_close))
                         }
                     }
                 }
@@ -10385,7 +10512,7 @@ private fun StreamBugReporter(
                 ) {
                     CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(10.dp))
-                    Text("Checking this session…", color = TextMuted)
+                    Text(stringResource(R.string.dlg_checking_session), color = TextMuted)
                 }
             } else {
                 BugReportPreflightDeckView(
@@ -10428,9 +10555,9 @@ private fun StreamBugReporter(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("Report a stream bug", fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.dlg_report_stream_bug), fontWeight = FontWeight.Bold)
                     Text(
-                        "Describe the problem without leaving your game.",
+                        stringResource(R.string.dlg_describe_problem),
                         color = TextMuted,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -10444,7 +10571,7 @@ private fun StreamBugReporter(
                         preflightDeck = preflightProvider()
                     },
                 ) {
-                    Text("Checks")
+                    Text(stringResource(R.string.dlg_checks))
                 }
                 TextButton(
                     enabled = !submission.uploading,
@@ -10457,7 +10584,7 @@ private fun StreamBugReporter(
                         onExpandedClose()
                     },
                 ) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.action_cancel))
                 }
             }
 
@@ -10477,8 +10604,8 @@ private fun StreamBugReporter(
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !submission.uploading,
                 singleLine = true,
-                label = { Text("Issue title") },
-                placeholder = { Text("Stream froze after reconnecting") },
+                label = { Text(stringResource(R.string.dlg_issue_title)) },
+                placeholder = { Text(stringResource(R.string.dlg_issue_placeholder)) },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
             )
             OutlinedTextField(
@@ -10493,8 +10620,8 @@ private fun StreamBugReporter(
                 enabled = !submission.uploading,
                 minLines = 4,
                 maxLines = 7,
-                label = { Text("What happened?") },
-                placeholder = { Text("What were you doing, what went wrong, and can you reproduce it?") },
+                label = { Text(stringResource(R.string.dlg_what_happened)) },
+                placeholder = { Text(stringResource(R.string.dlg_description_placeholder)) },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
             )
 
@@ -10514,7 +10641,7 @@ private fun StreamBugReporter(
                     enabled = !submission.uploading,
                 )
                 Text(
-                    "I understand what will be uploaded and consent to send it to PrintedWaste.",
+                    stringResource(R.string.dlg_consent_upload),
                     modifier = Modifier.weight(1f),
                     color = TextMuted,
                     style = MaterialTheme.typography.bodySmall,
@@ -10554,9 +10681,9 @@ private fun StreamBugReporter(
                         color = MaterialTheme.colorScheme.onPrimary,
                     )
                     Spacer(Modifier.width(8.dp))
-                    Text("Uploading report…")
+                    Text(stringResource(R.string.dlg_uploading_report))
                 } else {
-                    Text("Send bug report")
+                    Text(stringResource(R.string.dlg_send_bug_report))
                 }
             }
         }
@@ -10565,20 +10692,20 @@ private fun StreamBugReporter(
     if (confirmationOpen) {
         AlertDialog(
             onDismissRequest = { confirmationOpen = false },
-            title = { Text("Upload bug report?") },
+            title = { Text(stringResource(R.string.dlg_upload_bug_report)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     BugReportSubmissionRequirements()
                     Text(
-                        "Your report will be uploaded to the PrintedWaste API and may be viewed by PrintedWaste and NanaPlay maintainers.",
+                        stringResource(R.string.dlg_report_uploaded_info),
                     )
                     Text(
-                        "It includes your title and description exactly as written, the API's app/build fields, and the same redacted log file available from Settings > Advanced > Debug Logs. No other files are uploaded.",
+                        stringResource(R.string.dlg_report_includes_info),
                         color = TextMuted,
                         style = MaterialTheme.typography.bodySmall,
                     )
                     Text(
-                        "This data is not sold. It is used only to investigate and fix bugs.",
+                        stringResource(R.string.dlg_data_not_sold),
                         fontWeight = FontWeight.Bold,
                     )
                 }
@@ -10591,7 +10718,7 @@ private fun StreamBugReporter(
                         onSubmit(title, description)
                     },
                 ) {
-                    Text("Upload to PrintedWaste")
+                    Text(stringResource(R.string.dlg_upload_to_printedwaste))
                 }
             },
             dismissButton = {
@@ -10601,7 +10728,7 @@ private fun StreamBugReporter(
                         confirmationOpen = false
                     },
                 ) {
-                    Text("Go back")
+                    Text(stringResource(R.string.dlg_go_back))
                 }
             },
         )
@@ -11009,21 +11136,21 @@ private fun StreamKeyboardBar(
                     .fillMaxWidth()
                     .focusRequester(inputFocusRequester),
                 singleLine = true,
-                placeholder = { Text("Type into stream", color = TextMuted) },
+                placeholder = { Text(stringResource(R.string.osd_type_into_stream), color = TextMuted) },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { sendIfReady() }),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                Button(onClick = sendIfReady, enabled = text.isNotBlank(), modifier = Modifier.weight(1f)) { Text("Send") }
-                OutlinedButton(onClick = onBackspace, modifier = Modifier.weight(1f)) { Text("⌫") }
-                OutlinedButton(onClick = onEnter, modifier = Modifier.weight(1f)) { Text("Enter") }
-                OutlinedButton(onClick = onEsc, modifier = Modifier.weight(1f)) { Text("Esc") }
+                Button(onClick = sendIfReady, enabled = text.isNotBlank(), modifier = Modifier.weight(1f)) { Text(stringResource(R.string.action_send)) }
+                OutlinedButton(onClick = onBackspace, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.stream_panel_key_backspace)) }
+                OutlinedButton(onClick = onEnter, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.stream_panel_key_enter)) }
+                OutlinedButton(onClick = onEsc, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.stream_panel_key_esc)) }
                 TextButton(
                     onClick = {
                         keyboardController?.hide()
                         onDone()
                     },
-                ) { Text("Done") }
+                ) { Text(stringResource(R.string.action_done)) }
             }
         }
     }
@@ -11434,7 +11561,7 @@ private fun ActiveStreamModePill(
             onDismissRequest = {
                 if (!bugReportSubmission.uploading) detailsOpen = false
             },
-            title = { Text("Stream profile changed") },
+            title = { Text(stringResource(R.string.dlg_stream_profile_changed)) },
             text = {
                 Column(
                     modifier = Modifier
@@ -11534,10 +11661,10 @@ private fun ActiveStreamModePill(
                             color = MaterialTheme.colorScheme.onPrimary,
                         )
                         Spacer(Modifier.width(8.dp))
-                        Text("Sending…")
+                        Text(stringResource(R.string.dlg_sending))
                     }
                     bugReportSubmission.submitted -> TextButton(onClick = { detailsOpen = false }) {
-                        Text("Done")
+                        Text(stringResource(R.string.action_done))
                     }
                     else -> Button(
                         onClick = {
@@ -11546,14 +11673,14 @@ private fun ActiveStreamModePill(
                             reportConfirmationOpen = true
                         },
                     ) {
-                        Text(if (bugReportSubmission.error == null) "Send to developer" else "Try again")
+                        Text(if (bugReportSubmission.error == null) stringResource(R.string.dlg_send_to_developer) else stringResource(R.string.action_retry))
                     }
                 }
             },
             dismissButton = {
                 if (!bugReportSubmission.uploading && !bugReportSubmission.submitted) {
                     TextButton(onClick = { detailsOpen = false }) {
-                        Text("Close")
+                        Text(stringResource(R.string.action_close))
                     }
                 }
             },
@@ -11566,11 +11693,11 @@ private fun ActiveStreamModePill(
                 reportConfirmationOpen = false
                 detailsOpen = true
             },
-            title = { Text("Send stream diagnostics?") },
+            title = { Text(stringResource(R.string.dlg_send_stream_diagnostics)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        "This sends the profile-change summary and likely cause to PrintedWaste and NanaPlay maintainers so they can investigate it.",
+                        stringResource(R.string.dlg_profile_change_send_info),
                     )
                     BugReportDataDisclosure(
                         title = "Your device information will also be sent",
@@ -11586,7 +11713,7 @@ private fun ActiveStreamModePill(
                         detailsOpen = true
                     },
                 ) {
-                    Text("Send diagnostics")
+                    Text(stringResource(R.string.dlg_send_diagnostics))
                 }
             },
             dismissButton = {
@@ -11596,7 +11723,7 @@ private fun ActiveStreamModePill(
                         detailsOpen = true
                     },
                 ) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.action_cancel))
                 }
             },
         )
@@ -12821,12 +12948,12 @@ private fun QueueStuckWarningCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "Queue seems stuck — your position hasn't moved for a while.",
+                stringResource(R.string.queue_stuck_warning),
                 color = TextPrimary,
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.weight(1f),
             )
-            Button(onClick = onRetry) { Text("Retry") }
+            Button(onClick = onRetry) { Text(stringResource(R.string.action_retry)) }
         }
     }
 }
@@ -12879,10 +13006,10 @@ private fun QueueStatusPanel(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 OutlinedButton(onClick = onMinimize, modifier = Modifier.weight(1f)) {
-                    Text("Minimize", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(stringResource(R.string.osd_minimize), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) {
-                    Text("Cancel", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(stringResource(R.string.action_cancel), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
             if (queuePosition != null) {
@@ -12959,10 +13086,10 @@ private fun QueueStatusPanel(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 OutlinedButton(onClick = onMinimize, modifier = Modifier.weight(1f)) {
-                    Text("Minimize", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(stringResource(R.string.osd_minimize), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) {
-                    Text("Cancel", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(stringResource(R.string.action_cancel), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
             error?.let {
@@ -13001,7 +13128,7 @@ private fun LandscapeQueuePositionDock(queuePosition: Int, modifier: Modifier = 
         ) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    "Queue",
+                    stringResource(R.string.queue_title),
                     color = TextMuted,
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
@@ -13009,7 +13136,7 @@ private fun LandscapeQueuePositionDock(queuePosition: Int, modifier: Modifier = 
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    "Live position",
+                    stringResource(R.string.queue_live_position),
                     color = TextMuted.copy(alpha = 0.78f),
                     style = MaterialTheme.typography.labelSmall,
                     maxLines = 1,
@@ -13157,7 +13284,7 @@ private fun QueueAdPlayback(
 private fun QueueAdHeading(game: GameInfo?, compact: Boolean) {
     Column(Modifier.fillMaxWidth()) {
         Text(
-            "Advertisement",
+            stringResource(R.string.osd_advertisement),
             color = TextMuted,
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.Bold,
@@ -13196,10 +13323,10 @@ private fun QueueStatusAndActions(
         LinearProgressIndicator(Modifier.fillMaxWidth())
         if (stackActions) {
             OutlinedButton(onClick = onMinimize, modifier = Modifier.fillMaxWidth()) {
-                Text("Minimize", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(stringResource(R.string.osd_minimize), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) {
-                Text("Cancel", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(stringResource(R.string.action_cancel), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         } else {
             Row(
@@ -13207,10 +13334,10 @@ private fun QueueStatusAndActions(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 OutlinedButton(onClick = onMinimize, modifier = Modifier.weight(1f)) {
-                    Text("Minimize", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(stringResource(R.string.osd_minimize), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) {
-                    Text("Cancel", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(stringResource(R.string.action_cancel), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
@@ -13295,9 +13422,9 @@ private fun MinimizedQueueDock(
                             compact = true,
                         )
                     }
-                    TextButton(onClick = onRestore) { Text("View") }
+                    TextButton(onClick = onRestore) { Text(stringResource(R.string.action_view)) }
                     OutlinedButton(onClick = onCancel, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)) {
-                        Text("Cancel")
+                        Text(stringResource(R.string.action_cancel))
                     }
                 }
             }
@@ -14100,7 +14227,7 @@ private fun TouchControlGroup(
                     modifier = Modifier.padding(top = 4.dp),
                 ) {
                     Text(
-                        "Drag",
+                        stringResource(R.string.osd_drag),
                         color = MaterialTheme.colorScheme.onPrimary,
                         style = MaterialTheme.typography.labelSmall,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
@@ -14783,7 +14910,7 @@ private fun SortPicker(
             contentPadding = PaddingValues(horizontal = if (compact) 8.dp else 12.dp),
         ) {
             Text(
-                "Sort: $selectedLabel",
+                stringResource(R.string.dlg_sort_format, selectedLabel),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 style = if (compact) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge,
@@ -14851,14 +14978,14 @@ private fun FilterMenu(
             ),
             contentPadding = PaddingValues(horizontal = 10.dp),
         ) {
-            Text(if (selectedIds.isEmpty()) "Filters" else "Filters ${selectedIds.size}", maxLines = 1, style = MaterialTheme.typography.labelMedium)
+            Text(if (selectedIds.isEmpty()) stringResource(R.string.dlg_filters) else stringResource(R.string.dlg_filters_count, selectedIds.size), maxLines = 1, style = MaterialTheme.typography.labelMedium)
         }
         if (expanded) {
             AlertDialog(
                 onDismissRequest = { expanded = false },
                 title = {
                     Text(
-                        "Filters",
+                        stringResource(R.string.dlg_filters),
                         fontWeight = FontWeight.Bold,
                         style = MaterialTheme.typography.titleMedium,
                         color = TextPrimary,
@@ -14903,7 +15030,7 @@ private fun FilterMenu(
                 },
                 confirmButton = {
                     Button(onClick = { expanded = false }) {
-                        Text("Done")
+                        Text(stringResource(R.string.action_done))
                     }
                 }
             )
@@ -15020,7 +15147,7 @@ private fun PrintedWasteSelector(
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(game.title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text("Free tier queue routing", color = TextMuted, style = MaterialTheme.typography.bodySmall)
+                                Text(stringResource(R.string.queue_free_tier_routing), color = TextMuted, style = MaterialTheme.typography.bodySmall)
                             }
                         }
                         PrintedWasteOptionsColumn(
@@ -15062,7 +15189,7 @@ private fun PrintedWasteGameSummary(
         )
         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(game.title, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text("Free tier queue routing", color = TextMuted, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+            Text(stringResource(R.string.queue_free_tier_routing), color = TextMuted, style = MaterialTheme.typography.bodySmall, maxLines = 1)
         }
     }
 }
@@ -15113,14 +15240,14 @@ private fun PrintedWasteOptionsColumn(
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                    Text("Checking PrintedWaste queues and latency", color = TextMuted)
+                    Text(stringResource(R.string.queue_checking_queues), color = TextMuted)
                 }
             }
         } else if (state.printedWasteError != null) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(state.printedWasteError, color = Color(0xffff9f9f))
-                    OutlinedButton(onClick = onRetry) { Text("Retry") }
+                    OutlinedButton(onClick = onRetry) { Text(stringResource(R.string.action_retry)) }
                 }
             }
         } else {
@@ -15146,7 +15273,7 @@ private fun PrintedWasteOptionsColumn(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
-                    "Other regions",
+                    stringResource(R.string.queue_other_regions),
                     color = TextMuted,
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
@@ -15221,14 +15348,14 @@ private fun PrintedWasteOptionsColumn(
         }
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
             OutlinedButton(
                 onClick = onDefault,
                 modifier = Modifier
                     .weight(1f)
                     .focusRequester(defaultFocusRequester),
             ) {
-                Text("Default", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(stringResource(R.string.osd_default), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Button(
                 onClick = onLaunch,
@@ -15238,7 +15365,7 @@ private fun PrintedWasteOptionsColumn(
                     .focusRequester(launchFocusRequester)
                     .focusProperties { up = if (regionsExpanded) zoneListFocusRequester else regionsHeaderFocusRequester },
             ) {
-                Text("Launch", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(stringResource(R.string.osd_launch), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }
@@ -15279,7 +15406,7 @@ private fun RecommendedRouteHeroCard(
                         color = MaterialTheme.colorScheme.primary,
                     ) {
                         Text(
-                            "RECOMMENDED",
+                            stringResource(R.string.queue_recommended),
                             Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                             color = Color.White,
                             style = MaterialTheme.typography.labelSmall,
@@ -15323,7 +15450,7 @@ private fun RecommendedRouteHeroCard(
                 contentPadding = PaddingValues(horizontal = 18.dp, vertical = 0.dp),
             ) {
                 Text(
-                    "Launch",
+                    stringResource(R.string.osd_launch),
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
@@ -15413,7 +15540,7 @@ private fun PrintedWasteZoneRow(
                             Text(regionLabel(zone.Region), color = TextMuted, style = MaterialTheme.typography.bodySmall)
                         }
                         if (selected) {
-                            Text("Selected", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+                            Text(stringResource(R.string.osd_selected), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
                         }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

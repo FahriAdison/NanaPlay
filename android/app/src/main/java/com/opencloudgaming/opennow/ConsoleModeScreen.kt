@@ -489,7 +489,7 @@ private fun ConsoleSelectedGamePanel(
             ) {
                 Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Play", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.action_play), fontWeight = FontWeight.Bold)
             }
             IconButton(onClick = onToggleFavorite) {
                 Icon(

@@ -138,17 +138,18 @@ class AndroidQueueStatusService : Service() {
         runCatching {
             when (intent?.action) {
                 QUEUE_SERVICE_ACTION_STOP -> {
-                    startQueueForeground("NanaPlay", "Queue status")
+                    startQueueForeground("NanaPlay", getString(R.string.notif_queue_channel_name))
                     stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf(startId)
                 }
                 QUEUE_SERVICE_ACTION_UPDATE, null -> {
                     val title = intent?.getStringExtra(QUEUE_SERVICE_EXTRA_TITLE) ?: "NanaPlay"
-                    val text = intent?.getStringExtra(QUEUE_SERVICE_EXTRA_TEXT) ?: "Queue status"
+                    val text = intent?.getStringExtra(QUEUE_SERVICE_EXTRA_TEXT)
+                        ?: getString(R.string.notif_queue_channel_name)
                     startQueueForeground(title, text)
                 }
                 else -> {
-                    startQueueForeground("NanaPlay", "Queue status")
+                    startQueueForeground("NanaPlay", getString(R.string.notif_queue_channel_name))
                     stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf(startId)
                 }
@@ -184,10 +185,10 @@ private fun ensureQueueNotificationChannel(context: Context) {
     val notificationManager = context.applicationContext.getSystemService(NotificationManager::class.java)
     val channel = NotificationChannel(
         QUEUE_CHANNEL_ID,
-        "Queue status",
+        context.getString(R.string.notif_queue_channel_name),
         NotificationManager.IMPORTANCE_LOW,
     ).apply {
-        description = "Shows NanaPlay queue and session startup progress."
+        description = context.getString(R.string.notif_queue_channel_desc)
         lockscreenVisibility = Notification.VISIBILITY_PUBLIC
         setShowBadge(false)
     }
@@ -233,10 +234,10 @@ private fun ensureQueueAlertChannel(context: Context) {
     val notificationManager = context.applicationContext.getSystemService(NotificationManager::class.java)
     val channel = NotificationChannel(
         QUEUE_ALERT_CHANNEL_ID,
-        "Queue ready alert",
+        context.getString(R.string.notif_queue_ready_channel_name),
         NotificationManager.IMPORTANCE_HIGH,
     ).apply {
-        description = "Alerts when a GFN queue finishes and the game is about to launch."
+        description = context.getString(R.string.notif_queue_ready_channel_desc)
         lockscreenVisibility = Notification.VISIBILITY_PUBLIC
         setShowBadge(true)
         enableVibration(true)
@@ -265,8 +266,8 @@ private fun buildQueueReadyNotification(context: Context, gameTitle: String): No
     }
     return builder
         .setSmallIcon(QUEUE_NOTIFICATION_SMALL_ICON)
-        .setContentTitle("$gameTitle is ready to play!")
-        .setContentText("Your GFN queue is done. Tap to return to the app.")
+        .setContentTitle(appContext.getString(R.string.notif_queue_ready_title, gameTitle))
+        .setContentText(appContext.getString(R.string.notif_queue_ready_text))
         .setSubText("NanaPlay")
         .setCategory(Notification.CATEGORY_ALARM)
         .setVisibility(Notification.VISIBILITY_PUBLIC)

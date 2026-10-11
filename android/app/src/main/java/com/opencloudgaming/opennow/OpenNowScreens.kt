@@ -1966,7 +1966,15 @@ private fun MainShell(
 
         Scaffold(
             containerColor = Color.Transparent,
-            contentWindowInsets = if (streamingActive || tvProfile) WindowInsets(0, 0, 0, 0) else ScaffoldDefaults.contentWindowInsets,
+            // 1.0.55: console mode goes fully edge-to-edge (zero insets).
+            // ConsoleModeScreen applies systemBarsPadding to its content column,
+            // so the background is truly full-bleed while content stays clear
+            // of the status and navigation bars.
+            contentWindowInsets = if (streamingActive || tvProfile || consoleModeActive) {
+                WindowInsets(0, 0, 0, 0)
+            } else {
+                ScaffoldDefaults.contentWindowInsets
+            },
             bottomBar = {
                 // 1.0.49: hide bottom bar in console mode (has its own ribbon)
                 if (!inStream && !showNavigationRail && !consoleModeActive) {

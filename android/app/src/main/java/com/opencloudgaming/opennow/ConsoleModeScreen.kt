@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -276,7 +277,13 @@ internal fun ConsoleModeScreen(
         // when no games match. Previously an empty result replaced the whole
         // column — including the field's clear button — trapping the user in
         // the empty state with no way to clear the query.
-        Column(Modifier.fillMaxSize()) {
+        // 1.0.55: systemBarsPadding keeps content clear of status/nav bars
+        // while the background stays truly full-bleed.
+        Column(
+            Modifier
+                .fillMaxSize()
+                .systemBarsPadding()
+        ) {
             // PS5-style top header: time + quick actions (1.0.47)
             ConsoleTopHeader(
                 onSearchClick = onSearchRequested,

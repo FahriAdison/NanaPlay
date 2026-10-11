@@ -67,11 +67,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.ScaleFactor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
@@ -95,6 +97,19 @@ import kotlinx.coroutines.launch
  * grows. Works in both portrait and landscape; tap selects, tapping the
  * focused card (or Enter / D-pad center) plays it.
  */
+/**
+ * 1.0.57: background artwork scale — like Crop (fills the screen) but zoomed
+ * OUT slightly (88%) so more of the artwork is visible and characters don't
+ * look oversized. Any small gap blends into the dark palette background and
+ * the scrim gradient, reading as a soft vignette.
+ */
+private val ConsoleBackgroundScale = object : ContentScale {
+    override fun computeScaleFactor(srcSize: Size, dstSize: Size): ScaleFactor {
+        val crop = ContentScale.Crop.computeScaleFactor(srcSize, dstSize)
+        return ScaleFactor(crop.scaleX * 0.88f, crop.scaleY * 0.88f)
+    }
+}
+
 @Composable
 internal fun ConsoleModeScreen(
     page: AppPage,
@@ -260,7 +275,7 @@ internal fun ConsoleModeScreen(
                 AsyncImage(
                     model = bgUrl,
                     contentDescription = null,
-                    contentScale = ContentScale.Crop,
+                    contentScale = ConsoleBackgroundScale,
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {

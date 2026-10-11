@@ -124,7 +124,7 @@ class MainActivity : ComponentActivity() {
             } else {
                 val isLandscape = newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE
                 val shouldHide = isLandscape && when (state.page) {
-                    AppPage.Home, AppPage.Library ->
+                    AppPage.Home, AppPage.Library, AppPage.Music ->
                         state.settings.consoleModeEnabled || state.searchOverlayActive
                     AppPage.Settings -> true
                     else -> false
@@ -136,7 +136,7 @@ class MainActivity : ComponentActivity() {
                     window.decorView.postDelayed({
                         latestUiState?.let { s ->
                             val stillShouldHide = when (s.page) {
-                                AppPage.Home, AppPage.Library ->
+                                AppPage.Home, AppPage.Library, AppPage.Music ->
                                     s.settings.consoleModeEnabled || s.searchOverlayActive
                                 AppPage.Settings -> true
                                 else -> false
@@ -343,7 +343,7 @@ class MainActivity : ComponentActivity() {
         // 1.0.52: use tracked orientation, not resources.configuration (can be stale)
         if (lastKnownOrientation != Configuration.ORIENTATION_LANDSCAPE) return false
         return when (state.page) {
-            AppPage.Home, AppPage.Library ->
+            AppPage.Home, AppPage.Library, AppPage.Music ->
                 state.settings.consoleModeEnabled || state.searchOverlayActive
             AppPage.Settings -> true
             else -> false

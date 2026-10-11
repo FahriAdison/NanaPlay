@@ -239,6 +239,13 @@ internal fun ConsoleModeScreen(
             },
     ) {
         val isLandscape = maxWidth > maxHeight
+        // 1.0.56: adaptive tile size — capture Dp values here (BoxWithConstraints scope)
+        // because maxWidth/maxHeight aren't accessible inside nested Column scope.
+        val adaptiveTileWidth = if (isLandscape) {
+            (maxHeight * 0.11f).coerceIn(36.dp, 52.dp)
+        } else {
+            (maxWidth * 0.13f).coerceIn(44.dp, 64.dp)
+        }
 
         // Full-bleed background: focused game's banner art, crossfading between games.
         // Kept short (250ms) so browsing feels snappy on mid-range phones.
@@ -369,7 +376,8 @@ internal fun ConsoleModeScreen(
 
                 Spacer(Modifier.height(if (isLandscape) 8.dp else 14.dp))
 
-                val baseCardWidth = if (isLandscape) 44.dp else 60.dp
+                // 1.0.56: adaptive tile size — scales with screen, slightly smaller
+                val baseCardWidth = adaptiveTileWidth
                 LazyRow(
                     state = listState,
                     contentPadding = PaddingValues(

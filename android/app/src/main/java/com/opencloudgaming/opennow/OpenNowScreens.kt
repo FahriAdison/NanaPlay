@@ -2044,7 +2044,8 @@ private fun MainShell(
                 Row(
                     Modifier
                         .fillMaxSize()
-                        .padding(screenEdgePadding),
+                        // 1.0.54: no edge padding in console mode — true full-bleed
+                        .padding(if (consoleModeActive) 0.dp else screenEdgePadding),
                 ) {
                     // 1.0.49: hide nav rail in console mode (has its own ribbon)
                     if (showNavigationRail && !consoleImmersiveLandscape && !consoleModeActive) {

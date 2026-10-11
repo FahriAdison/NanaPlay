@@ -312,9 +312,10 @@ internal fun ConsoleModeScreen(
                     LazyRow(
                         contentPadding = PaddingValues(
                             horizontal = 16.dp,
-                            vertical = if (isLandscape) 6.dp else 10.dp,
+                            // 1.0.54: tighter chip row
+                            vertical = if (isLandscape) 4.dp else 6.dp,
                         ),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         item {
@@ -884,7 +885,7 @@ private fun ConsoleGenreChip(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
-    // 1.0.53: compact chips
+    // 1.0.54: truly compact chips — small text, tight padding
     FilterChip(
         selected = selected,
         onClick = onClick,
@@ -892,10 +893,10 @@ private fun ConsoleGenreChip(
             Text(
                 label,
                 maxLines = 1,
-                style = MaterialTheme.typography.labelMedium,
+                style = MaterialTheme.typography.labelSmall,
             )
         },
-        modifier = Modifier.height(32.dp),
+        modifier = Modifier.height(28.dp),
         colors = FilterChipDefaults.filterChipColors(
             selectedContainerColor = OpenNowPalette.AccentDefault,
             selectedLabelColor = OpenNowPalette.OnAccent,

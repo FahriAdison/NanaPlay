@@ -34,6 +34,8 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.SportsEsports
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -51,6 +53,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -142,9 +145,10 @@ internal fun ConsoleModeScreen(
 
     var selectedIndex by remember { mutableIntStateOf(0) }
     // Game Hub state (1.0.48): press Down to open game details
-    var showGameHub by remember { mutableStateOf(false) }
+    // 1.0.50: rememberSaveable so it survives rotation
+    var showGameHub by rememberSaveable { mutableStateOf(false) }
     // Control Center state (1.0.48): quick actions overlay
-    var showControlCenter by remember { mutableStateOf(false) }
+    var showControlCenter by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(games) {
         if (selectedIndex >= games.size) selectedIndex = 0
     }
@@ -184,6 +188,13 @@ internal fun ConsoleModeScreen(
     BackHandler(enabled = showSearch) {
         onConsoleSearchQueryChange("")
     }
+    // 1.0.50: back dismisses Game Hub and Control Center first
+    BackHandler(enabled = showGameHub) {
+        showGameHub = false
+    }
+    BackHandler(enabled = showControlCenter) {
+        showControlCenter = false
+    }
 
     BoxWithConstraints(
         modifier
@@ -197,20 +208,23 @@ internal fun ConsoleModeScreen(
                     Key.DirectionLeft, Key.DirectionUp -> {
                         if (showGameHub) {
                             showGameHub = false
-                        } else {
+                        } else if (!showControlCenter) {
                             selectedIndex = (selectedIndex - 1).coerceAtLeast(0)
                         }
                         true
                     }
                     Key.DirectionRight -> {
-                        selectedIndex = (selectedIndex + 1).coerceAtMost(games.size - 1)
+                        // 1.0.50: don't change selection while overlays are open
+                        if (!showGameHub && !showControlCenter) {
+                            selectedIndex = (selectedIndex + 1).coerceAtMost(games.size - 1)
+                        }
                         true
                     }
                     Key.DirectionDown -> {
                         // PS5-style: Down opens Game Hub
-                        if (!showGameHub && selectedGame != null) {
+                        if (!showGameHub && !showControlCenter && selectedGame != null) {
                             showGameHub = true
-                        } else {
+                        } else if (!showGameHub && !showControlCenter) {
                             selectedIndex = (selectedIndex + 1).coerceAtMost(games.size - 1)
                         }
                         true
@@ -449,8 +463,9 @@ internal fun ConsoleModeScreen(
         }
 
         // Game Hub overlay (1.0.48): PS5-style detail view on Down press
-        if (showGameHub && selectedGame != null) {
-            val hubGame = selectedGame!!
+        // 1.0.50: uses let instead of !! for null safety
+        selectedGame?.let { hubGame ->
+            if (showGameHub) {
             Box(
                 Modifier
                     .fillMaxSize()
@@ -521,6 +536,7 @@ internal fun ConsoleModeScreen(
                     )
                 }
             }
+        }
         }
 
         // Control Center overlay (1.0.48): PS5-style quick actions
@@ -649,9 +665,11 @@ internal fun ConsoleModeScreen(
                                             onClick = { viewModel.toggleControlCenterHidden(key) },
                                             modifier = Modifier.size(36.dp),
                                         ) {
-                                            Text(
-                                                if (hidden) "👁" else "👁‍🗨",
-                                                color = OpenNowPalette.TextPrimary.copy(alpha = 0.8f),
+                                            Icon(
+                                                imageVector = if (hidden) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                                contentDescription = if (hidden) "Show" else "Hide",
+                                                tint = OpenNowPalette.TextPrimary.copy(alpha = 0.8f),
+                                                modifier = Modifier.size(20.dp),
                                             )
                                         }
                                     }
@@ -800,18 +818,17 @@ private fun ConsoleTopHeader(
     modifier: Modifier = Modifier,
 ) {
     // PS5-style: compact overlay header — live clock + search
-    // Clock follows phone time, updates every 30s
+    // 1.0.50: respects phone's 12/24h setting, updates every 30s
+    val context = LocalContext.current
     var timeText by remember {
         mutableStateOf(
-            java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
-                .format(java.util.Date())
+            android.text.format.DateFormat.getTimeFormat(context).format(java.util.Date())
         )
     }
     LaunchedEffect(Unit) {
         while (true) {
             kotlinx.coroutines.delay(30_000)
-            timeText = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
-                .format(java.util.Date())
+            timeText = android.text.format.DateFormat.getTimeFormat(context).format(java.util.Date())
         }
     }
     Row(
@@ -825,21 +842,27 @@ private fun ConsoleTopHeader(
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Medium,
         )
-        IconButton(onClick = onSearchClick, modifier = Modifier.size(36.dp)) {
-            Icon(
-                painter = painterResource(R.drawable.ic_search),
-                contentDescription = "Search",
-                tint = OpenNowPalette.TextPrimary.copy(alpha = 0.75f),
-                modifier = Modifier.size(20.dp),
-            )
-        }
-        IconButton(onClick = onControlCenterClick, modifier = Modifier.size(36.dp)) {
-            Icon(
-                imageVector = Icons.Filled.Settings,
-                contentDescription = "Control Center",
-                tint = OpenNowPalette.TextPrimary.copy(alpha = 0.75f),
-                modifier = Modifier.size(20.dp),
-            )
+        // 1.0.50: group action buttons on the right
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onSearchClick, modifier = Modifier.size(36.dp)) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_search),
+                    contentDescription = "Search",
+                    tint = OpenNowPalette.TextPrimary.copy(alpha = 0.75f),
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            IconButton(onClick = onControlCenterClick, modifier = Modifier.size(36.dp)) {
+                Icon(
+                    imageVector = Icons.Filled.Settings,
+                    contentDescription = "Control Center",
+                    tint = OpenNowPalette.TextPrimary.copy(alpha = 0.75f),
+                    modifier = Modifier.size(20.dp),
+                )
+            }
         }
     }
 }

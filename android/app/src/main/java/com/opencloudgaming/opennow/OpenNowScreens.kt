@@ -2210,7 +2210,9 @@ private fun MainShell(
                 // instead of consuming layout width, so the background stays edge-to-edge.
                 // It auto-hides after a few idle seconds so it never covers content for
                 // long; tapping the left screen edge brings it back.
-                if (consoleImmersiveLandscape && showNavigationRail) {
+                // 1.0.50: don't show floating rail in console mode — the ribbon already
+                // provides navigation, and having both causes overlap.
+                if (consoleImmersiveLandscape && showNavigationRail && !consoleModeActive) {
                     var railVisible by remember { mutableStateOf(true) }
                     var railInteractionTick by remember { mutableIntStateOf(0) }
                     LaunchedEffect(railVisible, railInteractionTick) {

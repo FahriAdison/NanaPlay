@@ -106,6 +106,8 @@ class MainActivity : ComponentActivity() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         // Rotation doesn't re-emit view-model state, so re-evaluate console immersive here.
+        // 1.0.50: use newConfig.orientation directly — resources.configuration can be stale
+        // at this point, causing immersive mode to not apply on rotation.
         latestUiState?.let { state ->
             val streamActive = state.page == AppPage.Stream && state.streamStatus != "idle"
             if (streamActive) {
@@ -113,7 +115,14 @@ class MainActivity : ComponentActivity() {
                 // of letting console-immersive explicitly show them.
                 applyStreamSystemUi(true, force = true)
             } else {
-                applyConsoleImmersiveUi(shouldApplyConsoleImmersiveUi(state), force = true)
+                val isLandscape = newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE
+                val shouldHide = isLandscape && when (state.page) {
+                    AppPage.Home, AppPage.Library ->
+                        state.settings.consoleModeEnabled || state.searchOverlayActive
+                    AppPage.Settings -> true
+                    else -> false
+                }
+                applyConsoleImmersiveUi(shouldHide, force = true)
             }
         }
     }

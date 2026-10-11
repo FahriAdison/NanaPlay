@@ -47,6 +47,9 @@ class MainActivity : ComponentActivity() {
     private var lastStreamSystemUiInputReapplyMs = 0L
     private var consoleImmersiveActive = false
     private var latestUiState: OpenNowUiState? = null
+    // 1.0.52: track orientation manually — resources.configuration.orientation can be
+    // stale during rotation, causing immersive mode to flicker.
+    private var lastKnownOrientation = Configuration.ORIENTATION_PORTRAIT
     private var defaultRequestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
     private var phoneStreamOrientationLocked = false
     private var streamPictureInPictureReady = false
@@ -62,6 +65,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // 1.0.52: initialize tracked orientation
+        lastKnownOrientation = resources.configuration.orientation
         defaultRequestedOrientation = requestedOrientation
         volumeControlStream = AudioManager.STREAM_MUSIC
         setContent {
@@ -105,6 +110,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        // 1.0.52: track orientation definitively from newConfig
+        lastKnownOrientation = newConfig.orientation
         // Rotation doesn't re-emit view-model state, so re-evaluate console immersive here.
         // 1.0.50: use newConfig.orientation directly — resources.configuration can be stale
         // at this point, causing immersive mode to not apply on rotation.
@@ -333,7 +340,8 @@ class MainActivity : ComponentActivity() {
      * Stream screen keeps its own stronger handling and takes precedence.
      */
     private fun shouldApplyConsoleImmersiveUi(state: OpenNowUiState): Boolean {
-        if (resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE) return false
+        // 1.0.52: use tracked orientation, not resources.configuration (can be stale)
+        if (lastKnownOrientation != Configuration.ORIENTATION_LANDSCAPE) return false
         return when (state.page) {
             AppPage.Home, AppPage.Library ->
                 state.settings.consoleModeEnabled || state.searchOverlayActive

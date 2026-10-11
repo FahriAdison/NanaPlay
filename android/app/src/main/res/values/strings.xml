@@ -682,4 +682,10 @@
     <string name="toast_app_id_copied">App ID copied</string>
     <string name="store_not_owned">Not owned</string>
     <string name="store_owned_on_store">Owned on %1$s</string>
+    <string name="console_play">Play</string>
+    <string name="console_close">Close</string>
+    <string name="console_control_center">Control Center</string>
+    <string name="console_edit">Edit</string>
+    <string name="console_done">Done</string>
+    <string name="console_back_to_browse">↑ Back to browse</string>
 </resources>

@@ -290,6 +290,7 @@ internal fun ConsoleModeScreen(
                 currentPage = page,
                 onTabSelected = { viewModel.setPage(it) },
                 onSearchSelected = onSearchRequested,
+                hiddenTabs = state.settings.controlCenterHidden,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 4.dp),
@@ -523,14 +524,14 @@ internal fun ConsoleModeScreen(
                         ) {
                             Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Play", fontWeight = FontWeight.Bold)
+                            Text(stringResource(R.string.console_play), fontWeight = FontWeight.Bold)
                         }
                         TextButton(onClick = { showGameHub = false }) {
-                            Text("Close", color = OpenNowPalette.TextMuted)
+                            Text(stringResource(R.string.console_close), color = OpenNowPalette.TextMuted)
                         }
                     }
                     Text(
-                        "↑ Back to browse",
+                        stringResource(R.string.console_back_to_browse),
                         color = OpenNowPalette.TextMuted.copy(alpha = 0.6f),
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -585,14 +586,14 @@ internal fun ConsoleModeScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            "Control Center",
+                            stringResource(R.string.console_control_center),
                             color = OpenNowPalette.TextPrimary,
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold,
                         )
                         TextButton(onClick = { editMode = !editMode }) {
                             Text(
-                                if (editMode) "Done" else "Edit",
+                                if (editMode) stringResource(R.string.console_done) else stringResource(R.string.console_edit),
                                 color = OpenNowPalette.AccentDefault,
                             )
                         }
@@ -681,7 +682,7 @@ internal fun ConsoleModeScreen(
                         onClick = { showControlCenter = false; editMode = false },
                         modifier = Modifier.align(Alignment.CenterHorizontally)
                     ) {
-                        Text("Close", color = OpenNowPalette.TextMuted)
+                        Text(stringResource(R.string.console_close), color = OpenNowPalette.TextMuted)
                     }
                 }
             }
@@ -738,43 +739,53 @@ internal fun ConsoleRibbon(
     onTabSelected: (AppPage) -> Unit,
     onSearchSelected: () -> Unit,
     modifier: Modifier = Modifier,
+    hiddenTabs: Set<String> = emptySet(),
 ) {
     // PS5-style ribbon: 5 tabs mirroring bottom nav (1.0.49)
+    // 1.0.52: respects hidden tabs from Control Center settings
     Row(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Store/Home
-        RibbonTab(
-            icon = Icons.Filled.Home,
-            selected = currentPage == AppPage.Home,
-            onClick = { onTabSelected(AppPage.Home) },
-        )
-        // Search (triggers search mode)
+        if ("home" !in hiddenTabs) {
+            RibbonTab(
+                icon = Icons.Filled.Home,
+                selected = currentPage == AppPage.Home,
+                onClick = { onTabSelected(AppPage.Home) },
+            )
+        }
+        // Search (triggers search mode) — always visible
         RibbonTab(
             icon = Icons.Filled.Search,
             selected = false,
             onClick = onSearchSelected,
         )
         // Library
-        RibbonTab(
-            icon = Icons.Filled.CollectionsBookmark,
-            selected = currentPage == AppPage.Library,
-            onClick = { onTabSelected(AppPage.Library) },
-        )
+        if ("library" !in hiddenTabs) {
+            RibbonTab(
+                icon = Icons.Filled.CollectionsBookmark,
+                selected = currentPage == AppPage.Library,
+                onClick = { onTabSelected(AppPage.Library) },
+            )
+        }
         // Music
-        RibbonTab(
-            icon = Icons.Filled.MusicNote,
-            selected = currentPage == AppPage.Music,
-            onClick = { onTabSelected(AppPage.Music) },
-        )
+        if ("music" !in hiddenTabs) {
+            RibbonTab(
+                icon = Icons.Filled.MusicNote,
+                selected = currentPage == AppPage.Music,
+                onClick = { onTabSelected(AppPage.Music) },
+            )
+        }
         // Settings
-        RibbonTab(
-            icon = Icons.Filled.Settings,
-            selected = currentPage == AppPage.Settings,
-            onClick = { onTabSelected(AppPage.Settings) },
-        )
+        if ("settings" !in hiddenTabs) {
+            RibbonTab(
+                icon = Icons.Filled.Settings,
+                selected = currentPage == AppPage.Settings,
+                onClick = { onTabSelected(AppPage.Settings) },
+            )
+        }
     }
 }
 
@@ -858,7 +869,7 @@ private fun ConsoleTopHeader(
             IconButton(onClick = onControlCenterClick, modifier = Modifier.size(36.dp)) {
                 Icon(
                     imageVector = Icons.Filled.Settings,
-                    contentDescription = "Control Center",
+                    contentDescription = stringResource(R.string.console_control_center),
                     tint = OpenNowPalette.TextPrimary.copy(alpha = 0.75f),
                     modifier = Modifier.size(20.dp),
                 )

@@ -2186,6 +2186,7 @@ private fun MainShell(
                                             currentPage = AppPage.Settings,
                                             onTabSelected = { viewModel.setPage(it) },
                                             onSearchSelected = { revealSearch(SearchTarget.Settings) },
+                                            hiddenTabs = state.settings.controlCenterHidden,
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .padding(horizontal = 16.dp, vertical = 4.dp),
@@ -2234,6 +2235,7 @@ private fun MainShell(
                                             currentPage = AppPage.Music,
                                             onTabSelected = { viewModel.setPage(it) },
                                             onSearchSelected = { revealSearch(SearchTarget.Store) },
+                                            hiddenTabs = state.settings.controlCenterHidden,
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .padding(horizontal = 16.dp, vertical = 4.dp),

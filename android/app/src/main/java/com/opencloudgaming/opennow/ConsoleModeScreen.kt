@@ -676,7 +676,7 @@ private fun ConsoleRibbon(
             ) {
                 Icon(
                     imageVector = icon,
-                    contentDescription = tabPage.name,
+                    contentDescription = null,
                     tint = if (selected) OpenNowPalette.AccentDefault
                            else OpenNowPalette.TextPrimary.copy(alpha = 0.7f),
                     modifier = Modifier.size(22.dp),
@@ -728,7 +728,7 @@ private fun ConsoleTopHeader(
         }
         IconButton(onClick = onControlCenterClick, modifier = Modifier.size(36.dp)) {
             Icon(
-                imageVector = androidx.compose.material.icons.Icons.Filled.Tune,
+                imageVector = androidx.compose.material.icons.Icons.Filled.Settings,
                 contentDescription = "Control Center",
                 tint = OpenNowPalette.TextPrimary.copy(alpha = 0.75f),
                 modifier = Modifier.size(20.dp),

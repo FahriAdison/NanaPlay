@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.CollectionsBookmark
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.SportsEsports
 import androidx.compose.material3.Button
@@ -98,6 +99,7 @@ internal fun ConsoleModeScreen(
     modifier: Modifier = Modifier,
     searchRequested: Boolean = false,
     onSearchDismissed: () -> Unit = {},
+    onSearchRequested: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -263,7 +265,7 @@ internal fun ConsoleModeScreen(
         Column(Modifier.fillMaxSize()) {
             // PS5-style top header: time + quick actions (1.0.47)
             ConsoleTopHeader(
-                onSearchClick = { onConsoleSearchQueryChange("") /* trigger search */ },
+                onSearchClick = onSearchRequested,
                 onControlCenterClick = { showControlCenter = true },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -273,6 +275,7 @@ internal fun ConsoleModeScreen(
             ConsoleRibbon(
                 currentPage = page,
                 onTabSelected = { viewModel.setPage(it) },
+                onSearchSelected = onSearchRequested,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 4.dp),
@@ -521,7 +524,23 @@ internal fun ConsoleModeScreen(
         }
 
         // Control Center overlay (1.0.48): PS5-style quick actions
+        // 1.0.49: editable layout (reorder + hide)
         if (showControlCenter) {
+            var editMode by remember { mutableStateOf(false) }
+            val ccOrder = state.settings.controlCenterOrder
+            val ccHidden = state.settings.controlCenterHidden
+            // Button definitions
+            val ccButtons = mapOf(
+                "home" to (Icons.Filled.Home to AppPage.Home),
+                "library" to (Icons.Filled.CollectionsBookmark to AppPage.Library),
+                "music" to (Icons.Filled.MusicNote to AppPage.Music),
+                "settings" to (Icons.Filled.Settings to AppPage.Settings),
+            )
+            // Ensure all keys exist in order (migration for new buttons)
+            val effectiveOrder = remember(ccOrder) {
+                val defaults = listOf("home", "library", "music", "settings")
+                (ccOrder + defaults).distinct()
+            }
             Box(
                 Modifier
                     .fillMaxSize()
@@ -544,52 +563,104 @@ internal fun ConsoleModeScreen(
                         .padding(20.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
-                    Text(
-                        "Control Center",
-                        color = OpenNowPalette.TextPrimary,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    // Quick action rows
                     Row(
                         Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        ControlCenterButton(
-                            icon = Icons.Filled.Home,
-                            label = "Home",
-                            onClick = {
-                                showControlCenter = false
-                                viewModel.setPage(AppPage.Home)
-                            }
+                        Text(
+                            "Control Center",
+                            color = OpenNowPalette.TextPrimary,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
                         )
-                        ControlCenterButton(
-                            icon = Icons.Filled.CollectionsBookmark,
-                            label = "Library",
-                            onClick = {
-                                showControlCenter = false
-                                viewModel.setPage(AppPage.Library)
+                        TextButton(onClick = { editMode = !editMode }) {
+                            Text(
+                                if (editMode) "Done" else "Edit",
+                                color = OpenNowPalette.AccentDefault,
+                            )
+                        }
+                    }
+                    if (!editMode) {
+                        // Normal mode: quick action buttons
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                        ) {
+                            effectiveOrder.filter { it !in ccHidden }.forEach { key ->
+                                val (icon, page) = ccButtons[key] ?: return@forEach
+                                val label = key.replaceFirstChar { it.uppercase() }
+                                ControlCenterButton(
+                                    icon = icon,
+                                    label = label,
+                                    onClick = {
+                                        showControlCenter = false
+                                        viewModel.setPage(page)
+                                    }
+                                )
                             }
-                        )
-                        ControlCenterButton(
-                            icon = Icons.Filled.MusicNote,
-                            label = "Music",
-                            onClick = {
-                                showControlCenter = false
-                                viewModel.setPage(AppPage.Music)
+                        }
+                    } else {
+                        // Edit mode: reorder + show/hide
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            effectiveOrder.forEachIndexed { index, key ->
+                                val (icon, _) = ccButtons[key] ?: return@forEachIndexed
+                                val label = key.replaceFirstChar { it.uppercase() }
+                                val hidden = key in ccHidden
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    ) {
+                                        Icon(
+                                            imageVector = icon,
+                                            contentDescription = null,
+                                            tint = if (hidden) OpenNowPalette.TextMuted.copy(alpha = 0.4f)
+                                                   else OpenNowPalette.AccentDefault,
+                                            modifier = Modifier.size(24.dp),
+                                        )
+                                        Text(
+                                            label,
+                                            color = if (hidden) OpenNowPalette.TextMuted.copy(alpha = 0.5f)
+                                                    else OpenNowPalette.TextPrimary,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                        )
+                                    }
+                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        IconButton(
+                                            onClick = { viewModel.moveControlCenterButton(key, -1) },
+                                            enabled = index > 0,
+                                            modifier = Modifier.size(36.dp),
+                                        ) {
+                                            Text("↑", color = OpenNowPalette.TextPrimary.copy(alpha = if (index > 0) 0.8f else 0.3f))
+                                        }
+                                        IconButton(
+                                            onClick = { viewModel.moveControlCenterButton(key, 1) },
+                                            enabled = index < effectiveOrder.size - 1,
+                                            modifier = Modifier.size(36.dp),
+                                        ) {
+                                            Text("↓", color = OpenNowPalette.TextPrimary.copy(alpha = if (index < effectiveOrder.size - 1) 0.8f else 0.3f))
+                                        }
+                                        IconButton(
+                                            onClick = { viewModel.toggleControlCenterHidden(key) },
+                                            modifier = Modifier.size(36.dp),
+                                        ) {
+                                            Text(
+                                                if (hidden) "👁" else "👁‍🗨",
+                                                color = OpenNowPalette.TextPrimary.copy(alpha = 0.8f),
+                                            )
+                                        }
+                                    }
+                                }
                             }
-                        )
-                        ControlCenterButton(
-                            icon = Icons.Filled.Settings,
-                            label = "Settings",
-                            onClick = {
-                                showControlCenter = false
-                                viewModel.setPage(AppPage.Settings)
-                            }
-                        )
+                        }
                     }
                     TextButton(
-                        onClick = { showControlCenter = false },
+                        onClick = { showControlCenter = false; editMode = false },
                         modifier = Modifier.align(Alignment.CenterHorizontally)
                     ) {
                         Text("Close", color = OpenNowPalette.TextMuted)
@@ -647,49 +718,78 @@ private fun ControlCenterButton(
 private fun ConsoleRibbon(
     currentPage: AppPage,
     onTabSelected: (AppPage) -> Unit,
+    onSearchSelected: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // PS5 2026-style ribbon: icon tabs for main sections
-    val tabs = listOf(
-        AppPage.Home to Icons.Filled.Home,
-        AppPage.Library to Icons.Filled.CollectionsBookmark,
-        AppPage.Music to Icons.Filled.MusicNote,
-        AppPage.Settings to Icons.Filled.Settings,
-    )
+    // PS5-style ribbon: 5 tabs mirroring bottom nav (1.0.49)
     Row(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        tabs.forEach { tab ->
-            val tabPage = tab.first
-            val icon = tab.second
-            val selected = tabPage == currentPage
-            IconButton(
-                onClick = { if (!selected) onTabSelected(tabPage) },
-                modifier = Modifier
-                    .size(44.dp)
-                    .background(
-                        if (selected) OpenNowPalette.AccentDefault.copy(alpha = 0.18f)
-                        else androidx.compose.ui.graphics.Color.Transparent,
-                        androidx.compose.foundation.shape.CircleShape,
-                    )
-                    .border(
-                        1.dp,
-                        if (selected) OpenNowPalette.AccentDefault
-                        else OpenNowPalette.TextPrimary.copy(alpha = 0.15f),
-                        androidx.compose.foundation.shape.CircleShape,
-                    ),
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = if (selected) OpenNowPalette.AccentDefault
-                           else OpenNowPalette.TextPrimary.copy(alpha = 0.7f),
-                    modifier = Modifier.size(22.dp),
-                )
-            }
-        }
+        // Store/Home
+        RibbonTab(
+            icon = Icons.Filled.Home,
+            selected = currentPage == AppPage.Home,
+            onClick = { onTabSelected(AppPage.Home) },
+        )
+        // Search (triggers search mode)
+        RibbonTab(
+            icon = Icons.Filled.Search,
+            selected = false,
+            onClick = onSearchSelected,
+        )
+        // Library
+        RibbonTab(
+            icon = Icons.Filled.CollectionsBookmark,
+            selected = currentPage == AppPage.Library,
+            onClick = { onTabSelected(AppPage.Library) },
+        )
+        // Music
+        RibbonTab(
+            icon = Icons.Filled.MusicNote,
+            selected = currentPage == AppPage.Music,
+            onClick = { onTabSelected(AppPage.Music) },
+        )
+        // Settings
+        RibbonTab(
+            icon = Icons.Filled.Settings,
+            selected = currentPage == AppPage.Settings,
+            onClick = { onTabSelected(AppPage.Settings) },
+        )
+    }
+}
+
+@Composable
+private fun RibbonTab(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    IconButton(
+        onClick = { if (!selected) onClick() },
+        modifier = modifier
+            .size(44.dp)
+            .background(
+                if (selected) OpenNowPalette.AccentDefault.copy(alpha = 0.18f)
+                else androidx.compose.ui.graphics.Color.Transparent,
+                androidx.compose.foundation.shape.CircleShape,
+            )
+            .border(
+                1.dp,
+                if (selected) OpenNowPalette.AccentDefault
+                else OpenNowPalette.TextPrimary.copy(alpha = 0.15f),
+                androidx.compose.foundation.shape.CircleShape,
+            ),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = if (selected) OpenNowPalette.AccentDefault
+                   else OpenNowPalette.TextPrimary.copy(alpha = 0.7f),
+            modifier = Modifier.size(22.dp),
+        )
     }
 }
 

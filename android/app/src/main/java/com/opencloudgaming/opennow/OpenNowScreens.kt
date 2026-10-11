@@ -1934,6 +1934,10 @@ private fun MainShell(
         val consoleImmersiveLandscape = state.settings.consoleModeEnabled &&
             (state.page == AppPage.Home || state.page == AppPage.Library) &&
             phoneLandscapeChrome
+        // 1.0.49: console mode hides ALL system chrome (bottom bar + nav rail)
+        // in both orientations — it has its own ribbon for navigation.
+        val consoleModeActive = state.settings.consoleModeEnabled &&
+            (state.page == AppPage.Home || state.page == AppPage.Library)
         val scrollChromePage = state.page == AppPage.Home || state.page == AppPage.Library
         val tvCatalogChrome = tvProfile && scrollChromePage
         val storeControlsInTopBar = (phoneLandscapeChrome || tvCatalogChrome) && state.page == AppPage.Home
@@ -1962,7 +1966,8 @@ private fun MainShell(
             containerColor = Color.Transparent,
             contentWindowInsets = if (streamingActive || tvProfile) WindowInsets(0, 0, 0, 0) else ScaffoldDefaults.contentWindowInsets,
             bottomBar = {
-                if (!inStream && !showNavigationRail) {
+                // 1.0.49: hide bottom bar in console mode (has its own ribbon)
+                if (!inStream && !showNavigationRail && !consoleModeActive) {
                     Column {
                         if (showMinimizedQueueDock) {
                             MinimizedQueueDock(
@@ -2039,7 +2044,8 @@ private fun MainShell(
                         .fillMaxSize()
                         .padding(screenEdgePadding),
                 ) {
-                    if (showNavigationRail && !consoleImmersiveLandscape) {
+                    // 1.0.49: hide nav rail in console mode (has its own ribbon)
+                    if (showNavigationRail && !consoleImmersiveLandscape && !consoleModeActive) {
                         AppNavigationRail(
                             state = state,
                             activeSearchTarget = visibleSearchTarget,
@@ -2130,6 +2136,7 @@ private fun MainShell(
                                         onSearchDismissed = {
                                             if (visibleSearchTarget == SearchTarget.Store) visibleSearchTarget = null
                                         },
+                                        onSearchRequested = { revealSearch(SearchTarget.Store) },
                                     )
                                 } else {
                                     HomeScreen(
@@ -2154,6 +2161,7 @@ private fun MainShell(
                                         onSearchDismissed = {
                                             if (visibleSearchTarget == SearchTarget.Library) visibleSearchTarget = null
                                         },
+                                        onSearchRequested = { revealSearch(SearchTarget.Library) },
                                     )
                                 } else {
                                     LibraryScreen(
@@ -4234,7 +4242,8 @@ private fun NanaPlayHomeHeader(
     favoriteCount: Int,
     modifier: Modifier = Modifier,
 ) {
-    val electricBlue = OpenNowPalette.AccentDefault
+    // 1.0.49: Neon-Noir restyle — deep navy base with cyan/violet aurora accents
+    // (was electric-blue gradient)
     Box(
         modifier
             .fillMaxWidth()
@@ -4242,14 +4251,24 @@ private fun NanaPlayHomeHeader(
             .background(
                 Brush.linearGradient(
                     colors = listOf(
-                        electricBlue,
-                        Color(0xff0e63b6),
-                        Color(0xff0a3d75),
+                        Color(0xff0a0f1e),
+                        Color(0xff111832),
+                        Color(0xff1a2340),
                     ),
                     start = Offset.Zero,
                     end = Offset.Infinite,
                 ),
             )
+            .border(
+                1.dp,
+                Brush.linearGradient(
+                    colors = listOf(
+                        OpenNowPalette.AccentDefault.copy(alpha = 0.5f),
+                        OpenNowPalette.AccentViolet.copy(alpha = 0.3f),
+                    ),
+                ),
+                RoundedCornerShape(20.dp),
+            ),
             .padding(horizontal = 18.dp, vertical = 16.dp),
     ) {
         // Subtle decorative glow circle, top-right.

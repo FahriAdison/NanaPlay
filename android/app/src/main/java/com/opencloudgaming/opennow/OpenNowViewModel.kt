@@ -1277,6 +1277,37 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         settingsStore.replace(next)
     }
 
+    /** 1.0.49: update Control Center button order. */
+    fun updateControlCenterOrder(order: List<String>) {
+        val current = state.value.settings
+        updateSettings(current.copy(controlCenterOrder = order))
+    }
+
+    /** 1.0.49: toggle Control Center button visibility. */
+    fun toggleControlCenterHidden(key: String) {
+        val current = state.value.settings
+        val hidden = current.controlCenterHidden.toMutableSet()
+        if (key in hidden) hidden.remove(key) else hidden.add(key)
+        // Keep at least one visible
+        val visibleCount = current.controlCenterOrder.count { it !in hidden }
+        if (visibleCount > 0) {
+            updateSettings(current.copy(controlCenterHidden = hidden))
+        }
+    }
+
+    /** 1.0.49: move Control Center button up/down in order. */
+    fun moveControlCenterButton(key: String, direction: Int) {
+        val current = state.value.settings
+        val order = current.controlCenterOrder.toMutableList()
+        val idx = order.indexOf(key)
+        val newIdx = (idx + direction).coerceIn(0, order.size - 1)
+        if (idx >= 0 && newIdx != idx) {
+            order.removeAt(idx)
+            order.add(newIdx, key)
+            updateSettings(current.copy(controlCenterOrder = order))
+        }
+    }
+
     fun checkAndroidUpdate() {
         startAndroidUpdateCheck(automatic = false)
     }

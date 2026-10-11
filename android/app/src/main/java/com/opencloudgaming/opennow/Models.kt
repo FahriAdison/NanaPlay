@@ -296,6 +296,10 @@ data class AppSettings(
     val compactGameCards: Boolean = true,
     /** Opt-in PS5-style console theme for the Store/Library screens (default is Classic). */
     val consoleModeEnabled: Boolean = false,
+    /** Control Center button order (1.0.49, editable). Default: Home, Library, Music, Settings. */
+    val controlCenterOrder: List<String> = listOf("home", "library", "music", "settings"),
+    /** Control Center hidden buttons (1.0.49). */
+    val controlCenterHidden: Set<String> = emptySet(),
     val handheldLandscapeFourColumnGrid: Boolean = false,
     val handheldLandscapeSquareCards: Boolean = false,
     val nerdCatalogBackground: Boolean = false,

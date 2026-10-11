@@ -361,7 +361,7 @@ internal fun ConsoleModeScreen(
 
                 Spacer(Modifier.height(if (isLandscape) 8.dp else 14.dp))
 
-                val baseCardWidth = if (isLandscape) 52.dp else 68.dp
+                val baseCardWidth = if (isLandscape) 44.dp else 60.dp
                 LazyRow(
                     state = listState,
                     contentPadding = PaddingValues(
@@ -799,7 +799,7 @@ private fun RibbonTab(
     IconButton(
         onClick = { if (!selected) onClick() },
         modifier = modifier
-            .size(44.dp)
+            .size(38.dp)
             .background(
                 if (selected) OpenNowPalette.AccentDefault.copy(alpha = 0.18f)
                 else androidx.compose.ui.graphics.Color.Transparent,
@@ -817,7 +817,7 @@ private fun RibbonTab(
             contentDescription = null,
             tint = if (selected) OpenNowPalette.AccentDefault
                    else OpenNowPalette.TextPrimary.copy(alpha = 0.7f),
-            modifier = Modifier.size(22.dp),
+            modifier = Modifier.size(18.dp),
         )
     }
 }
@@ -884,10 +884,18 @@ private fun ConsoleGenreChip(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
+    // 1.0.53: compact chips
     FilterChip(
         selected = selected,
         onClick = onClick,
-        label = { Text(label, maxLines = 1) },
+        label = {
+            Text(
+                label,
+                maxLines = 1,
+                style = MaterialTheme.typography.labelMedium,
+            )
+        },
+        modifier = Modifier.height(32.dp),
         colors = FilterChipDefaults.filterChipColors(
             selectedContainerColor = OpenNowPalette.AccentDefault,
             selectedLabelColor = OpenNowPalette.OnAccent,
@@ -917,7 +925,8 @@ private fun ConsoleSelectedGamePanel(
         Text(
             game.title,
             color = OpenNowPalette.TextPrimary,
-            style = (if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium).copy(shadow = textShadow),
+            // 1.0.53: slightly smaller title
+            style = (if (compact) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge).copy(shadow = textShadow),
             fontWeight = FontWeight.Bold,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
@@ -945,15 +954,20 @@ private fun ConsoleSelectedGamePanel(
                     containerColor = OpenNowPalette.AccentDefault,
                     contentColor = OpenNowPalette.OnAccent,
                 ),
+                // 1.0.53: more compact Play button
                 contentPadding = if (compact) {
-                    PaddingValues(horizontal = 22.dp, vertical = 8.dp)
+                    PaddingValues(horizontal = 18.dp, vertical = 6.dp)
                 } else {
-                    PaddingValues(horizontal = 28.dp, vertical = 12.dp)
+                    PaddingValues(horizontal = 22.dp, vertical = 8.dp)
                 },
             ) {
-                Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
+                Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text(stringResource(R.string.action_play), fontWeight = FontWeight.Bold)
+                Text(
+                    stringResource(R.string.action_play),
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.labelLarge,
+                )
             }
             IconButton(onClick = onToggleFavorite) {
                 Icon(

@@ -1,10 +1,1 @@
-{
-  "announcements": [
-    {
-      "id": "2026-10-07-testing-hold",
-      "title": "Update on Hold",
-      "message": "NanaPlay updates are temporarily on hold while we run some internal testing. Thanks for your patience — we'll be back with new features soon!",
-      "showUntil": "2026-10-31T00:00:00Z"
-    }
-  ]
-}
+{"announcements":[{"id":"2026-10-12-update-break","message":"There have been a lot of NanaPlay updates lately due to various adjustments and bug fixes, so NanaPlay will be taking a break from updates for a while. If you have any feedback, suggestions, or something to report, feel free to reach out via chat. Thank you, and happy gaming!\n\nAkhir-akhir ini NanaPlay banyak melakukan update karena berbagai penyesuaian dan perbaikan bug, jadi NanaPlay akan absen dulu dari update untuk sementara waktu. Jika kalian ingin memberikan masukan, saran, atau melaporkan sesuatu, silakan chat saja. Terima kasih dan selamat bermain!","showUntil":"2026-11-30T00:00:00Z","title":"Taking a Short Break"}]}

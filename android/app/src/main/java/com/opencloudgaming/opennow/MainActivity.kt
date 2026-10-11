@@ -123,6 +123,23 @@ class MainActivity : ComponentActivity() {
                     else -> false
                 }
                 applyConsoleImmersiveUi(shouldHide, force = true)
+                // 1.0.51: delayed re-apply to handle race with state emissions
+                // that might show the bars after rotation completes.
+                if (shouldHide) {
+                    window.decorView.postDelayed({
+                        latestUiState?.let { s ->
+                            val stillShouldHide = when (s.page) {
+                                AppPage.Home, AppPage.Library ->
+                                    s.settings.consoleModeEnabled || s.searchOverlayActive
+                                AppPage.Settings -> true
+                                else -> false
+                            }
+                            if (stillShouldHide) {
+                                applyConsoleImmersiveUi(true, force = true)
+                            }
+                        }
+                    }, 500)
+                }
             }
         }
     }

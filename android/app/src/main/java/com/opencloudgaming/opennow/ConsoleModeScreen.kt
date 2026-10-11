@@ -733,7 +733,7 @@ private fun ControlCenterButton(
 }
 
 @Composable
-private fun ConsoleRibbon(
+internal fun ConsoleRibbon(
     currentPage: AppPage,
     onTabSelected: (AppPage) -> Unit,
     onSearchSelected: () -> Unit,

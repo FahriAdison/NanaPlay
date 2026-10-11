@@ -1936,8 +1936,10 @@ private fun MainShell(
             phoneLandscapeChrome
         // 1.0.49: console mode hides ALL system chrome (bottom bar + nav rail)
         // in both orientations — it has its own ribbon for navigation.
+        // 1.0.51: extended to Music and Settings pages for consistent console UI.
         val consoleModeActive = state.settings.consoleModeEnabled &&
-            (state.page == AppPage.Home || state.page == AppPage.Library)
+            (state.page == AppPage.Home || state.page == AppPage.Library ||
+             state.page == AppPage.Music || state.page == AppPage.Settings)
         val scrollChromePage = state.page == AppPage.Home || state.page == AppPage.Library
         val tvCatalogChrome = tvProfile && scrollChromePage
         val storeControlsInTopBar = (phoneLandscapeChrome || tvCatalogChrome) && state.page == AppPage.Home
@@ -2177,24 +2179,72 @@ private fun MainShell(
                                         onScrollChromeHiddenChange = { phoneLandscapeScrollChromeHidden = it },
                                     )
                                 }
-                                AppPage.Settings -> SettingsScreen(
-                                    state = state,
-                                    viewModel = viewModel,
-                                    tvProfile = tvProfile,
-                                    searchRequested = visibleSearchTarget == SearchTarget.Settings,
-                                    searchQuery = settingsSearchQuery,
-                                    backRequestToken = settingsBackRequestToken,
-                                    onSearchQueryChange = { next ->
-                                        settingsSearchQuery = next
-                                        if (next.isBlank() && visibleSearchTarget == SearchTarget.Settings) {
-                                            visibleSearchTarget = null
+                                AppPage.Settings -> if (state.settings.consoleModeEnabled) {
+                                    // 1.0.51: console-style wrapper with ribbon for Settings
+                                    Column(Modifier.fillMaxSize().background(OpenNowPalette.Background)) {
+                                        ConsoleRibbon(
+                                            currentPage = AppPage.Settings,
+                                            onTabSelected = { viewModel.setPage(it) },
+                                            onSearchSelected = { revealSearch(SearchTarget.Settings) },
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                                        )
+                                        Box(Modifier.weight(1f).fillMaxWidth()) {
+                                            SettingsScreen(
+                                                state = state,
+                                                viewModel = viewModel,
+                                                tvProfile = tvProfile,
+                                                searchRequested = visibleSearchTarget == SearchTarget.Settings,
+                                                searchQuery = settingsSearchQuery,
+                                                backRequestToken = settingsBackRequestToken,
+                                                onSearchQueryChange = { next ->
+                                                    settingsSearchQuery = next
+                                                    if (next.isBlank() && visibleSearchTarget == SearchTarget.Settings) {
+                                                        visibleSearchTarget = null
+                                                    }
+                                                },
+                                                onDetailRouteChange = { settingsDetailRouteOpen = it },
+                                            )
                                         }
-                                    },
-                                    onDetailRouteChange = { settingsDetailRouteOpen = it },
-                                )
+                                    }
+                                } else {
+                                    SettingsScreen(
+                                        state = state,
+                                        viewModel = viewModel,
+                                        tvProfile = tvProfile,
+                                        searchRequested = visibleSearchTarget == SearchTarget.Settings,
+                                        searchQuery = settingsSearchQuery,
+                                        backRequestToken = settingsBackRequestToken,
+                                        onSearchQueryChange = { next ->
+                                            settingsSearchQuery = next
+                                            if (next.isBlank() && visibleSearchTarget == SearchTarget.Settings) {
+                                                visibleSearchTarget = null
+                                            }
+                                        },
+                                        onDetailRouteChange = { settingsDetailRouteOpen = it },
+                                    )
+                                }
                                 AppPage.Stream -> StreamScreen(state, viewModel)
                                 // NanaPlay 1.0.25: local music player page.
-                                AppPage.Music -> NanaMusicScreen()
+                                AppPage.Music -> if (state.settings.consoleModeEnabled) {
+                                    // 1.0.51: console-style wrapper with ribbon for Music
+                                    Column(Modifier.fillMaxSize().background(OpenNowPalette.Background)) {
+                                        ConsoleRibbon(
+                                            currentPage = AppPage.Music,
+                                            onTabSelected = { viewModel.setPage(it) },
+                                            onSearchSelected = { revealSearch(SearchTarget.Store) },
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                                        )
+                                        Box(Modifier.weight(1f).fillMaxWidth()) {
+                                            NanaMusicScreen()
+                                        }
+                                    }
+                                } else {
+                                    NanaMusicScreen()
+                                }
                             }
                         }
                         if (showMinimizedQueueDock && showNavigationRail) {

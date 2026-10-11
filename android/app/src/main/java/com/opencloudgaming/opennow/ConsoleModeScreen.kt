@@ -28,7 +28,11 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CollectionsBookmark
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.SportsEsports
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -551,7 +555,7 @@ internal fun ConsoleModeScreen(
                         horizontalArrangement = Arrangement.SpaceEvenly,
                     ) {
                         ControlCenterButton(
-                            icon = androidx.compose.material.icons.Icons.Filled.Home,
+                            icon = Icons.Filled.Home,
                             label = "Home",
                             onClick = {
                                 showControlCenter = false
@@ -559,7 +563,7 @@ internal fun ConsoleModeScreen(
                             }
                         )
                         ControlCenterButton(
-                            icon = androidx.compose.material.icons.Icons.Filled.CollectionsBookmark,
+                            icon = Icons.Filled.CollectionsBookmark,
                             label = "Library",
                             onClick = {
                                 showControlCenter = false
@@ -567,7 +571,7 @@ internal fun ConsoleModeScreen(
                             }
                         )
                         ControlCenterButton(
-                            icon = androidx.compose.material.icons.Icons.Filled.MusicNote,
+                            icon = Icons.Filled.MusicNote,
                             label = "Music",
                             onClick = {
                                 showControlCenter = false
@@ -575,7 +579,7 @@ internal fun ConsoleModeScreen(
                             }
                         )
                         ControlCenterButton(
-                            icon = androidx.compose.material.icons.Icons.Filled.Settings,
+                            icon = Icons.Filled.Settings,
                             label = "Settings",
                             onClick = {
                                 showControlCenter = false
@@ -646,17 +650,19 @@ private fun ConsoleRibbon(
 ) {
     // PS5 2026-style ribbon: icon tabs for main sections
     val tabs = listOf(
-        AppPage.Home to androidx.compose.material.icons.Icons.Filled.Home,
-        AppPage.Library to androidx.compose.material.icons.Icons.Filled.CollectionsBookmark,
-        AppPage.Music to androidx.compose.material.icons.Icons.Filled.MusicNote,
-        AppPage.Settings to androidx.compose.material.icons.Icons.Filled.Settings,
+        AppPage.Home to Icons.Filled.Home,
+        AppPage.Library to Icons.Filled.CollectionsBookmark,
+        AppPage.Music to Icons.Filled.MusicNote,
+        AppPage.Settings to Icons.Filled.Settings,
     )
     Row(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        tabs.forEach { (tabPage, icon) ->
+        tabs.forEach { tab ->
+            val tabPage = tab.first
+            val icon = tab.second
             val selected = tabPage == currentPage
             IconButton(
                 onClick = { if (!selected) onTabSelected(tabPage) },
@@ -728,7 +734,7 @@ private fun ConsoleTopHeader(
         }
         IconButton(onClick = onControlCenterClick, modifier = Modifier.size(36.dp)) {
             Icon(
-                imageVector = androidx.compose.material.icons.Icons.Filled.Settings,
+                imageVector = Icons.Filled.Settings,
                 contentDescription = "Control Center",
                 tint = OpenNowPalette.TextPrimary.copy(alpha = 0.75f),
                 modifier = Modifier.size(20.dp),

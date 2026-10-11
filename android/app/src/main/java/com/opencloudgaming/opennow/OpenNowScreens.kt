@@ -4268,7 +4268,7 @@ private fun NanaPlayHomeHeader(
                     ),
                 ),
                 RoundedCornerShape(20.dp),
-            ),
+            )
             .padding(horizontal = 18.dp, vertical = 16.dp),
     ) {
         // Subtle decorative glow circle, top-right.

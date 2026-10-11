@@ -59,6 +59,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -67,13 +68,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.ScaleFactor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
@@ -98,18 +97,12 @@ import kotlinx.coroutines.launch
  * focused card (or Enter / D-pad center) plays it.
  */
 /**
- * 1.0.57: background artwork scale — like Crop (fills the screen) but zoomed
- * OUT slightly (88%) so more of the artwork is visible and characters don't
- * look oversized. Any small gap blends into the dark palette background and
- * the scrim gradient, reading as a soft vignette.
+ * 1.0.58: blurred-fill background — the technique media apps use when the
+ * artwork's aspect ratio (16:9) doesn't match the phone's screen. The back
+ * layer is the same artwork cropped to fill, heavily blurred and darkened;
+ * the front layer shows the full artwork zoomed out. No hard empty strips,
+ * no oversized crop.
  */
-private val ConsoleBackgroundScale = object : ContentScale {
-    override fun computeScaleFactor(srcSize: Size, dstSize: Size): ScaleFactor {
-        val crop = ContentScale.Crop.computeScaleFactor(srcSize, dstSize)
-        return ScaleFactor(crop.scaleX * 0.88f, crop.scaleY * 0.88f)
-    }
-}
-
 @Composable
 internal fun ConsoleModeScreen(
     page: AppPage,
@@ -272,12 +265,30 @@ internal fun ConsoleModeScreen(
             val game = games.firstOrNull { it.id == gameId }
             val bgUrl = game?.let(::consoleBackgroundUrl)
             if (bgUrl != null) {
-                AsyncImage(
-                    model = bgUrl,
-                    contentDescription = null,
-                    contentScale = ConsoleBackgroundScale,
-                    modifier = Modifier.fillMaxSize(),
-                )
+                // 1.0.58: blurred-fill — blurred/darkened copy fills the screen
+                // behind the full artwork (see ConsoleModeScreen doc).
+                Box(Modifier.fillMaxSize()) {
+                    AsyncImage(
+                        model = bgUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer(scaleX = 1.15f, scaleY = 1.15f)
+                            .blur(36.dp),
+                    )
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.35f)),
+                    )
+                    AsyncImage(
+                        model = bgUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             } else {
                 Box(Modifier.fillMaxSize().background(OpenNowPalette.Background))
             }

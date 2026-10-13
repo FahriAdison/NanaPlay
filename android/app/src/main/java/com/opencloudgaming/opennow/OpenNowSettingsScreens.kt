@@ -793,6 +793,13 @@ private fun SettingsContent(
                 ) { enabled ->
                     viewModel.updateSettings(settings.copy(controllerMouseEmulation = enabled))
                 }
+                SettingSwitch(
+                    label = stringResource(R.string.stream_panel_keymap_mode),
+                    checked = settings.keyboardToGamepad,
+                    description = "Toggle in Stream Controls per session. Physical keyboard/mouse become gamepad input — for games like NTE that ignore keyboard/mouse on GFN.",
+                ) { enabled ->
+                    viewModel.updateSettings(settings.copy(keyboardToGamepad = enabled))
+                }
                 if (settings.controllerMouseEmulation) {
                     Box(Modifier.padding(start = 24.dp)) {
                         Column {

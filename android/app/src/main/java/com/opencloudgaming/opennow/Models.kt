@@ -330,6 +330,8 @@ data class AppSettings(
     val controllerMode: Boolean = false,
     val controllerUiSounds: Boolean = true,
     val controllerMouseEmulation: Boolean = false,
+    /** 1.0.60: translate physical keyboard/mouse into virtual gamepad input (for games like NTE that ignore KB/mouse on GFN). */
+    val keyboardToGamepad: Boolean = false,
     val controllerBackgroundAnimations: Boolean = true,
     val controllerThemeStyle: String = "aurora",
     val controllerThemeColor: ControllerThemeRgb = ControllerThemeRgb(),

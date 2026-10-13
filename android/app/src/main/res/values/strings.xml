@@ -124,6 +124,8 @@
     <string name="stream_panel_phone_rumble">Phone rumble fallback</string>
     <string name="stream_panel_mouse_mode">Mouse mode (Using Gamepad)</string>
     <string name="stream_panel_mouse_mode_summary">L stick moves mouse ·R stick scroll · R stick scrolls · A clicks · B right-clicks</string>
+    <string name="stream_panel_keymap_mode">Keyboard → Gamepad</string>
+    <string name="stream_panel_keymap_mode_summary">WASD left stick · mouse right stick · Space A · E X · Q Y · LMB RT</string>
     <string name="stream_mouse_mode_title">Mouse mode</string>
     <string name="stream_mouse_mode_subtitle">Configure mouse emulation</string>
     <string name="stream_panel_drag_edit">Drag edit mode</string>

@@ -20,6 +20,7 @@ import java.nio.ByteBuffer
 import java.util.ArrayDeque
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.LockSupport
@@ -65,7 +66,12 @@ internal class AndroidStreamRecorder(
         private const val AUDIO_GAP_REANCHOR_THRESHOLD_NS = 50_000_000L
         private const val PENDING_SAMPLE_CAPACITY = 128
         private const val FINALIZE_TIMEOUT_NS = 15_000_000_000L
+        /** Bound for stopAndAwaitFinished(): finalize (15s) + muxer stop + legacy copy. */
+        private const val STOP_AWAIT_TIMEOUT_MS = 30_000L
     }
+
+    /** Thrown when the encoders don't drain to EOS within [FINALIZE_TIMEOUT_NS]. */
+    private class FinalizeTimeoutException : java.io.IOException("Timed out waiting for codec EOS")
 
     private val appContext = context.applicationContext
     private val resolver = appContext.contentResolver
@@ -303,6 +309,9 @@ internal class AndroidStreamRecorder(
             thread.start()
             true
         } catch (error: Throwable) {
+            // The worker never ran: reset `started` so a later start() can retry instead of
+            // being bricked forever by the compareAndSet above.
+            started.set(false)
             synchronized(inputGate) { acceptingInput = false }
             workerThread = null
             report(StreamRecorderPhase.Failed, failureMessage("Could not start recorder worker", error))
@@ -328,6 +337,17 @@ internal class AndroidStreamRecorder(
     /** Lifecycle alias for integrations that use an explicit release callback. */
     fun release() = stop()
 
+    /**
+     * Requests finalization and blocks (up to [STOP_AWAIT_TIMEOUT_MS]) until the worker
+     * has finished releasing codecs, muxer, and EGL. Call from a BACKGROUND thread during
+     * teardown — never the main thread — so the process doesn't exit mid-mux and leave a
+     * truncated file. Returns true when the worker finished in time.
+     */
+    fun stopAndAwaitFinished(): Boolean {
+        stop()
+        return awaitWorkerFinished(STOP_AWAIT_TIMEOUT_MS)
+    }
+
     /** Waits for codecs, muxer, and the recorder-owned EGL child context to be fully released. */
     fun awaitWorkerFinished() {
         var interrupted = false
@@ -342,12 +362,37 @@ internal class AndroidStreamRecorder(
         if (interrupted) Thread.currentThread().interrupt()
     }
 
+    /**
+     * Timed variant of [awaitWorkerFinished]: returns true when the worker finished within
+     * [timeoutMs], false on timeout (the worker keeps finalizing in the background).
+     */
+    fun awaitWorkerFinished(timeoutMs: Long): Boolean {
+        var interrupted = false
+        try {
+            return try {
+                workerFinished.await(timeoutMs, TimeUnit.MILLISECONDS)
+            } catch (_: InterruptedException) {
+                interrupted = true
+                false
+            }
+        } finally {
+            if (interrupted) Thread.currentThread().interrupt()
+        }
+    }
+
     private fun runWorker() {
         try {
             createVideoEncoder()
             createAudioEncoder()
             report(StreamRecorderPhase.Recording, null)
-            recordingLoop()
+            var truncated = false
+            try {
+                recordingLoop()
+            } catch (_: FinalizeTimeoutException) {
+                // The encoders didn't drain to EOS in time (wedged codec). The MP4 muxed so
+                // far is still valid — finalize it instead of discarding the whole recording.
+                truncated = true
+            }
             finishOutput()
             releaseResources()
             copyLegacyOutputIfNeeded()
@@ -355,6 +400,7 @@ internal class AndroidStreamRecorder(
             val audioDrops = audioDroppedBlocks.get()
             val videoDrops = videoDroppedFrames.get()
             val finishMessage = buildList {
+                if (truncated) add("finalized early because the encoders did not finish in time")
                 if (audioDrops > 0L) add("dropped $audioDrops audio PCM blocks to stay synchronized")
                 if (videoDrops > 0L) add("dropped $videoDrops video frames under encoder load")
             }.takeIf { it.isNotEmpty() }?.joinToString("; ")
@@ -500,7 +546,7 @@ internal class AndroidStreamRecorder(
                 break
             }
             if (finalizing && System.nanoTime() >= finalizeDeadlineNs) {
-                throw IOException("Timed out waiting for codec EOS")
+                throw FinalizeTimeoutException()
             }
             if (!progress) LockSupport.parkNanos(1_000_000L)
         }

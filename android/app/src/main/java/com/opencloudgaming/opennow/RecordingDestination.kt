@@ -14,7 +14,11 @@ internal object RecordingDestination {
             Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
         )
         true
-    } catch (_: SecurityException) {
+    } catch (_: Exception) {
+        // SecurityException is the common case (grant revoked/denied), but provider
+        // misbehavior can surface as other RuntimeExceptions (e.g. IllegalArgumentException
+        // for a malformed URI, UnsupportedOperationException). Any failure means the
+        // folder is unusable — report false rather than crashing the caller.
         false
     }
 

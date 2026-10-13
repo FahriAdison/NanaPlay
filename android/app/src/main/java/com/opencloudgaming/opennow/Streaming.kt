@@ -423,10 +423,28 @@ private class OpenNowVideoDecoderFactory(
             )
         }
         return if (decoder != null && tuneSelectedDecoder) {
-            LowLatencyVideoDecoder(
-                delegate = decoder,
-                requestedFps = exactRequestedFps,
-                lowLatencyEnabled = nativeLowLatencyDecoderEnabled,
+            // Try the tuned decoder first; if the device rejects the tuning at
+            // init, fall back to a freshly created untuned decoder instead of
+            // leaving video dead for the whole session.
+            FallbackVideoDecoder(
+                createPrimary = {
+                    LowLatencyVideoDecoder(
+                        delegate = decoder,
+                        requestedFps = exactRequestedFps,
+                        lowLatencyEnabled = nativeLowLatencyDecoderEnabled,
+                    )
+                },
+                createFallback = {
+                    val freshHardware = if (codec != null) hardwareFactory.createDecoder(info) else null
+                    when (codec) {
+                        VideoCodec.H264 -> freshHardware ?: defaultFactory.createDecoder(info)
+                        VideoCodec.H265,
+                        VideoCodec.AV1,
+                        -> freshHardware
+                        null -> defaultFactory.createDecoder(info)
+                    }
+                },
+                codecLabel = codec?.name ?: info.name,
             )
         } else {
             decoder
@@ -524,6 +542,7 @@ internal enum class SignalingFailureDisposition {
     RetryTransport,
     RecoverSession,
     SessionEnded,
+    Reauthenticate,
 }
 
 internal fun signalingFailureDisposition(
@@ -533,6 +552,12 @@ internal fun signalingFailureDisposition(
     message.contains("http=410", ignoreCase = true) -> SignalingFailureDisposition.SessionEnded
     message.contains("http=404", ignoreCase = true) ||
         message.contains("Not Found", ignoreCase = true) -> SignalingFailureDisposition.RecoverSession
+    // Auth failures must never fall through to silent transport retry:
+    // the token is dead, so retrying forever only shows "Reconnecting...".
+    message.contains("http=401", ignoreCase = true) ||
+        message.contains("http=403", ignoreCase = true) ||
+        message.contains("unauthorized", ignoreCase = true) ||
+        message.contains("forbidden", ignoreCase = true) -> SignalingFailureDisposition.Reauthenticate
     normalClosureMeansSessionEnded && message.contains("code=1000", ignoreCase = true) ->
         SignalingFailureDisposition.SessionEnded
     else -> SignalingFailureDisposition.RetryTransport
@@ -3272,6 +3297,9 @@ class NativeStreamClient(
     private var session: SessionInfo? = null
     private var transportGeneration = 0
     private var reconnectAttempts = 0
+    // Start (elapsedRealtime ms) of the current no-media-progress episode, 0 = none.
+    // Circuit breaker for uncapped persistent-reconnect retries.
+    private var persistentStallStartMs = 0L
     private var videoSafeFallbackApplied = false
     private var catastrophicResolutionCodecFallbacks = 0
     private var firstDecodedResolutionEvaluated = false
@@ -3612,6 +3640,7 @@ class NativeStreamClient(
         this.settings = settings
         transportGeneration += 1
         reconnectAttempts = 0
+        persistentStallStartMs = 0L
         videoSafeFallbackApplied = false
         catastrophicResolutionCodecFallbacks = 0
         sessionRecoveryRequested = false
@@ -3637,6 +3666,7 @@ class NativeStreamClient(
         stopStreamRecording()
         transportGeneration += 1
         reconnectAttempts = 0
+        persistentStallStartMs = 0L
         sessionRecoveryRequested = false
         livenessWatchdog.reset()
         firstVideoFrameWatchdog.reset()
@@ -3709,7 +3739,9 @@ class NativeStreamClient(
         videoTrack?.removeSink(recorder)
         detachRecordingAudioSink()
         recordingPhase.value = StreamRecorderPhase.Finalizing
-        recorder.stop()
+        // Await finalization on a background thread (never main): stopAndAwaitFinished
+        // blocks up to 30s for the muxer/codecs to release cleanly.
+        scope.launch(Dispatchers.IO) { recorder.stopAndAwaitFinished() }
     }
 
     internal fun canCaptureScreenshot(): Boolean {
@@ -4437,51 +4469,70 @@ class NativeStreamClient(
     }
 
     private fun handleSignaling(event: SignalingEvent, generation: Int) {
-        if (generation != transportGeneration) return
-        when (event) {
-            SignalingEvent.Connected -> {
-                recordStreamDiagnostic("signaling connected generation=$generation")
-                emitState("Waiting for offer")
-                startOfferTimeout(generation)
-            }
-            is SignalingEvent.Disconnected -> {
-                recordStreamDiagnostic("signaling disconnected ${event.reason}")
-                when (signalingFailureDisposition(event.reason, normalClosureMeansSessionEnded = true)) {
-                    SignalingFailureDisposition.SessionEnded -> {
-                        recordStreamDiagnostic("Signaling disconnected normally. Stopping stream.")
-                        stop()
-                        scope.launch { onStreamStopped() }
-                    }
-                    SignalingFailureDisposition.RecoverSession -> {
-                        recordStreamDiagnostic("Signaling endpoint is stale. Recovering cloud session.")
-                        requestSessionRecovery("Signaling endpoint became unavailable while connecting to the cloud session.")
-                    }
-                    SignalingFailureDisposition.RetryTransport ->
-                        scheduleTransportReconnect("Signaling disconnected: ${event.reason}", SIGNALING_RECONNECT_DELAY_MS, generation)
+        // GfnSignalingClient invokes this from OkHttp's WebSocket thread.
+        // Hop to the client scope so every state mutation below happens on
+        // one thread, exactly like handleIceConnectionChange already does.
+        scope.launch {
+            if (generation != transportGeneration) return@launch
+            when (event) {
+                SignalingEvent.Connected -> {
+                    recordStreamDiagnostic("signaling connected generation=$generation")
+                    emitState("Waiting for offer")
+                    startOfferTimeout(generation)
                 }
-            }
-            is SignalingEvent.Error -> {
-                recordStreamDiagnostic("signaling error ${event.message}")
-                when (signalingFailureDisposition(event.message)) {
-                    SignalingFailureDisposition.SessionEnded -> {
-                        recordStreamDiagnostic("Signaling error indicates session terminated. Stopping stream.")
-                        stop()
-                        scope.launch { onStreamStopped() }
+                is SignalingEvent.Disconnected -> {
+                    recordStreamDiagnostic("signaling disconnected ${event.reason}")
+                    when (signalingFailureDisposition(event.reason, normalClosureMeansSessionEnded = true)) {
+                        SignalingFailureDisposition.SessionEnded -> {
+                            recordStreamDiagnostic("Signaling disconnected normally. Stopping stream.")
+                            stop()
+                            scope.launch { onStreamStopped() }
+                        }
+                        SignalingFailureDisposition.RecoverSession -> {
+                            recordStreamDiagnostic("Signaling endpoint is stale. Recovering cloud session.")
+                            requestSessionRecovery("Signaling endpoint became unavailable while connecting to the cloud session.")
+                        }
+                        SignalingFailureDisposition.Reauthenticate -> {
+                            recordStreamDiagnostic("Signaling auth failed (401/403). Stopping stream.")
+                            failStream(
+                                "Session unauthorized or forbidden (401/403). Please sign out and sign back in.",
+                                generation,
+                            )
+                        }
+                        SignalingFailureDisposition.RetryTransport ->
+                            scheduleTransportReconnect("Signaling disconnected: ${event.reason}", SIGNALING_RECONNECT_DELAY_MS, generation)
                     }
-                    SignalingFailureDisposition.RecoverSession -> {
-                        recordStreamDiagnostic("Signaling endpoint is stale. Recovering cloud session.")
-                        requestSessionRecovery("Signaling endpoint became unavailable while connecting to the cloud session.")
-                    }
-                    SignalingFailureDisposition.RetryTransport ->
-                        scheduleTransportReconnect("Signaling failed: ${event.message}", SIGNALING_RECONNECT_DELAY_MS, generation)
                 }
+                is SignalingEvent.Error -> {
+                    recordStreamDiagnostic("signaling error ${event.message}")
+                    when (signalingFailureDisposition(event.message)) {
+                        SignalingFailureDisposition.SessionEnded -> {
+                            recordStreamDiagnostic("Signaling error indicates session terminated. Stopping stream.")
+                            stop()
+                            scope.launch { onStreamStopped() }
+                        }
+                        SignalingFailureDisposition.RecoverSession -> {
+                            recordStreamDiagnostic("Signaling endpoint is stale. Recovering cloud session.")
+                            requestSessionRecovery("Signaling endpoint became unavailable while connecting to the cloud session.")
+                        }
+                        SignalingFailureDisposition.Reauthenticate -> {
+                            recordStreamDiagnostic("Signaling auth failed (401/403). Stopping stream.")
+                            failStream(
+                                "Session unauthorized or forbidden (401/403). Please sign out and sign back in.",
+                                generation,
+                            )
+                        }
+                        SignalingFailureDisposition.RetryTransport ->
+                            scheduleTransportReconnect("Signaling failed: ${event.message}", SIGNALING_RECONNECT_DELAY_MS, generation)
+                    }
+                }
+                is SignalingEvent.Log -> recordStreamDiagnostic(event.message)
+                is SignalingEvent.RemoteIce -> {
+                    val added = peerConnection?.addIceCandidate(event.candidate)
+                    recordStreamDiagnostic("remote ICE add requested accepted=${added ?: false} pcReady=${peerConnection != null} ${event.candidate.diagnosticSummary()}")
+                }
+                is SignalingEvent.Offer -> handleOffer(event.sdp, generation)
             }
-            is SignalingEvent.Log -> recordStreamDiagnostic(event.message)
-            is SignalingEvent.RemoteIce -> {
-                val added = peerConnection?.addIceCandidate(event.candidate)
-                recordStreamDiagnostic("remote ICE add requested accepted=${added ?: false} pcReady=${peerConnection != null} ${event.candidate.diagnosticSummary()}")
-            }
-            is SignalingEvent.Offer -> handleOffer(event.sdp, generation)
         }
     }
 
@@ -4882,6 +4933,12 @@ class NativeStreamClient(
                 }
                 PeerConnection.IceConnectionState.FAILED -> {
                     emitState("ICE_FAILED")
+                    // FAILED is more severe than a pending DISCONNECTED grace
+                    // timer: preempt it so the reconnect is actually scheduled
+                    // instead of being refused and then cancelled by the guard.
+                    iceRecoveryJob?.cancel()
+                    iceRecoveryJob = null
+                    recordStreamDiagnostic("ice FAILED preempted pending recovery job generation=$generation")
                     scheduleTransportReconnect("ICE failed", ICE_FAILED_RECONNECT_DELAY_MS, generation)
                 }
                 PeerConnection.IceConnectionState.CHECKING,
@@ -4937,10 +4994,33 @@ class NativeStreamClient(
     }
 
     private fun restartTransport(reason: String, videoFailure: Boolean = false) {
-        val currentSession = session ?: return
+        val currentSession = session ?: run {
+            recordStreamDiagnostic("restartTransport ignored: session is null reason=$reason")
+            return
+        }
         val currentSettings = settings
         val persistentReconnect = currentSettings.persistentReconnect
         val hadStableMedia = transportHasStableMedia
+        // Circuit breaker for persistent mode: reconnectAttempts is uncapped
+        // there, so stop retrying when media hasn't progressed for a long
+        // time instead of draining battery/data forever.
+        if (persistentReconnect && !transportHasStableMedia) {
+            val now = SystemClock.elapsedRealtime()
+            if (persistentStallStartMs == 0L) {
+                persistentStallStartMs = now
+            } else if (now - persistentStallStartMs >= PERSISTENT_RECONNECT_STALL_LIMIT_MS) {
+                recordStreamDiagnostic(
+                    "persistent reconnect circuit breaker tripped: no media progress for " +
+                        "${PERSISTENT_RECONNECT_STALL_LIMIT_MS / 60000}min reason=$reason",
+                )
+                persistentStallStartMs = 0L
+                failStream(
+                    "No media progress for ${PERSISTENT_RECONNECT_STALL_LIMIT_MS / 60000} minutes. " +
+                        "Check your connection and try again.",
+                )
+                return
+            }
+        }
         if (
             transportRestartShouldApplySafeVideoFallback(
                 videoFailure = videoFailure,
@@ -5526,6 +5606,8 @@ class NativeStreamClient(
             consecutiveTransportProgressSamples = 0
             return
         }
+        // Any media progress resets the persistent-reconnect stall timer.
+        persistentStallStartMs = 0L
         firstVideoFrameWatchdog.markRendered()
         consecutiveTransportProgressSamples += 1
         if (consecutiveTransportProgressSamples < STABLE_TRANSPORT_PROGRESS_SAMPLES) return
@@ -7410,6 +7492,9 @@ private const val ANDROID_CODEC_RESTART_SETTLE_MS = 180L
 private const val MAX_TRANSPORT_RECONNECT_ATTEMPTS = 3
 private const val PERSISTENT_RECONNECT_BASE_DELAY_MS = 2000L
 private const val PERSISTENT_RECONNECT_MAX_DELAY_MS = 30000L
+// Persistent mode retries are uncapped: stop after this long without any
+// media progress instead of retrying forever.
+private const val PERSISTENT_RECONNECT_STALL_LIMIT_MS = 10 * 60 * 1000L
 private const val PERSISTENT_SAFE_FALLBACK_AFTER_ATTEMPTS = 2
 private const val OFFER_TIMEOUT_MS = 12_000L
 private const val MEDIA_STALL_KEYFRAME_AFTER_MS = 5_000L

@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">NanaPlay</string>
+    <string name="auth_refresh_needs_relogin">Your sign-in expired. Please sign in again.</string>
     <string name="status_starting_opennow">Starting NanaPlay</string>
     <string name="login_with_provider">Sign in with %1$s</string>
     <string name="login_tv_start">Sign in on another device with %1$s</string>
@@ -538,6 +539,8 @@
     <string name="music_err_online_unavailable">Online music temporarily unavailable</string>
     <string name="music_err_no_valid_files">Couldn\'t add songs: no valid files selected.</string>
     <string name="music_err_add_failed">Couldn\'t add songs. Please try again.</string>
+    <string name="music_err_persist_permission">Couldn\'t keep access to %1$d file(s) — they may disappear after the app restarts. Try picking them again.</string>
+    <string name="music_notif_channel">Music playback</string>
     <!-- NanaPlay 1.0.43: music screen tabs -->
     <string name="music_tab_my_music">My Music</string>
     <string name="music_tab_online">Online</string>
@@ -572,6 +575,7 @@
     <string name="dlg_share_diagnostics">Share diagnostics?</string>
     <string name="dlg_share_analytics">Share analytics</string>
     <string name="dlg_share_anonymous_desc">Share anonymous diagnostics to help us find patterns in bugs, crashes, and performance problems. Sensitive data is removed, and we do not sell your data.</string>
+    <string name="dlg_share_analytics_recipient">If enabled, usage analytics events are sent to: %1$s</string>
     <string name="dlg_sharing_off_warning">If sharing is off during a crash, we may not have enough information to investigate your report. It is off by default and can be changed in Privacy settings.</string>
     <string name="dlg_keep_off">Keep off</string>
     <string name="dlg_got_it">Got it</string>
@@ -688,4 +692,51 @@
     <string name="console_edit">Edit</string>
     <string name="console_done">Done</string>
     <string name="console_back_to_browse">↑ Back to browse</string>
+    <!-- Settings labels (touch/input/stream) -->
+    <string name="settings_share_usage_analytics">Share usage analytics</string>
+    <string name="settings_stream_sharpening">Stream sharpening</string>
+    <string name="settings_sharpness_amount">Sharpness amount</string>
+    <string name="settings_mouse_sensitivity">Mouse sensitivity</string>
+    <string name="settings_mouse_acceleration">Mouse acceleration</string>
+    <string name="settings_keyboard_layout">Keyboard layout</string>
+    <string name="settings_game_language">Game language</string>
+    <string name="settings_clipboard_paste">Clipboard paste</string>
+    <string name="settings_phone_rumble_fallback">Phone rumble fallback</string>
+    <string name="settings_touch_controls">Touch controls</string>
+    <string name="settings_touch_controller_style">Touch controller style</string>
+    <string name="settings_touch_joystick">Touch joystick</string>
+    <string name="settings_joystick_dead_zone">Joystick dead zone</string>
+    <string name="settings_finger_mouse">Finger mouse</string>
+    <string name="settings_direct_click">Direct click</string>
+    <string name="settings_touch_layout_scale">Touch layout scale</string>
+    <string name="settings_touch_button_size">Touch button size</string>
+    <string name="settings_touch_stick_size">Touch stick size</string>
+    <string name="settings_touch_opacity">Touch opacity</string>
+    <string name="settings_touch_edge_padding">Touch edge padding</string>
+    <string name="settings_touch_bottom_padding">Touch bottom padding</string>
+    <string name="settings_left_controls_horizontal_offset">Left controls horizontal offset</string>
+    <string name="settings_left_controls_vertical_offset">Left controls vertical offset</string>
+    <string name="settings_right_controls_horizontal_offset">Right controls horizontal offset</string>
+    <string name="settings_right_controls_vertical_offset">Right controls vertical offset</string>
+    <!-- Console mode -->
+    <string name="console_genre_all">All</string>
+    <string name="console_cc_home">Home</string>
+    <string name="console_cc_music">Music</string>
+    <string name="console_content_show">Show</string>
+    <string name="console_content_hide">Hide</string>
+    <string name="console_remove_from_favorites">Remove from favorites</string>
+    <string name="console_add_to_favorites">Add to favorites</string>
+    <string name="console_loading_games">Loading games…</string>
+    <string name="console_no_games_yet">No games here yet</string>
+    <string name="console_pull_to_refresh">Pull down to refresh, or check your connection and linked stores.</string>
+    <!-- Browser panel -->
+    <string name="browser_title">Browser</string>
+    <string name="browser_cycle_size">Cycle size</string>
+    <string name="browser_expand">Expand</string>
+    <string name="browser_minimize">Minimize</string>
+    <string name="browser_close">Close browser</string>
+    <string name="browser_back">Back</string>
+    <string name="browser_forward">Forward</string>
+    <string name="browser_clear">Clear</string>
+    <string name="settings_show_floating_action_buttons">Show floating action buttons</string>
 </resources>

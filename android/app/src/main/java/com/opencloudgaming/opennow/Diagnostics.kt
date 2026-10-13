@@ -174,7 +174,11 @@ private fun shouldRedactDiagnosticKey(key: String): Boolean {
         normalized == "devicehashid" ||
         normalized == "sub" ||
         normalized == "email" ||
-        normalized == "userid"
+        normalized == "userid" ||
+        normalized == "name" ||
+        normalized == "displayname" ||
+        normalized == "username" ||
+        normalized == "nickname"
 }
 
 private fun redactDiagnosticText(text: String): String {
@@ -190,12 +194,12 @@ internal fun sanitizeDiagnosticExport(raw: String): String {
     var sanitized = Regex("""(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+""").replace(raw, "Bearer [redacted]")
     sanitized = redactDiagnosticText(sanitized)
     sanitized = Regex(
-        """(?i)([\"']?(?:email|user(?:[_-]?id|[_-]?name)?|display[_-]?name|account[_-]?id|profile[_-]?id|session[_-]?id|server[_-]?ip|device[_-]?id|device[_-]?name|ip[_-]?address)[\"']?\s*:\s*)(\"(?:\\.|[^\"])*\"|'(?:\\.|[^'])*'|[^,}\r\n]+)""",
+        """(?i)([\"']?(?:email|user(?:[_-]?id|[_-]?name)?|display[_-]?name|(?<![A-Za-z0-9_-])name(?![A-Za-z0-9_-])|(?<![A-Za-z0-9_-])nickname(?![A-Za-z0-9_-])|account[_-]?id|profile[_-]?id|session[_-]?id|server[_-]?ip|device[_-]?id|device[_-]?name|ip[_-]?address)[\"']?\s*:\s*)(\"(?:\\.|[^\"])*\"|'(?:\\.|[^'])*'|[^,}\r\n]+)""",
     ).replace(sanitized) { match ->
         "${match.groupValues[1]}\"[redacted]\""
     }
     sanitized = Regex(
-        """(?im)\b(email|user|user[_-]?id|user[_-]?name|display[_-]?name|account|account[_-]?id|profile[_-]?id|session|session[_-]?id|server|server[_-]?ip|device|device[_-]?id|device[_-]?name|ip[_-]?address)(\s*[=:]\s*)(.*?)(?=\s+[a-z][a-z0-9_.-]*\s*[=:]|$)""",
+        """(?im)\b(email|user|user[_-]?id|user[_-]?name|display[_-]?name|name|nickname|account|account[_-]?id|profile[_-]?id|session|session[_-]?id|server|server[_-]?ip|device|device[_-]?id|device[_-]?name|ip[_-]?address)(\s*[=:]\s*)(.*?)(?=\s+[a-z][a-z0-9_.-]*\s*[=:]|$)""",
     ).replace(sanitized) { match ->
         "${match.groupValues[1]}${match.groupValues[2]}[redacted]"
     }

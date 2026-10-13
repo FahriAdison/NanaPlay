@@ -3,6 +3,10 @@ package com.opencloudgaming.opennow
 import android.content.Context
 import android.content.res.Configuration
 import android.os.Build
+import android.util.Xml
+import org.xmlpull.v1.XmlPullParser
+import java.io.File
+import java.io.FileInputStream
 import java.util.Locale
 
 /**
@@ -65,8 +69,7 @@ object AppLocale {
 
     private fun readStoredLanguage(base: Context): String {
         return try {
-            val prefs = base.getSharedPreferences("opennow_native", Context.MODE_PRIVATE)
-            val json = prefs.getString("settings", null) ?: return LANGUAGE_ENGLISH
+            val json = readSettingsJson(base) ?: return LANGUAGE_ENGLISH
             // Minimal parse: find "appLanguage":"xx" without full JSON deserialization
             val match = Regex("\"appLanguage\"\\s*:\\s*\"([^\"]+)\"").find(json)
             val lang = match?.groupValues?.get(1)
@@ -75,4 +78,56 @@ object AppLocale {
             LANGUAGE_ENGLISH
         }
     }
+
+    /**
+     * Reads the raw settings JSON exactly where ExternalPrefs stores it, without
+     * initializing SettingsStore (unsafe in attachBaseContext: it touches
+     * PackageManager/resources that aren't ready yet).
+     *
+     * Mirrors ExternalPrefs lookup order: external primary file, then the
+     * internal filesDir fallback (newest wins), then the internal
+     * SharedPreferences (only non-empty before ExternalPrefs migration runs).
+     */
+    private fun readSettingsJson(base: Context): String? {
+        val extDir = runCatching { base.getExternalFilesDir(null) }.getOrNull()
+        val filesDir = runCatching { base.filesDir }.getOrNull()
+        val candidates = listOfNotNull(
+            extDir?.let { File(it, EXTERNAL_PREFS_FILE) },
+            filesDir?.let { File(it, EXTERNAL_PREFS_FILE) },
+        ).filter { it.isFile }
+        candidates.maxByOrNull { it.lastModified() }
+            ?.let { readSettingsFromXml(it) }
+            ?.let { return it }
+        // Pre-migration fallback: internal SharedPreferences, cleared by migration.
+        return runCatching {
+            base.getSharedPreferences("opennow_native", Context.MODE_PRIVATE)
+                .getString("settings", null)
+        }.getOrNull()
+    }
+
+    private fun readSettingsFromXml(file: File): String? {
+        return try {
+            FileInputStream(file).use { fis ->
+                val parser = Xml.newPullParser()
+                parser.setInput(fis, "UTF-8")
+                var event = parser.eventType
+                while (event != XmlPullParser.END_DOCUMENT) {
+                    if (event == XmlPullParser.START_TAG &&
+                        parser.name == "string" &&
+                        parser.getAttributeValue(null, "name") == "settings"
+                    ) {
+                        // nextText() returns the XML-unescaped text content.
+                        return parser.nextText().takeIf { it.isNotBlank() }
+                    }
+                    event = parser.next()
+                }
+                null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** File name used by ExternalPrefs (see Persistence.kt). */
+    private const val EXTERNAL_PREFS_FILE = "opennow_native.xml"
 }

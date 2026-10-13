@@ -3,7 +3,10 @@ import com.papahchan.nanaplay.BuildConfig
 import com.papahchan.nanaplay.R
 
 import android.app.Application
+import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
@@ -15,6 +18,7 @@ import androidx.compose.runtime.Immutable
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -51,9 +55,17 @@ enum class SettingsRouteTarget {
 private const val ANDROID_UPDATE_LAUNCH_CHECK_DELAY_MS = 5_000L
 /** No queue-position improvement for this long → warn the user the queue may be stuck. */
 private const val QUEUE_STUCK_WARNING_MS = 10L * 60L * 1000L
+/** Never poll the queue longer than this — a wedged server must not drain battery/data forever. */
+private const val POLL_MAX_DURATION_MS = 40L * 60L * 1000L
+/** Upper bound for the exponential backoff between failed queue polls. */
+private const val POLL_RETRY_MAX_BACKOFF_MS = 30_000L
 /** Transient-failure retries for session creation before surfacing the error. */
 private const val CREATE_SESSION_MAX_ATTEMPTS = 3
 private const val CREATE_SESSION_RETRY_BASE_MS = 2_000L
+/** Matches "CloudMatch returned status N" in toSessionInfo check() failures. */
+private val CLOUDMATCH_STATUS_REGEX = Regex("""\bCloudMatch returned status\s+(\d+)\b""")
+/** Give up stream recovery after this long instead of hanging on "Reconnecting stream" forever. */
+private const val STREAM_RECOVERY_TIMEOUT_MS = 75_000L
 internal const val ANDROID_UPDATE_PERIODIC_CHECK_INTERVAL_MS = 6L * 60L * 60L * 1000L
 private const val ANDROID_UPDATE_STREAMING_RETRY_DELAY_MS = 30_000L
 private const val DEBUG_EVENT_LIMIT = 140
@@ -279,6 +291,8 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
     private var settingsRefreshJob: Job? = null
     private var authRefreshJob: Job? = null
 
+    private var announcementsChecked = false
+
     init {
         viewModelScope.launch {
             settingsStore.settings.collect { next ->
@@ -383,8 +397,6 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private var announcementsChecked = false
-
     private fun recordDebugEvent(category: String, message: String) {
         val oneLineMessage = message
             .lineSequence()
@@ -475,24 +487,33 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             val restored = restoreResult.getOrNull()
             val activeSession = restored ?: authStore.activeSession()
             val selected = activeSession?.provider ?: authStore.state.value.selectedProvider ?: providers.firstOrNull() ?: defaultProvider()
-            val restoreError = restoreResult.exceptionOrNull()?.message?.takeIf { activeSession == null }
+            // The background refresh worker flags permanent credential death (invalid_grant /
+            // revoked token): the stored session is unusable, so force a logged-out state with
+            // a clear "log in again" message instead of failing silently on every launch.
+            val backgroundRefreshNeedsRelogin =
+                AndroidAuthRefreshWorker.consumeBackgroundRefreshNeedsRelogin(getApplication())
+            val effectiveSession = activeSession.takeUnless { backgroundRefreshNeedsRelogin }
+            val restoreError = when {
+                backgroundRefreshNeedsRelogin -> getApplication<Application>().getString(R.string.auth_refresh_needs_relogin)
+                else -> restoreResult.exceptionOrNull()?.message?.takeIf { activeSession == null }
+            }
             _state.update {
                 it.copy(
                     providers = providers,
                     selectedProvider = selected,
-                    authSession = activeSession,
+                    authSession = effectiveSession,
                     savedAccounts = authStore.state.value.sessions.map { session -> session.toSavedAccount() },
                     initializing = false,
                     launchPhase = "",
-                    loadingGames = if (activeSession == null) false else it.loadingGames,
-                    games = if (activeSession == null) emptyList() else it.games,
-                    libraryGames = if (activeSession == null) emptyList() else it.libraryGames,
-                    catalogResult = if (activeSession == null) CatalogBrowseResult(emptyList()) else it.catalogResult,
+                    loadingGames = if (effectiveSession == null) false else it.loadingGames,
+                    games = if (effectiveSession == null) emptyList() else it.games,
+                    libraryGames = if (effectiveSession == null) emptyList() else it.libraryGames,
+                    catalogResult = if (effectiveSession == null) CatalogBrowseResult(emptyList()) else it.catalogResult,
                     error = restoreError ?: it.error,
                 )
             }
-            if (activeSession != null) {
-                refreshAfterAuth(activeSession)
+            if (effectiveSession != null) {
+                refreshAfterAuth(effectiveSession)
             }
         }
     }
@@ -1787,6 +1808,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     it.copy(
                         error = normalizeLaunchError(error, game.title),
                         streamStatus = "idle",
+                        streamSession = null,
                         activeStreamSettings = null,
                         streamReturnPage = null,
                         launchPhase = "",
@@ -1886,6 +1908,10 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
     fun stopStream() {
         val beforeStop = state.value
         val completedSessionReport = finishSessionReport()
+        // Guard against the stale-report race: if the user launches a new game while this
+        // coroutine is still stopping the old session, the trailing state update below must
+        // not overwrite the new session's (null) report with this old one.
+        val stoppedSessionId = beforeStop.streamSession?.sessionId
         recordDebugEvent(
             "stream",
             "Stop requested status=${beforeStop.streamStatus} session=${beforeStop.streamSession?.shortDebugId().orEmpty()} game=${beforeStop.streamGame?.title.orEmpty()}",
@@ -1893,6 +1919,8 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         launchJob?.cancel()
         launchJob = null
         pendingActiveSessionLaunch = null
+        // The telephony callback is only needed for the live cellular label in stream stats.
+        CellularNetworkStatus.stopMonitoring(getApplication())
         viewModelScope.launch {
             val auth = state.value.authSession
             val snapshot = state.value
@@ -1932,6 +1960,16 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 ),
             )
             _state.update {
+                // Only attach this stop's report when no newer session has started
+                // meanwhile (see stoppedSessionId above).
+                val currentSessionId = it.streamSession?.sessionId
+                val report = if (completedSessionReport != null &&
+                    (currentSessionId == null || currentSessionId == stoppedSessionId)
+                ) {
+                    completedSessionReport
+                } else {
+                    it.sessionReport
+                }
                 it.copy(
                     streamSession = null,
                     activeStreamSettings = null,
@@ -1945,7 +1983,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     pendingStoreChoiceGame = null,
                     activeSessionDecision = null,
                     page = returnPage,
-                    sessionReport = completedSessionReport ?: it.sessionReport,
+                    sessionReport = report,
                 )
             }
             refreshActiveSession()
@@ -2066,6 +2104,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     it.copy(
                         error = normalizeLaunchError(error, pending.game.title),
                         streamStatus = "idle",
+                        streamSession = null,
                         activeStreamSettings = null,
                         streamReturnPage = null,
                         activeSessionDecision = null,
@@ -2153,6 +2192,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     it.copy(
                         error = normalizeLaunchError(error, state.value.streamGame?.title),
                         streamStatus = "idle",
+                        streamSession = null,
                         activeStreamSettings = null,
                         streamReturnPage = null,
                         launchPhase = "",
@@ -2216,6 +2256,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     it.copy(
                         error = normalizeLaunchError(error, pending.game.title),
                         streamStatus = "idle",
+                        streamSession = null,
                         activeStreamSettings = null,
                         streamReturnPage = null,
                         activeSessionDecision = null,
@@ -2465,7 +2506,10 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 "game_id" to (state.value.streamGame?.id ?: ""),
             ),
         )
-        _state.update { it.copy(error = message, streamStatus = "idle", activeStreamSettings = null, launchPhase = "") }
+        // streamSession must go null together with "idle": isAndroidUpdateCheckBlockedByStream()
+        // treats a non-null session as an active stream and would block update checks forever.
+        _state.update { it.copy(error = message, streamStatus = "idle", streamSession = null, activeStreamSettings = null, launchPhase = "") }
+        CellularNetworkStatus.stopMonitoring(getApplication())
     }
 
     fun recordNativeStreamState(message: String) {
@@ -2626,61 +2670,65 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             }
 
             runCatching {
-                val resolvedAppId = runCatching {
-                    resolveFallbackLaunchAppId(
+                // Bound the whole recovery so a wedged server can never leave the UI
+                // stuck on "Reconnecting stream" forever (see onFailure below).
+                withTimeout(STREAM_RECOVERY_TIMEOUT_MS) {
+                    val resolvedAppId = runCatching {
+                        resolveFallbackLaunchAppId(
+                            token = token,
+                            game = game,
+                            active = active,
+                            baseUrl = baseUrl,
+                        ).toIntOrNull()
+                    }.getOrNull()
+                    // 1.0.30: for a session this app just created, poll it directly
+                    // by ID first. The active-sessions list may not have propagated
+                    // it yet (race condition behind "session could not be found").
+                    val directCandidate = pollKnownSessionDirectly(
                         token = token,
-                        game = game,
-                        active = active,
-                        baseUrl = baseUrl,
-                    ).toIntOrNull()
-                }.getOrNull()
-                // 1.0.30: for a session this app just created, poll it directly
-                // by ID first. The active-sessions list may not have propagated
-                // it yet (race condition behind "session could not be found").
-                val directCandidate = pollKnownSessionDirectly(
-                    token = token,
-                    previousSession = previousSession,
-                    resolvedAppId = resolvedAppId,
-                    fallbackAppId = active?.appId,
-                    settings = currentSettings,
-                )
-                val activeSessions = sessionRepository.getActiveSessions(token, baseUrl, currentSettings)
-                recordDebugEvent("recovery", "Recovery active sessions count=${activeSessions.size} base=${hostForDebug(baseUrl)}")
-                // 1.0.37 (port from upstream): zero active sessions means the old
-                // session is fully gone — strict matching cannot succeed. Fail fast
-                // with a clear message so the user re-queues instead of hanging.
-                if (shouldCreateFreshRecoverySession(activeSessions.size) && directCandidate == null) {
-                    recordDebugEvent("recovery", "No active sessions and no direct candidate — session is gone, requesting fresh launch")
-                    error("The cloud session has ended. Please start the game again.")
-                }
-                val readyCandidate = activeSessionRecoveryCandidate(
-                    sessions = activeSessions,
-                    previousSessionId = previousSession.sessionId,
-                    launchAppId = resolvedAppId,
-                    settings = currentSettings,
-                )
-                if (readyCandidate?.sessionId == previousSession.sessionId && !readyCandidate.matchesStreamSettings(currentSettings)) {
-                    recordDebugEvent(
-                        "recovery",
-                        "Reclaiming current session after local profile fallback active=${readyCandidate.debugSummary()} settings=${currentSettings.debugSummary()}",
+                        previousSession = previousSession,
+                        resolvedAppId = resolvedAppId,
+                        fallbackAppId = active?.appId,
+                        settings = currentSettings,
                     )
+                    val activeSessions = sessionRepository.getActiveSessions(token, baseUrl, currentSettings)
+                    recordDebugEvent("recovery", "Recovery active sessions count=${activeSessions.size} base=${hostForDebug(baseUrl)}")
+                    // 1.0.37 (port from upstream): zero active sessions means the old
+                    // session is fully gone — strict matching cannot succeed. Fail fast
+                    // with a clear message so the user re-queues instead of hanging.
+                    if (shouldCreateFreshRecoverySession(activeSessions.size) && directCandidate == null) {
+                        recordDebugEvent("recovery", "No active sessions and no direct candidate — session is gone, requesting fresh launch")
+                        error("The cloud session has ended. Please start the game again.")
+                    }
+                    val readyCandidate = activeSessionRecoveryCandidate(
+                        sessions = activeSessions,
+                        previousSessionId = previousSession.sessionId,
+                        launchAppId = resolvedAppId,
+                        settings = currentSettings,
+                    )
+                    if (readyCandidate?.sessionId == previousSession.sessionId && !readyCandidate.matchesStreamSettings(currentSettings)) {
+                        recordDebugEvent(
+                            "recovery",
+                            "Reclaiming current session after local profile fallback active=${readyCandidate.debugSummary()} settings=${currentSettings.debugSummary()}",
+                        )
+                    }
+                    val cachedCurrentSession = active?.takeIf {
+                        it.sessionId == previousSession.sessionId && it.matchesStreamGeometry(currentSettings)
+                    }
+                    // 1.0.30: for a freshly created session, don't demand exact
+                    // geometry match in the fallback — ready status + serverIp
+                    // suffices. Behavior for old sessions is unchanged.
+                    val isFreshSession = isFreshlyCreatedSession(previousSession)
+                    val fallbackCandidate = directCandidate
+                        ?: readyCandidate
+                        ?: previousSession.toRecoveryActiveSession(
+                            appId = resolvedAppId ?: active?.appId ?: 0,
+                            fallbackActive = cachedCurrentSession,
+                        )?.takeIf { isFreshSession || it.matchesStreamGeometry(currentSettings) }
+                        ?: error("The running session could not be found anymore, so recovery was not possible.")
+                    recordDebugEvent("recovery", "Claiming recovery candidate ${fallbackCandidate.debugSummary()}")
+                    claimActiveSessionOrContinuePolling(token, fallbackCandidate, currentSettings)
                 }
-                val cachedCurrentSession = active?.takeIf {
-                    it.sessionId == previousSession.sessionId && it.matchesStreamGeometry(currentSettings)
-                }
-                // 1.0.30: for a freshly created session, don't demand exact
-                // geometry match in the fallback — ready status + serverIp
-                // suffices. Behavior for old sessions is unchanged.
-                val isFreshSession = isFreshlyCreatedSession(previousSession)
-                val fallbackCandidate = directCandidate
-                    ?: readyCandidate
-                    ?: previousSession.toRecoveryActiveSession(
-                        appId = resolvedAppId ?: active?.appId ?: 0,
-                        fallbackActive = cachedCurrentSession,
-                    )?.takeIf { isFreshSession || it.matchesStreamGeometry(currentSettings) }
-                    ?: error("The running session could not be found anymore, so recovery was not possible.")
-                recordDebugEvent("recovery", "Claiming recovery candidate ${fallbackCandidate.debugSummary()}")
-                claimActiveSessionOrContinuePolling(token, fallbackCandidate, currentSettings)
             }.onSuccess { readySession ->
                 val anchoredSession = readySession.withSessionTimerAnchor()
                 recordDebugEvent("recovery", "Recovery claim ready ${anchoredSession.debugSummary()}")
@@ -2698,6 +2746,24 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     )
                 }
             }.onFailure { error ->
+                if (error is TimeoutCancellationException) {
+                    recordDebugEvent("recovery", "Recovery timed out after ${STREAM_RECOVERY_TIMEOUT_MS / 1000} seconds")
+                    _state.update {
+                        it.copy(
+                            error = "Stream recovery timed out. Please start the game again.",
+                            streamStatus = "idle",
+                            streamSession = null,
+                            activeStreamSettings = null,
+                            streamReturnPage = null,
+                            launchPhase = "",
+                            streamLaunchMinimized = false,
+                            queuePosition = null,
+                            queueAdActiveId = null,
+                            page = returnPage,
+                        )
+                    }
+                    return@onFailure
+                }
                 if (error is CancellationException) return@onFailure
                 recordDebugEvent("recovery", "Recovery failed error=${error.debugMessage()}")
                 _state.update {
@@ -3164,6 +3230,10 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                         libraryGames = mergedLibrary.ifEmpty { it.libraryGames },
                     )
                 }
+                // Drop per-game overrides for games no longer in the catalog.
+                runCatching {
+                    settingsStore.prunePerGameSettings(result.games.map { it.id }.toSet())
+                }
             }.onFailure { error ->
                 if (error is CancellationException) return@onFailure
                 _state.update { it.copy(error = if (cachedCatalog != null) null else error.message ?: "Catalog refresh failed", loadingGames = false) }
@@ -3361,6 +3431,20 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    /**
+     * Best-effort connectivity check used to pause queue polling while offline.
+     * Returns true when the check itself cannot run — never block polling on a
+     * failing system-service lookup.
+     */
+    private fun hasNetworkConnectivity(): Boolean {
+        val connectivity = getApplication<Application>()
+            .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return true
+        val network = connectivity.activeNetwork ?: return false
+        val capabilities = connectivity.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
     private suspend fun pollUntilReady(token: String, created: SessionInfo, settings: StreamSettings): SessionInfo {
         var latest = created
         var pollCount = 0
@@ -3370,6 +3454,8 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         var bestQueuePosition: Int? = null
         var lastImprovementMs = android.os.SystemClock.elapsedRealtime()
         var stuckWarningShown = false
+        val pollStartMs = android.os.SystemClock.elapsedRealtime()
+        var consecutivePollFailures = 0
         recordDebugEvent("queue", "Begin polling ${latest.debugSummary()}")
         _state.update {
             it.copy(
@@ -3381,6 +3467,21 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             )
         }
         while (!latest.isReadyForStream()) {
+            // Circuit breaker: a wedged server must not keep the device polling forever.
+            if (android.os.SystemClock.elapsedRealtime() - pollStartMs >= POLL_MAX_DURATION_MS) {
+                recordDebugEvent("queue", "Polling timed out after ${POLL_MAX_DURATION_MS / 60_000} minutes ${latest.debugSummary()}")
+                error("The queue is taking too long. Please try again later.")
+            }
+            // While offline, pause polling instead of hammering the server every 2 seconds.
+            if (!hasNetworkConnectivity()) {
+                recordDebugEvent("queue", "No network connectivity; pausing queue polling until the network returns")
+                var offlineWaitMs = 0L
+                while (!hasNetworkConnectivity() && offlineWaitMs < 60_000L) {
+                    kotlinx.coroutines.delay(5_000L)
+                    offlineWaitMs += 5_000L
+                }
+                continue
+            }
             val waitMs = if (shouldWaitForQueueAdPlayback(latest.adState)) 30_000L else 2_000L
             if (waitMs > 2_000L) {
                 recordDebugEvent(
@@ -3420,10 +3521,13 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 )
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
-                recordDebugEvent("queue", "Poll #$pollCount failed due to network error: ${e.message}. Retrying in 2 seconds...")
-                kotlinx.coroutines.delay(2_000L)
+                consecutivePollFailures += 1
+                val backoffMs = minOf(POLL_RETRY_MAX_BACKOFF_MS, 2_000L shl consecutivePollFailures.coerceAtMost(4))
+                recordDebugEvent("queue", "Poll #$pollCount failed due to network error: ${e.message}. Retrying in ${backoffMs}ms...")
+                kotlinx.coroutines.delay(backoffMs)
                 continue
             }
+            consecutivePollFailures = 0
             latest = mergeQueueSessionState(latest, polled)
             recordDebugEvent("queue", "Poll #$pollCount result ${latest.debugSummary()}")
             val currentPosition = queueDisplayPosition(latest)
@@ -3455,9 +3559,27 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
     }
 
     /**
-     * Creates a session, transparently retrying transient network failures (DNS, timeouts,
-     * connection resets) a few times before surfacing the error. Non-transient failures
-     * (auth, conflicts, bad requests) fail fast so the user gets the real error immediately.
+     * Classifies a session-creation failure as transient (worth retrying) or
+     * terminal (fail fast). Network I/O problems are transient. CloudMatch
+     * failures surface as IllegalStateException from `check(status == 1)` in
+     * toSessionInfo with message "CloudMatch returned status N: ...":
+     * status 81 alone means "server busy" (transient), but 81 combined with
+     * "limited" is a limited-mode entitlement failure (terminal) — see
+     * LaunchErrors.kt. All other non-1 statuses are terminal.
+     */
+    private fun isTransientCreateSessionError(error: Throwable?): Boolean {
+        if (error is java.io.IOException) return true
+        if (error is IllegalStateException) {
+            val message = error.message ?: return false
+            val status = CLOUDMATCH_STATUS_REGEX.find(message)?.groupValues?.getOrNull(1)?.toIntOrNull()
+            return status == 81 && !message.contains("limited", ignoreCase = true)
+        }
+        return false
+    }
+
+    /**
+     * Creates a session, retrying transient failures (see [isTransientCreateSessionError])
+     * a few times before surfacing the error. Terminal failures fail fast.
      */
     private suspend fun createSessionWithRetry(
         token: String,
@@ -3486,7 +3608,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             if (result.isSuccess) return result.getOrThrow()
             val error = result.exceptionOrNull()
             if (error is CancellationException) throw error
-            if (error !is java.io.IOException) {
+            if (!isTransientCreateSessionError(error)) {
                 recordDebugEvent("queue", "createSession failed non-transient: ${error?.debugMessage()}")
                 throw error ?: IllegalStateException("Session creation failed")
             }
@@ -3509,6 +3631,10 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         val game = state.value.streamGame ?: return
         recordDebugEvent("queue", "Queue retry requested by user game=${game.title}")
         launchJob?.cancel()
+        // Null it immediately: play() refuses while launchJob.isActive (a cancelled
+        // job stays "active" until its coroutine finishes), so without this the
+        // retry button silently does nothing. Same pattern as launchWithPrintedWaste.
+        launchJob = null
         _state.update { it.copy(queueStuckWarning = false) }
         play(game, skipPrintedWaste = true, skipStoreChoice = true)
     }
@@ -3574,6 +3700,11 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             signalingUrl = signalingUrl ?: host.takeIf { it.isNotBlank() }?.let { "wss://$it:443/nvst/" }.orEmpty(),
             gpuType = gpuType,
             deviceId = authStore.stableDeviceId(),
+            // Unified timer-anchor policy: resolve from the same store that
+            // withSessionTimerAnchor() uses, so the pending session carries a
+            // real anchor instead of null (which the UI and
+            // isFreshlyCreatedSession() would otherwise treat as "just now").
+            timerStartedAtMs = sessionTimerAnchorStore.startedAtMsFor(sessionId),
         )
     }
 

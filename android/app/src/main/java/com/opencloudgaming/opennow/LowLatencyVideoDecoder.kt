@@ -1,8 +1,10 @@
 package com.opencloudgaming.opennow
 
+import android.media.MediaCrypto
 import android.media.MediaFormat
 import android.os.Build
 import android.util.Log
+import android.view.Surface
 import org.webrtc.EncodedImage
 import org.webrtc.VideoCodecStatus
 import org.webrtc.VideoDecoder
@@ -47,7 +49,6 @@ class LowLatencyVideoDecoder(
         if (patched) {
             return
         }
-        patched = true
 
         try {
             val factoryField = findMediaCodecWrapperFactoryField(delegate.javaClass)
@@ -55,6 +56,8 @@ class LowLatencyVideoDecoder(
                 val msg = "MediaCodecWrapperFactory field not found on ${delegate.javaClass.name}"
                 Log.w(TAG, msg)
                 NativeInputDiagnostics.add("LowLatencyVideoDecoder: $msg")
+                // Terminal for this delegate class: retrying won't help.
+                patched = true
                 return
             }
 
@@ -64,6 +67,8 @@ class LowLatencyVideoDecoder(
                 val msg = "MediaCodecWrapperFactory is null on ${delegate.javaClass.name}"
                 Log.w(TAG, msg)
                 NativeInputDiagnostics.add("LowLatencyVideoDecoder: $msg")
+                // Terminal for this instance: retrying won't help.
+                patched = true
                 return
             }
 
@@ -78,6 +83,9 @@ class LowLatencyVideoDecoder(
                 )
             )
             factoryField.set(delegate, proxyFactory)
+            // Only mark patched after the patch actually landed, so a
+            // transient reflection failure can be retried on the next init.
+            patched = true
             val msg = "Successfully patched MediaCodecWrapperFactory on ${delegate.javaClass.name}"
             Log.i(TAG, msg)
             NativeInputDiagnostics.add("LowLatencyVideoDecoder: $msg")
@@ -153,6 +161,22 @@ class LowLatencyVideoDecoder(
             }
 
             NativeInputDiagnostics.add("LowLatencyVideoDecoder: Successfully wrapping MediaCodecWrapper of class ${result.javaClass.name}")
+            // Pre-resolve the two intercepted methods so the per-frame hot path
+            // can match by identity instead of by name on every call. If
+            // resolution fails (unexpected interface shape), the handler falls
+            // back to name matching — tuning keeps working either way.
+            val configureMethod = runCatching {
+                codecWrapperInterface.getMethod(
+                    "configure",
+                    MediaFormat::class.java,
+                    Surface::class.java,
+                    MediaCrypto::class.java,
+                    Int::class.javaPrimitiveType,
+                )
+            }.getOrNull()
+            val startMethod = runCatching {
+                codecWrapperInterface.getMethod("start")
+            }.getOrNull()
             return Proxy.newProxyInstance(
                 codecWrapperInterface.classLoader,
                 arrayOf(codecWrapperInterface),
@@ -161,6 +185,8 @@ class LowLatencyVideoDecoder(
                     codecName = codecName,
                     requestedFps = requestedFps,
                     lowLatencyEnabled = lowLatencyEnabled,
+                    configureMethod = configureMethod,
+                    startMethod = startMethod,
                 )
             )
         }
@@ -171,9 +197,16 @@ class LowLatencyVideoDecoder(
         private val codecName: String,
         private val requestedFps: Int,
         private val lowLatencyEnabled: Boolean,
+        private val configureMethod: Method?,
+        private val startMethod: Method?,
     ) : InvocationHandler {
         override fun invoke(proxy: Any?, method: Method, args: Array<out Any>?): Any? {
-            if ("configure" == method.name && args != null && args.isNotEmpty() && args[0] is MediaFormat) {
+            // Only configure/start are ever intercepted; everything else is a
+            // straight forward. Identity match against the pre-resolved
+            // interface methods (name match as fallback).
+            if (isTargetMethod(method, configureMethod, "configure") &&
+                args != null && args.isNotEmpty() && args[0] is MediaFormat
+            ) {
                 val format = args[0] as MediaFormat
                 NativeInputDiagnostics.add(
                     "MediaCodecVideoDecoder: configure codec=$codecName requestedFps=$requestedFps " +
@@ -184,17 +217,30 @@ class LowLatencyVideoDecoder(
                 NativeInputDiagnostics.add("MediaCodecVideoDecoder: configured format=$format")
             }
             val result = invokeDelegate(delegateCodec, method, args)
-            if ("start" == method.name && lowLatencyEnabled) {
+            if (isTargetMethod(method, startMethod, "start") && lowLatencyEnabled) {
                 NativeInputDiagnostics.add("LowLatencyVideoDecoder: Intercepted start() for codec=$codecName")
-                applyLowLatencyParameters(delegateCodec)
+                applyLowLatencyParameters(delegateCodec, codecName)
             }
             return result
         }
+
+        private fun isTargetMethod(method: Method, resolved: Method?, name: String): Boolean =
+            if (resolved != null) method == resolved else method.name == name
     }
 
     companion object {
         private const val TAG = "LowLatencyDecoder"
         private const val OPERATING_RATE = 0x7FFF
+
+        /**
+         * Cache for [isCodecSupported]: enumerating MediaCodecList involves
+         * binder IPC and can take >1s on low-end devices. It used to run on
+         * the decoder thread in the critical path to the first frame.
+         */
+        private val codecSupportCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+
+        private fun isCodecSupportedCached(name: String): Boolean =
+            codecSupportCache.getOrPut(name) { isCodecSupported(name) }
 
         private fun applyDecoderPerformanceFormat(
             format: MediaFormat,
@@ -325,7 +371,7 @@ class LowLatencyVideoDecoder(
             val normalized = codecName.lowercase(Locale.US)
             if (normalized.startsWith("c2.mtk.") && normalized.endsWith(".decoder")) {
                 val lowLatencyName = "$codecName.lowlatency"
-                if (isCodecSupported(lowLatencyName)) {
+                if (isCodecSupportedCached(lowLatencyName)) {
                     Log.i(TAG, "LowLatencyVideoDecoder: Found MediaTek low latency variant: $lowLatencyName")
                     return lowLatencyName
                 }
@@ -355,27 +401,31 @@ class LowLatencyVideoDecoder(
             }
         }
 
-        private fun applyLowLatencyParameters(delegateCodec: Any) {
+        private fun applyLowLatencyParameters(delegateCodec: Any, codecName: String) {
             try {
                 val field = findMediaCodecField(delegateCodec.javaClass) ?: return
                 field.isAccessible = true
                 val mediaCodec = field.get(delegateCodec) as? android.media.MediaCodec ?: return
-                
+
                 val bundle = android.os.Bundle()
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     bundle.putInt(android.media.MediaCodec.PARAMETER_KEY_LOW_LATENCY, 1)
                 }
-                bundle.putInt("vendor.mtk-dec-low-latency", 1)
-                bundle.putInt("vendor.mtk-dec-lowlatency", 1)
-                bundle.putInt("vendor.mtk-ext-dec-low-latency.enable", 1)
-                bundle.putInt("vendor.mtk-ext-dec-lowlatency.enable", 1)
-                bundle.putInt("vendor.mtk-vdec-lowlatency", 1)
-                bundle.putInt("vendor.mtk-vdec-low-latency", 1)
-                bundle.putInt("vendor.mtk.vdec.lowlatency", 1)
-                bundle.putInt("vendor.mtk.vdec.low-latency", 1)
-                bundle.putInt("vendor.mtk.dec.lowlatency", 1)
-                bundle.putInt("vendor.mtk.dec.low-latency", 1)
-                bundle.putInt("vendor.mtk.ext.dec.lowlatency.enable", 1)
+                // Vendor MTK keys are only meaningful on MediaTek decoders;
+                // don't spray them at Qualcomm/Exynos/HiSilicon codecs.
+                if (isMediaTekDecoder(codecName.lowercase(Locale.US))) {
+                    bundle.putInt("vendor.mtk-dec-low-latency", 1)
+                    bundle.putInt("vendor.mtk-dec-lowlatency", 1)
+                    bundle.putInt("vendor.mtk-ext-dec-low-latency.enable", 1)
+                    bundle.putInt("vendor.mtk-ext-dec-lowlatency.enable", 1)
+                    bundle.putInt("vendor.mtk-vdec-lowlatency", 1)
+                    bundle.putInt("vendor.mtk-vdec-low-latency", 1)
+                    bundle.putInt("vendor.mtk.vdec.lowlatency", 1)
+                    bundle.putInt("vendor.mtk.vdec.low-latency", 1)
+                    bundle.putInt("vendor.mtk.dec.lowlatency", 1)
+                    bundle.putInt("vendor.mtk.dec.low-latency", 1)
+                    bundle.putInt("vendor.mtk.ext.dec.lowlatency.enable", 1)
+                }
 
                 mediaCodec.setParameters(bundle)
                 Log.i(TAG, "LowLatencyVideoDecoder: Successfully set MediaCodec parameters: $bundle")
@@ -398,6 +448,76 @@ class LowLatencyVideoDecoder(
             }
             return null
         }
+    }
+}
+
+/**
+ * Tries a tuned [LowLatencyVideoDecoder] first; if its [initDecode] fails
+ * (e.g. the device rejects the low-latency MediaFormat tuning in configure()),
+ * releases it and retries with a freshly created untuned decoder, so video
+ * doesn't die permanently on strict devices.
+ *
+ * WebRTC has no factory-level retry: a failed initDecode would otherwise
+ * leave the video track dead for the whole session.
+ */
+internal class FallbackVideoDecoder(
+    private val createPrimary: () -> VideoDecoder?,
+    private val createFallback: () -> VideoDecoder?,
+    private val codecLabel: String,
+) : VideoDecoder {
+
+    @Volatile
+    private var active: VideoDecoder? = null
+
+    @Volatile
+    private var usingFallback = false
+
+    override fun initDecode(settings: VideoDecoder.Settings?, decodeCallback: VideoDecoder.Callback?): VideoCodecStatus {
+        val primary = createPrimary()
+        if (primary != null) {
+            val status = runCatching { primary.initDecode(settings, decodeCallback) }
+                .getOrElse { VideoCodecStatus.ERROR }
+            if (status == VideoCodecStatus.OK) {
+                active = primary
+                return VideoCodecStatus.OK
+            }
+            runCatching { primary.release() }
+            Log.w(TAG, "Tuned decoder initDecode failed for $codecLabel; falling back to untuned decoder")
+            NativeInputDiagnostics.add(
+                "FallbackVideoDecoder: tuned initDecode failed for $codecLabel, using untuned fallback",
+            )
+        }
+        val fallback = createFallback()
+        if (fallback == null) {
+            NativeInputDiagnostics.add("FallbackVideoDecoder: no fallback decoder available for $codecLabel")
+            return VideoCodecStatus.ERROR
+        }
+        val status = runCatching { fallback.initDecode(settings, decodeCallback) }
+            .getOrElse { VideoCodecStatus.ERROR }
+        if (status == VideoCodecStatus.OK) {
+            active = fallback
+            usingFallback = true
+        }
+        return status
+    }
+
+    override fun release(): VideoCodecStatus {
+        val decoder = active
+        active = null
+        return decoder?.release() ?: VideoCodecStatus.OK
+    }
+
+    override fun decode(frame: EncodedImage?, info: VideoDecoder.DecodeInfo?): VideoCodecStatus {
+        return active?.decode(frame, info) ?: VideoCodecStatus.ERROR
+    }
+
+    override fun getImplementationName(): String {
+        val base = active?.implementationName ?: "fallback-pending"
+        return if (usingFallback) "$base+untuned-fallback" else base
+    }
+
+    companion object {
+        private const val TAG = "FallbackVideoDecoder"
     }
 }
 

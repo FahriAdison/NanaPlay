@@ -1,8 +1,12 @@
 package com.opencloudgaming.opennow
 
 import android.content.Context
+import android.content.SharedPreferences
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
@@ -25,6 +29,7 @@ private const val STORE_NAME = "opennow_native"
 private const val CATALOG_CACHE_STORE_NAME = "opennow_catalog_cache"
 private const val SECURE_STORE_NAME = "opennow_auth_secure"
 private const val KEY_SETTINGS = "settings"
+private const val KEY_SETTINGS_BACKUP = "settings.bak"
 private const val KEY_AUTH = "auth"
 private const val KEY_DEVICE_ID = "gfn_device_id"
 private const val KEY_CATALOG_CACHE_PREFIX = "catalog_cache_"
@@ -32,6 +37,10 @@ private const val KEY_ANDROID_UPDATE_DISMISSED_NOTICE = "android_update_dismisse
 private const val KEY_QUEUED_GAME_KEYS = "queued_game_keys"
 private const val CATALOG_CACHE_TTL_MS = 12L * 60L * 60L * 1000L
 private const val QUEUED_GAME_LIMIT = 24
+// Proxy credentials may embed username:password — they live in internal
+// storage, never in the external (user-accessible) settings file.
+private const val PROXY_STORE_NAME = "opennow_proxy_secure"
+private const val KEY_PROXY_URL = "session_proxy_url"
 // Keys that must never be written to the external (potentially world-readable) file.
 private val SENSITIVE_KEYS = setOf(KEY_AUTH, KEY_DEVICE_ID)
 private val AUTH_STORE_LOCK = Any()
@@ -266,6 +275,10 @@ class ExternalPrefs private constructor(context: Context, val name: String) {
 
 class SettingsStore(context: Context) {
     private val prefs = ExternalPrefs.get(context, STORE_NAME)
+    // Proxy credentials may embed username:password — kept in internal
+    // storage, never written to the external (user-accessible) settings file.
+    private val securePrefs =
+        context.applicationContext.getSharedPreferences(PROXY_STORE_NAME, Context.MODE_PRIVATE)
     private val androidTvProfile = isAndroidTvProfile(context)
     private val _settings = MutableStateFlow(
         load()
@@ -275,41 +288,113 @@ class SettingsStore(context: Context) {
     val settings: StateFlow<AppSettings> = _settings
 
     private fun load(): AppSettings {
-        val raw = prefs.getString(KEY_SETTINGS, null) ?: return AppSettings()
-        return runCatching { OpenNowJson.decodeFromString<AppSettings>(raw) }.getOrElse { AppSettings() }
+        val raw = prefs.getString(KEY_SETTINGS, null) ?: return AppSettings().withStoredProxyUrl()
+        runCatching { OpenNowJson.decodeFromString<AppSettings>(raw) }.getOrNull()
+            ?.let { return it.withStoredProxyUrl() }
+        // Primary JSON is corrupt — fall back to the last-known-good backup
+        // before giving up and resetting to defaults.
+        val backup = prefs.getString(KEY_SETTINGS_BACKUP, null)
+        if (!backup.isNullOrBlank()) {
+            runCatching { OpenNowJson.decodeFromString<AppSettings>(backup) }.getOrNull()
+                ?.let { return it.withStoredProxyUrl() }
+        }
+        return AppSettings().withStoredProxyUrl()
     }
 
+    /**
+     * Re-attaches the proxy URL kept in internal storage. A URL still found in
+     * the legacy external location is migrated inward once.
+     */
+    private fun AppSettings.withStoredProxyUrl(): AppSettings {
+        val stored = securePrefs.getString(KEY_PROXY_URL, null)
+        if (stored != null) return copy(stream = stream.copy(sessionProxyUrl = stored))
+        if (stream.sessionProxyUrl.isNotBlank()) {
+            securePrefs.edit().putString(KEY_PROXY_URL, stream.sessionProxyUrl).apply()
+        }
+        return this
+    }
+
+    private fun AppSettings.withoutProxyUrl(): AppSettings =
+        copy(stream = stream.copy(sessionProxyUrl = ""))
+
     fun update(transform: (AppSettings) -> AppSettings) {
-        val next = transform(_settings.value)
-            .withCurrentStreamPresentationDefaults(androidTvProfile)
-            .normalizedForAndroid()
-        prefs.edit().putString(KEY_SETTINGS, OpenNowJson.encodeToString(next)).commit()
-        _settings.value = next
+        var previous: AppSettings? = null
+        var next: AppSettings? = null
+        // Atomic read-modify-write on the in-memory state; the transform must be pure.
+        _settings.update { current ->
+            previous = current
+            next = transform(current)
+                .withCurrentStreamPresentationDefaults(androidTvProfile)
+                .normalizedForAndroid()
+            next!!
+        }
+        persistSettings(previous, next ?: return)
     }
 
     fun replace(next: AppSettings) {
-        val normalized = next
-            .withCurrentStreamPresentationDefaults(androidTvProfile)
-            .normalizedForAndroid()
-        prefs.edit().putString(KEY_SETTINGS, OpenNowJson.encodeToString(normalized)).commit()
-        _settings.value = normalized
+        var previous: AppSettings? = null
+        var normalized: AppSettings? = null
+        _settings.update { current ->
+            previous = current
+            normalized = next
+                .withCurrentStreamPresentationDefaults(androidTvProfile)
+                .normalizedForAndroid()
+            normalized!!
+        }
+        persistSettings(previous, normalized ?: return)
+    }
+
+    /**
+     * Persists settings without blocking the caller: proxy credentials go to
+     * internal storage (synchronously — a single key, so the external JSON can
+     * never become the only copy), the external JSON is written with the proxy
+     * stripped, and the previous JSON is kept as a last-known-good backup.
+     */
+    private fun persistSettings(previous: AppSettings?, next: AppSettings) {
+        // Credentials first: the external JSON must never be the only copy.
+        securePrefs.edit().putString(KEY_PROXY_URL, next.stream.sessionProxyUrl).commit()
+        val editor = prefs.edit()
+        if (previous != null) {
+            editor.putString(
+                KEY_SETTINGS_BACKUP,
+                OpenNowJson.encodeToString(previous.withoutProxyUrl()),
+            )
+        }
+        editor.putString(
+            KEY_SETTINGS,
+            OpenNowJson.encodeToString(next.withoutProxyUrl()),
+        ).apply()
+    }
+
+    /**
+     * Drops per-game overrides whose game id is no longer in the catalog.
+     * Call after a catalog refresh with the ids of all known games.
+     */
+    fun prunePerGameSettings(knownGameIds: Set<String>) {
+        val current = _settings.value
+        if (current.perGameSettings.keys.all { it in knownGameIds }) return
+        update { it.copy(perGameSettings = it.perGameSettings.filterKeys { id -> id in knownGameIds }) }
     }
 
     fun reset() {
         replace(AppSettings())
     }
 
-    private fun AppSettings.normalizedForAndroid(): AppSettings {
-        val compatibleStream = stream.withCodecColorCompatibility()
-        val lowPowerSafe = compatibleStream.copy(
-            codec = compatibleStream.codec,
-            sessionProxyUrl = stream.sessionProxyUrl.trim(),
-            maxBitrateMbps = compatibleStream.maxBitrateMbps.coerceIn(1, 150),
-            fps = compatibleStream.fps.coerceIn(30, 360),
-            streamSharpeningAmount = compatibleStream.streamSharpeningAmount.coerceIn(0f, 1f),
+    /** Stream-level normalization, shared by global settings and per-game overrides. */
+    private fun StreamSettings.normalizedStreamForAndroid(): StreamSettings =
+        withCodecColorCompatibility().copy(
+            sessionProxyUrl = sessionProxyUrl.trim(),
+            maxBitrateMbps = maxBitrateMbps.coerceIn(1, 150),
+            fps = fps.coerceIn(30, 360),
+            streamSharpeningAmount = streamSharpeningAmount.coerceIn(0f, 1f),
         )
+
+    private fun AppSettings.normalizedForAndroid(): AppSettings {
         return copy(
-            stream = lowPowerSafe,
+            stream = stream.normalizedStreamForAndroid(),
+            perGameSettings = perGameSettings.mapValues { (_, override) ->
+                override.normalizedStreamForAndroid()
+            },
             posterSizeScale = posterSizeScale.coerceIn(MIN_GAME_CARD_SCALE, MAX_GAME_CARD_SCALE),
             androidTouch = androidTouch.copy(
                 opacity = androidTouch.opacity.coerceIn(0.15f, 1f),
@@ -345,9 +430,45 @@ class SettingsStore(context: Context) {
 }
 
 class AuthStore(context: Context) {
-    private val sharedPrefs = context.applicationContext.getSharedPreferences(SECURE_STORE_NAME, Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+    // Auth tokens are kept encrypted via the Android Keystore. If encrypted
+    // storage is unavailable on this device, fall back to plain internal
+    // storage rather than breaking sign-in — never crash here.
+    private val sharedPrefs: SharedPreferences by lazy {
+        createSecurePrefs(appContext)
+    }
     private val _state = MutableStateFlow(loadAndMigrate(context))
     val state: StateFlow<PersistedAuthState> = _state
+
+    private fun createSecurePrefs(appContext: Context): SharedPreferences {
+        val legacy = appContext.getSharedPreferences(SECURE_STORE_NAME, Context.MODE_PRIVATE)
+        return try {
+            val masterKey = MasterKey.Builder(appContext)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            val encrypted = EncryptedSharedPreferences.create(
+                appContext,
+                "${SECURE_STORE_NAME}_enc",
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+            )
+            // One-time migration from the old plaintext file.
+            if (!encrypted.contains(KEY_AUTH) && legacy.contains(KEY_AUTH)) {
+                encrypted.edit().putString(KEY_AUTH, legacy.getString(KEY_AUTH, null)).apply()
+            }
+            if (!encrypted.contains(KEY_DEVICE_ID) && legacy.contains(KEY_DEVICE_ID)) {
+                encrypted.edit().putString(KEY_DEVICE_ID, legacy.getString(KEY_DEVICE_ID, null)).apply()
+            }
+            // Drop the plaintext originals only after the encrypted copies exist.
+            if (encrypted.contains(KEY_AUTH)) legacy.edit().remove(KEY_AUTH).apply()
+            if (encrypted.contains(KEY_DEVICE_ID)) legacy.edit().remove(KEY_DEVICE_ID).apply()
+            encrypted
+        } catch (t: Throwable) {
+            android.util.Log.w("AuthStore", "Encrypted prefs unavailable; using plaintext", t)
+            legacy
+        }
+    }
 
     private fun loadAndMigrate(context: Context): PersistedAuthState {
         val legacyPrefs = ExternalPrefs.get(context, STORE_NAME)
@@ -448,7 +569,7 @@ class AuthStore(context: Context) {
         save(PersistedAuthState())
     }
 
-    fun stableDeviceId(): String {
+    fun stableDeviceId(): String = synchronized(AUTH_STORE_LOCK) {
         val existing = sharedPrefs.getString(KEY_DEVICE_ID, null)
         if (!existing.isNullOrBlank()) return existing
         val next = UUID.randomUUID().toString()
@@ -578,6 +699,7 @@ class CatalogCacheStore(context: Context) {
 
 class QueuedGameStore(context: Context) {
     private val prefs = ExternalPrefs.get(context, STORE_NAME)
+    private val lock = Any()
 
     fun load(): List<String> {
         val raw = prefs.getString(KEY_QUEUED_GAME_KEYS, null) ?: return emptyList()
@@ -589,7 +711,8 @@ class QueuedGameStore(context: Context) {
             .take(QUEUED_GAME_LIMIT)
     }
 
-    fun record(gameKey: String): List<String> {
+    /** Read-modify-write is serialized so rapid successive calls can't clobber each other. */
+    fun record(gameKey: String): List<String> = synchronized(lock) {
         val normalized = gameKey.trim()
         if (normalized.isBlank()) return load()
         val next = (listOf(normalized) + load().filterNot { it == normalized })

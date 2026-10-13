@@ -1,5 +1,6 @@
 package com.opencloudgaming.opennow
 import com.papahchan.nanaplay.R
+import com.papahchan.nanaplay.BuildConfig
 
 import android.Manifest
 import android.app.Activity
@@ -1037,6 +1038,14 @@ private fun AnalyticsConsentDialog(
                 Text(
                     stringResource(R.string.dlg_share_anonymous_desc),
                 )
+                // Name the analytics recipient when one is configured (privacy).
+                val analyticsHost = BuildConfig.POSTHOG_HOST.trim()
+                if (analyticsHost.isNotEmpty()) {
+                    Text(
+                        stringResource(R.string.dlg_share_analytics_recipient, analyticsHost),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
                 Text(
                     stringResource(R.string.dlg_sharing_off_warning),
                     color = MaterialTheme.colorScheme.error,
@@ -12651,7 +12660,7 @@ private fun QueueAmbientOrb(
     Box(
         modifier
             .size(size)
-            .blur(64.dp)
+            .blurCompat(64.dp)
             .graphicsLayer(alpha = alpha.coerceIn(0f, 1f))
             .background(
                 Brush.radialGradient(

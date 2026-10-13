@@ -36,11 +36,30 @@ class NanaSaavnException(message: String, cause: Throwable? = null) : Exception(
 
 object NanaSaavnApi {
 
-    private const val BASE_URL = "https://shnwazdev-jiosaavn-apii.vercel.app"
+    /**
+     * 1.0.59 — base-URL fallback chain. The primary is a personal Vercel
+     * deployment; if it goes down the whole online-music feature used to die.
+     * Fallbacks are other public deployments of the same sumitkolhe/jiosaavn-api
+     * project with identical endpoint shapes (verified: saavn.sumit.co live and
+     * response-compatible on 2026-10-13; saavn.dev is the project's well-known
+     * public host). Tried in order; the last working one is tried first next
+     * time so a dead primary doesn't cost a 15s connect timeout on every call.
+     */
+    private val BASE_URLS = listOf(
+        "https://shnwazdev-jiosaavn-apii.vercel.app",
+        "https://saavn.sumit.co",
+        "https://saavn.dev",
+    )
+
+    @Volatile
+    private var preferredBase: String = BASE_URLS[0]
 
     private val http = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
+        // 1.0.59: bound the total call — resolveAudioUrl runs while the UI
+        // shows "buffering", and an unbounded hang used to leave it stuck.
+        .callTimeout(35, TimeUnit.SECONDS)
         .build()
 
     /**
@@ -50,7 +69,7 @@ object NanaSaavnApi {
     suspend fun searchSongs(query: String, limit: Int = 50): List<NanaOnlineTrack> =
         withContext(Dispatchers.IO) {
             val encoded = URLEncoder.encode(query, "UTF-8")
-            val body = get("$BASE_URL/api/search/songs?query=$encoded&limit=$limit")
+            val body = get("/api/search/songs?query=$encoded&limit=$limit")
             parseSongList(toSongArray(body))
         }
 
@@ -59,12 +78,15 @@ object NanaSaavnApi {
      * Returns null when unavailable.
      */
     suspend fun resolveAudioUrl(id: String): String? = withContext(Dispatchers.IO) {
-        val body = get("$BASE_URL/api/songs/$id")
+        val body = get("/api/songs/$id")
         val songs = toSongArray(body)
         var bestUrl: String? = null
         var bestKbps = -1
         for (i in 0 until songs.length()) {
             val song = songs.optJSONObject(i) ?: continue
+            // 1.0.59: the API can return extra entries — only trust the song
+            // we actually asked for, so a wrong track's audio can never play.
+            if (song.optString("id") != id) continue
             val downloads = song.optJSONArray("downloadUrl") ?: continue
             for (j in 0 until downloads.length()) {
                 val entry = downloads.optJSONObject(j) ?: continue
@@ -160,7 +182,26 @@ object NanaSaavnApi {
         }
     }
 
-    private fun get(url: String): String {
+    /**
+     * 1.0.59 — try each base URL in order (preferred last-working one first).
+     * Throws the last failure when every host is unreachable.
+     */
+    private fun get(path: String): String {
+        val ordered = listOf(preferredBase) + BASE_URLS.filter { it != preferredBase }
+        var lastError: NanaSaavnException? = null
+        for (base in ordered) {
+            try {
+                val body = getOnce("$base$path")
+                preferredBase = base
+                return body
+            } catch (e: NanaSaavnException) {
+                lastError = e
+            }
+        }
+        throw lastError ?: NanaSaavnException("JioSaavn request failed")
+    }
+
+    private fun getOnce(url: String): String {
         val request = Request.Builder()
             .url(url)
             .header("Accept", "application/json")

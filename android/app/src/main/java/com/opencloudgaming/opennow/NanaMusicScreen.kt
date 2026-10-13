@@ -75,6 +75,23 @@ private fun musicReadPermission(): String =
     }
 
 /**
+ * 1.0.59 — OpenMultipleDocuments + persistable URI permission.
+ *
+ * The stock contract's launch intent lacks FLAG_GRANT_PERSISTABLE_URI_PERMISSION,
+ * so takePersistableUriPermission() always threw (silently swallowed) and every
+ * local track was dropped on the next restore. The flag must be on the LAUNCH
+ * intent — adding it afterwards is too late.
+ */
+private class OpenMultipleDocumentsPersistable : ActivityResultContracts.OpenMultipleDocuments() {
+    override fun createIntent(context: android.content.Context, input: Array<String>): android.content.Intent {
+        return super.createIntent(context, input).apply {
+            addFlags(android.content.Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+    }
+}
+
+/**
  * 1.0.27 — hoisted online-search state. Previously the query/results lived in
  * `remember` inside NanaMusicOnlineTab, so switching tabs destroyed the tab
  * composable and the search reset. Hoisted to NanaMusicScreen (which stays
@@ -117,25 +134,40 @@ fun NanaMusicScreen(modifier: Modifier = Modifier) {
             ) == PackageManager.PERMISSION_GRANTED,
         )
     }
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        permissionGranted = granted
-    }
     val filePicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenMultipleDocuments(),
+        OpenMultipleDocumentsPersistable(),
     ) { uris ->
         if (uris.isNotEmpty()) {
-            // Persist access so tracks survive process restarts within the grant.
+            // Persist access so tracks survive process restarts. 1.0.59: a
+            // failure here is surfaced instead of swallowed — without the
+            // grant these tracks won't survive a restart.
+            var persistFailed = 0
             uris.forEach { uri ->
-                runCatching {
+                val ok = runCatching {
                     context.contentResolver.takePersistableUriPermission(
                         uri,
                         android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
                     )
-                }
+                }.isSuccess
+                if (!ok) persistFailed++
+            }
+            if (persistFailed > 0) {
+                NanaMusicPlayer.setLastError(
+                    context.getString(R.string.music_err_persist_permission, persistFailed),
+                )
             }
             NanaMusicPlayer.addTracks(context, uris)
+        }
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        permissionGranted = granted
+        if (granted) {
+            // 1.0.59: open the picker immediately — don't make the user tap
+            // Add a second time. (filePicker is defined above so the
+            // reference is initialized when this callback can fire.)
+            filePicker.launch(arrayOf("audio/*"))
         }
     }
 

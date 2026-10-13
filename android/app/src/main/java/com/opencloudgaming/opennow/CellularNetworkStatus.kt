@@ -49,6 +49,31 @@ internal object CellularNetworkStatus {
         }
     }
 
+    /**
+     * Unregisters the telephony callback/listener. Called when the stream session ends —
+     * the callbacks are only needed for the live cellular label in the stream stats.
+     * Safe to call when monitoring was never started.
+     */
+    @Synchronized
+    fun stopMonitoring(context: Context) {
+        if (!monitoringStarted) return
+        monitoringStarted = false
+        val callback = retainedCallback
+        retainedCallback = null
+        if (callback == null) return
+        val telephony =
+            context.applicationContext.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
+                ?: return
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && callback is TelephonyCallback) {
+                telephony.unregisterTelephonyCallback(callback)
+            } else if (callback is PhoneStateListener) {
+                @Suppress("DEPRECATION")
+                telephony.listen(callback, PhoneStateListener.LISTEN_NONE)
+            }
+        }
+    }
+
     @android.annotation.TargetApi(Build.VERSION_CODES.S)
     private fun registerModernCallback(context: Context, telephony: TelephonyManager) {
         val callback = object : TelephonyCallback(), TelephonyCallback.DisplayInfoListener {

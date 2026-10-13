@@ -31,8 +31,12 @@ fun buildConfigString(value: String): String =
         .replace("\n", "\\n")
         .replace("\r", "\\r") + "\""
 
-val defaultPostHogProjectToken = "phc_pdob6BhBvbayfd7BA6zXBkty8o6EkxKYY7sF3ZwLymk3"
-val defaultPostHogHost = "https://aa.printedwaste.com"
+// Analytics ship DISABLED by default: no PostHog token/host is baked in.
+// The distributor configures these via gradle property / env / local.properties
+// (posthog.apiKey|posthog.projectToken, posthog.host / POSTHOG_* / local.properties).
+// OpenNowAnalytics.setup() already no-ops when the token is blank.
+val defaultPostHogProjectToken = ""
+val defaultPostHogHost = ""
 
 val postHogProjectToken = firstNonBlankValue(
     gradlePropertyValue("posthog.apiKey", "posthog.projectToken"),
@@ -60,8 +64,8 @@ android {
         applicationId = "com.papahchan.nanaplay"
         minSdk = 23
         targetSdk = 36
-        versionCode = 113
-        versionName = "1.0.58"
+        versionCode = 114
+        versionName = "1.0.59"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "POSTHOG_PROJECT_TOKEN", buildConfigString(postHogProjectToken))
@@ -78,21 +82,30 @@ android {
         create("nanaplay") {
             // Keystore config via env vars (set in CI secrets / local shell).
             // No hardcoded credentials in source.
-            storeFile = file(System.getenv("NANAPLAY_KEYSTORE_PATH")
-                ?: error("NANAPLAY_KEYSTORE_PATH not set"))
-            storePassword = System.getenv("NANAPLAY_KEYSTORE_PASSWORD")
-                ?: error("NANAPLAY_KEYSTORE_PASSWORD not set")
-            keyAlias = System.getenv("NANAPLAY_KEY_ALIAS")
-                ?: error("NANAPLAY_KEY_ALIAS not set")
-            keyPassword = System.getenv("NANAPLAY_KEY_PASSWORD")
-                ?: error("NANAPLAY_KEY_PASSWORD not set")
+            // Lazy by design: a missing env must NOT fail *configuration* (so
+            // assembleDebug, lint, or unit tests work on machines without the
+            // keystore). A release build that actually signs without env fails
+            // at signing time with AGP's own "keystore not found" error.
+            val keystorePath = System.getenv("NANAPLAY_KEYSTORE_PATH")
+            if (keystorePath.isNullOrBlank()) {
+                storeFile = file("missing-nanaplay-keystore.keystore")
+            } else {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("NANAPLAY_KEYSTORE_PASSWORD")
+                    ?: error("NANAPLAY_KEYSTORE_PASSWORD not set")
+                keyAlias = System.getenv("NANAPLAY_KEY_ALIAS")
+                    ?: error("NANAPLAY_KEY_ALIAS not set")
+                keyPassword = System.getenv("NANAPLAY_KEY_PASSWORD")
+                    ?: error("NANAPLAY_KEY_PASSWORD not set")
+            }
         }
     }
 
     buildTypes {
         debug {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("nanaplay")
+            // Intentionally no signingConfig: AGP falls back to its default
+            // debug keystore. The release key is never used for debug builds.
         }
         release {
             isMinifyEnabled = true
@@ -160,6 +173,7 @@ dependencies {
     implementation("androidx.media3:media3-common:1.10.1")
     implementation("androidx.media3:media3-exoplayer:1.10.1")
     implementation("androidx.media3:media3-ui:1.10.1")
+    implementation("androidx.media3:media3-session:1.10.1")
     implementation("androidx.work:work-runtime:2.11.2")
 
     implementation("io.coil-kt.coil3:coil-compose:3.4.0")
@@ -173,6 +187,10 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
     implementation("com.posthog:posthog-android:3.51.2")
+    // Encrypted storage for auth tokens (Android Keystore). Note: Google has
+    // deprecated this library (1.1.0 line) in favour of direct Keystore use;
+    // 1.0.0 remains stable and functional, with a plaintext fallback in code.
+    implementation("androidx.security:security-crypto:1.0.0")
     // Tap-to-translate: on-device OCR + translation
     // OCR via Play Services (thin client — model stays on device, not bundled in APK)
     implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.1")

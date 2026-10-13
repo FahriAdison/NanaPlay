@@ -44,6 +44,8 @@ class AndroidQueueStatusNotifier(private val context: Context) {
     private val notificationManager = appContext.getSystemService(NotificationManager::class.java)
     private var serviceStartRequested = false
     private var queueReadyAlertSent = false
+    private var lastTitle: String? = null
+    private var lastText: String? = null
 
     fun update(state: OpenNowUiState) {
         if (!shouldShowQueueLaunchStatus(state)) {
@@ -57,8 +59,9 @@ class AndroidQueueStatusNotifier(private val context: Context) {
         }
 
         // Send a one-shot high-priority heads-up alert when queue finishes and game is loading.
+        // The flag is set only after notify() succeeds: if we lack the permission (or the
+        // post fails), the alert must fire again on the next update once it can be shown.
         if (!queueReadyAlertSent && isQueueComplete(state)) {
-            queueReadyAlertSent = true
             if (canPostNotifications()) {
                 runCatching {
                     ensureQueueAlertChannel(appContext)
@@ -66,17 +69,25 @@ class AndroidQueueStatusNotifier(private val context: Context) {
                         QUEUE_ALERT_NOTIFICATION_ID,
                         buildQueueReadyNotification(appContext, state.streamGame?.title ?: "NanaPlay"),
                     )
+                }.onSuccess {
+                    queueReadyAlertSent = true
                 }.onFailure { error ->
                     Log.w(QUEUE_SERVICE_TAG, "Unable to post queue-ready alert notification", error)
                 }
             }
         }
 
+        val title = state.streamGame?.title ?: "NanaPlay"
+        val text = queueLaunchStatusText(state)
+        // Dedup: queue text rarely changes between updates — don't restart the foreground
+        // service for an identical notification (same pattern as the stream keepalive notifier).
+        if (serviceStartRequested && lastTitle == title && lastText == text) return
+
         ensureChannel()
         val intent = Intent(appContext, AndroidQueueStatusService::class.java).apply {
             action = QUEUE_SERVICE_ACTION_UPDATE
-            putExtra(QUEUE_SERVICE_EXTRA_TITLE, state.streamGame?.title ?: "NanaPlay")
-            putExtra(QUEUE_SERVICE_EXTRA_TEXT, queueLaunchStatusText(state))
+            putExtra(QUEUE_SERVICE_EXTRA_TITLE, title)
+            putExtra(QUEUE_SERVICE_EXTRA_TEXT, text)
         }
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -85,13 +96,15 @@ class AndroidQueueStatusNotifier(private val context: Context) {
                 appContext.startService(intent)
             }
             serviceStartRequested = true
+            lastTitle = title
+            lastText = text
         }.onFailure { error ->
             Log.w(QUEUE_SERVICE_TAG, "Unable to start queue foreground service", error)
             if (canPostNotifications()) {
                 runCatching {
                     notificationManager.notify(
                         QUEUE_NOTIFICATION_ID,
-                        buildQueueNotification(appContext, state.streamGame?.title ?: "NanaPlay", queueLaunchStatusText(state)),
+                        buildQueueNotification(appContext, title, text),
                     )
                 }.onFailure { notifyError ->
                     Log.w(QUEUE_SERVICE_TAG, "Unable to post fallback queue notification", notifyError)
@@ -115,6 +128,8 @@ class AndroidQueueStatusNotifier(private val context: Context) {
         }
         serviceStartRequested = false
         queueReadyAlertSent = false
+        lastTitle = null
+        lastText = null
         notificationManager.cancel(QUEUE_NOTIFICATION_ID)
         notificationManager.cancel(QUEUE_ALERT_NOTIFICATION_ID)
     }

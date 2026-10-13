@@ -30,6 +30,7 @@ import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import java.io.File
 import java.security.MessageDigest
 import java.util.Locale
@@ -37,6 +38,8 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 private const val APK_MIME_TYPE = "application/vnd.android.package-archive"
+/** Manifests are a few KB — never buffer more than this, even from a hostile custom URL. */
+private const val UPDATE_MANIFEST_MAX_BYTES = 262_144
 internal const val ANDROID_UPDATE_SOURCE_URL = "https://api.github.com/repos/FahriAdison/NanaPlay/releases/latest"
 internal const val GOOGLE_PLAY_STORE_PACKAGE = "com.android.vending"
 internal const val GOOGLE_PLAY_STORE_LISTING_URL = "https://play.google.com/store/apps/details?id=${BuildConfig.APPLICATION_ID}"
@@ -470,7 +473,9 @@ class AndroidAppUpdater(
             if (looksLikeApk(sourceUrl, contentType)) {
                 return directApkCandidate(sourceUrl, response.header("X-OpenNOW-Version-Name"), response.header("X-OpenNOW-Version-Code")?.toLongOrNull(), response.header("X-OpenNOW-SHA256"))
             }
-            val body = response.body?.string()?.takeIf { it.isNotBlank() } ?: error("Update source returned an empty manifest.")
+            val body = readBoundedManifestBody(response)
+                ?.takeIf { it.isNotBlank() }
+                ?: error("Update source returned an empty manifest.")
             return parseAndroidUpdateCandidate(sourceUrl, body)
                 ?: error("Update manifest must provide versionCode/versionName and an apkUrl.")
         }
@@ -657,6 +662,29 @@ internal fun normalizeAndroidUpdateSourceUrl(raw: String): String {
         error("Use HTTPS for update sources. HTTP is only allowed for localhost.")
     }
     return url.toString()
+}
+
+/**
+ * Reads the manifest body with a hard cap: `ResponseBody.string()` would
+ * buffer an arbitrarily large response into memory first. A truncated body
+ * simply fails JSON parsing downstream (fail closed).
+ */
+private fun readBoundedManifestBody(response: Response): String? {
+    val input = response.body?.byteStream() ?: return null
+    input.use {
+        val out = java.io.ByteArrayOutputStream()
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        var total = 0L
+        while (true) {
+            val read = it.read(buffer)
+            if (read == -1) break
+            val remaining = UPDATE_MANIFEST_MAX_BYTES - total
+            if (remaining <= 0) break
+            out.write(buffer, 0, minOf(read.toLong(), remaining).toInt())
+            total += read
+        }
+        return out.toString(Charsets.UTF_8)
+    }
 }
 
 internal fun parseAndroidUpdateCandidate(sourceUrl: String, body: String): AndroidUpdateCandidate? {

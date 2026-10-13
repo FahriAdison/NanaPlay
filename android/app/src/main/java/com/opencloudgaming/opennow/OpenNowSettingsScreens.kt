@@ -495,7 +495,7 @@ private fun SettingsContent(
                 AdvancedOptionsSettings(settings = settings, viewModel = viewModel)
             }
     CategorySettingsSection(selectedCategory, SettingsCategory.General, searchQuery, "Privacy", "privacy", "analytics", "telemetry", "posthog", "usage", "tracking", "opt out") {
-                SettingSwitch("Share usage analytics", settings.analyticsSharingEnabled) { enabled ->
+                SettingSwitch((stringResource(R.string.settings_share_usage_analytics), settings.analyticsSharingEnabled) { enabled ->
                     viewModel.updateSettings(
                         settings.copy(
                             analyticsConsentAsked = true,
@@ -690,11 +690,11 @@ private fun SettingsContent(
                         ).withCodecColorCompatibility()
                     }
                 }
-                SettingSwitch("Stream sharpening", settings.stream.streamSharpeningEnabled) {
+                SettingSwitch((stringResource(R.string.settings_stream_sharpening), settings.stream.streamSharpeningEnabled) {
                     viewModel.updateStreamSettings { s -> s.copy(streamSharpeningEnabled = it) }
                 }
                 if (settings.stream.streamSharpeningEnabled) {
-                    NumberSlider("Sharpness amount", settings.stream.streamSharpeningAmount, 0f, 1f, 0.05f) {
+                    NumberSlider((stringResource(R.string.settings_sharpness_amount), settings.stream.streamSharpeningAmount, 0f, 1f, 0.05f) {
                         viewModel.updateStreamSettings { s -> s.copy(streamSharpeningAmount = it) }
                     }
                 }
@@ -772,20 +772,20 @@ private fun SettingsContent(
                         microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                     }
                 }
-                NumberSlider("Mouse sensitivity", settings.stream.mouseSensitivity, 0.25f, 3f, 0.05f, valueFormatter = { "%.2fx".format(it) }) {
+                NumberSlider((stringResource(R.string.settings_mouse_sensitivity), settings.stream.mouseSensitivity, 0.25f, 3f, 0.05f, valueFormatter = { "%.2fx".format(it) }) {
                     viewModel.updateStreamSettings { s -> s.copy(mouseSensitivity = it) }
                 }
-                NumberSlider("Mouse acceleration", settings.stream.mouseAcceleration.toFloat(), 1f, 150f, 1f) {
+                NumberSlider((stringResource(R.string.settings_mouse_acceleration), settings.stream.mouseAcceleration.toFloat(), 1f, 150f, 1f) {
                     viewModel.updateStreamSettings { s -> s.copy(mouseAcceleration = it.roundToInt()) }
                 }
-                ChoiceOptionRow("Keyboard layout", keyboardLayoutOptions, settings.stream.keyboardLayout) {
+                ChoiceOptionRow((stringResource(R.string.settings_keyboard_layout), keyboardLayoutOptions, settings.stream.keyboardLayout) {
                     viewModel.updateStreamSettings { s -> s.copy(keyboardLayout = it) }
                 }
-                ChoiceOptionRow("Game language", gameLanguageOptions, settings.stream.gameLanguage) {
+                ChoiceOptionRow((stringResource(R.string.settings_game_language), gameLanguageOptions, settings.stream.gameLanguage) {
                     viewModel.updateStreamSettings { s -> s.copy(gameLanguage = it) }
                 }
-                SettingSwitch("Clipboard paste", settings.clipboardPaste) { enabled -> viewModel.updateSettings(settings.copy(clipboardPaste = enabled)) }
-                SettingSwitch("Phone rumble fallback", settings.phoneRumbleFallback) { enabled -> viewModel.updateSettings(settings.copy(phoneRumbleFallback = enabled)) }
+                SettingSwitch((stringResource(R.string.settings_clipboard_paste), settings.clipboardPaste) { enabled -> viewModel.updateSettings(settings.copy(clipboardPaste = enabled)) }
+                SettingSwitch((stringResource(R.string.settings_phone_rumble_fallback), settings.phoneRumbleFallback) { enabled -> viewModel.updateSettings(settings.copy(phoneRumbleFallback = enabled)) }
                 SettingSwitch(
                     label = stringResource(R.string.stream_panel_mouse_mode),
                     checked = settings.controllerMouseEmulation,
@@ -827,12 +827,12 @@ private fun SettingsContent(
                         }
                     }
                 }
-                SettingSwitch("Touch controls", settings.androidTouch.enabled) { enabled -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(enabled = enabled))) }
+                SettingSwitch((stringResource(R.string.settings_touch_controls), settings.androidTouch.enabled) { enabled -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(enabled = enabled))) }
                 val touchStyleOptions = listOf(
                     SettingsChoiceOption(TouchControllerStyle.V1.name, "V1 (Solid)"),
                     SettingsChoiceOption(TouchControllerStyle.V2.name, "V2 (Clean Outline)")
                 )
-                ChoiceOptionRow("Touch controller style", touchStyleOptions, settings.androidTouch.touchControllerStyle.name) { styleName ->
+                ChoiceOptionRow((stringResource(R.string.settings_touch_controller_style), touchStyleOptions, settings.androidTouch.touchControllerStyle.name) { styleName ->
                     val style = TouchControllerStyle.valueOf(styleName)
                     viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(touchControllerStyle = style)))
                 }
@@ -840,11 +840,11 @@ private fun SettingsContent(
                     SettingsChoiceOption(TouchJoystickMode.Fixed.name, "Fixed"),
                     SettingsChoiceOption(TouchJoystickMode.Dynamic.name, "Dynamic"),
                 )
-                ChoiceOptionRow("Touch joystick", joystickModeOptions, settings.androidTouch.joystickMode.name) { modeName ->
+                ChoiceOptionRow((stringResource(R.string.settings_touch_joystick), joystickModeOptions, settings.androidTouch.joystickMode.name) { modeName ->
                     val mode = TouchJoystickMode.valueOf(modeName)
                     viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(joystickMode = mode)))
                 }
-                NumberSlider("Joystick dead zone", settings.androidTouch.joystickDeadZone, 0f, 0.3f, 0.01f) { value ->
+                NumberSlider((stringResource(R.string.settings_joystick_dead_zone), settings.androidTouch.joystickDeadZone, 0f, 0.3f, 0.01f) { value ->
                     viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(joystickDeadZone = value)))
                 }
                 if (!state.androidTvProfile) {
@@ -895,11 +895,11 @@ private fun SettingsContent(
                         }
                     }
                 }
-                SettingSwitch("Finger mouse", settings.androidTouch.mousePad) { enabled -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(mousePad = enabled))) }
+                SettingSwitch((stringResource(R.string.settings_finger_mouse), settings.androidTouch.mousePad) { enabled -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(mousePad = enabled))) }
                 if (settings.androidTouch.mousePad) {
                     Box(Modifier.padding(start = 24.dp)) {
                         Column {
-                            SettingSwitch("Direct click", settings.androidTouch.mouseDirectClick) { enabled -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(mouseDirectClick = enabled))) }
+                            SettingSwitch((stringResource(R.string.settings_direct_click), settings.androidTouch.mouseDirectClick) { enabled -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(mouseDirectClick = enabled))) }
 
                             val scrollHint = when {
                                 settings.stream.mouseScrollSensitivity <= 20 -> "Very fast"
@@ -921,16 +921,16 @@ private fun SettingsContent(
                         }
                     }
                 }
-                NumberSlider("Touch layout scale", settings.androidTouch.scale, 0.6f, 1.4f, 0.05f) { value -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(scale = value))) }
-                NumberSlider("Touch button size", settings.androidTouch.buttonScale, 0.65f, 1.5f, 0.05f) { value -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(buttonScale = value))) }
-                NumberSlider("Touch stick size", settings.androidTouch.stickScale, 0.65f, 1.5f, 0.05f) { value -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(stickScale = value))) }
-                NumberSlider("Touch opacity", settings.androidTouch.opacity, 0.15f, 1f, 0.05f) { value -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(opacity = value))) }
-                NumberSlider("Touch edge padding", settings.androidTouch.edgePaddingDp, 0f, 72f, 1f, unit = "dp") { value -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(edgePaddingDp = value))) }
-                NumberSlider("Touch bottom padding", settings.androidTouch.bottomPaddingDp, 0f, 120f, 1f, unit = "dp") { value -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(bottomPaddingDp = value))) }
-                NumberSlider("Left controls horizontal offset", settings.androidTouch.leftOffsetXDp, -220f, 220f, 2f, unit = "dp") { value -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(leftOffsetXDp = value))) }
-                NumberSlider("Left controls vertical offset", settings.androidTouch.leftOffsetYDp, -160f, 160f, 2f, unit = "dp") { value -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(leftOffsetYDp = value))) }
-                NumberSlider("Right controls horizontal offset", settings.androidTouch.rightOffsetXDp, -220f, 220f, 2f, unit = "dp") { value -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(rightOffsetXDp = value))) }
-                NumberSlider("Right controls vertical offset", settings.androidTouch.rightOffsetYDp, -160f, 160f, 2f, unit = "dp") { value -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(rightOffsetYDp = value))) }
+                NumberSlider((stringResource(R.string.settings_touch_layout_scale), settings.androidTouch.scale, 0.6f, 1.4f, 0.05f) { value -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(scale = value))) }
+                NumberSlider((stringResource(R.string.settings_touch_button_size), settings.androidTouch.buttonScale, 0.65f, 1.5f, 0.05f) { value -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(buttonScale = value))) }
+                NumberSlider((stringResource(R.string.settings_touch_stick_size), settings.androidTouch.stickScale, 0.65f, 1.5f, 0.05f) { value -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(stickScale = value))) }
+                NumberSlider((stringResource(R.string.settings_touch_opacity), settings.androidTouch.opacity, 0.15f, 1f, 0.05f) { value -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(opacity = value))) }
+                NumberSlider((stringResource(R.string.settings_touch_edge_padding), settings.androidTouch.edgePaddingDp, 0f, 72f, 1f, unit = "dp") { value -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(edgePaddingDp = value))) }
+                NumberSlider((stringResource(R.string.settings_touch_bottom_padding), settings.androidTouch.bottomPaddingDp, 0f, 120f, 1f, unit = "dp") { value -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(bottomPaddingDp = value))) }
+                NumberSlider((stringResource(R.string.settings_left_controls_horizontal_offset), settings.androidTouch.leftOffsetXDp, -220f, 220f, 2f, unit = "dp") { value -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(leftOffsetXDp = value))) }
+                NumberSlider((stringResource(R.string.settings_left_controls_vertical_offset), settings.androidTouch.leftOffsetYDp, -160f, 160f, 2f, unit = "dp") { value -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(leftOffsetYDp = value))) }
+                NumberSlider((stringResource(R.string.settings_right_controls_horizontal_offset), settings.androidTouch.rightOffsetXDp, -220f, 220f, 2f, unit = "dp") { value -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(rightOffsetXDp = value))) }
+                NumberSlider((stringResource(R.string.settings_right_controls_vertical_offset), settings.androidTouch.rightOffsetYDp, -160f, 160f, 2f, unit = "dp") { value -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(rightOffsetYDp = value))) }
             }
     CategorySettingsSection(selectedCategory, SettingsCategory.Interface, searchQuery, stringResource(R.string.settings_section_interface), "interface", "ui", "theme", "console", "ps5", "system colors", "accent", "launch page", "default page", "store", "library", "nerd", "expressive", "compact", "cards", "store labels", "game card size", "stats", "position", "server selector", "controller", "sounds", "button", "tone", "tv", "safe area", "screen padding", "overscan", "session counter", "intro", "music", "queue", "stretch", "fill") {
                 val accentOptions = UiAccent.entries.map { it to uiAccentLabel(it) }
@@ -1026,7 +1026,7 @@ private fun SettingsContent(
                     viewModel.updateSettings(settings.copy(queueReadyMusic = enabled))
                 }
                 // 1.0.33: let users hide the in-stream floating quick-action button entirely.
-                SettingSwitch("Show floating action buttons", settings.quickAccessBarVisible) { enabled ->
+                SettingSwitch(stringResource(R.string.settings_show_floating_action_buttons), settings.quickAccessBarVisible) { enabled ->
                     viewModel.updateSettings(settings.copy(quickAccessBarVisible = enabled))
                 }
             }

@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">NanaPlay</string>
+    <string name="auth_refresh_needs_relogin">Sesi masuk Anda telah kedaluwarsa. Silakan masuk kembali.</string>
     <string name="status_starting_opennow">Memulai NanaPlay</string>
     <string name="login_with_provider">Masuk dengan %1$s</string>
     <string name="login_tv_start">Masuk di perangkat lain dengan %1$s</string>
@@ -537,6 +538,8 @@
     <string name="music_err_online_unavailable">Musik online tidak tersedia untuk sementara</string>
     <string name="music_err_no_valid_files">Tidak bisa menambah lagu: tidak ada file valid yang dipilih.</string>
     <string name="music_err_add_failed">Gagal menambah lagu. Coba lagi.</string>
+    <string name="music_err_persist_permission">Akses ke %1$d file gagal disimpan — file bisa hilang setelah aplikasi dibuka ulang. Coba pilih lagi.</string>
+    <string name="music_notif_channel">Pemutaran musik</string>
     <!-- NanaPlay 1.0.43: tab musik -->
     <string name="music_tab_my_music">Musik Saya</string>
     <string name="music_tab_online">Online</string>
@@ -571,6 +574,7 @@
     <string name="dlg_share_diagnostics">Bagikan diagnostik?</string>
     <string name="dlg_share_analytics">Bagikan analitik</string>
     <string name="dlg_share_anonymous_desc">Bagikan diagnostik anonim untuk membantu menemukan pola bug, crash, dan masalah performa. Data sensitif dihapus, dan datamu tidak kami jual.</string>
+    <string name="dlg_share_analytics_recipient">Jika diaktifkan, data analitik penggunaan dikirim ke: %1$s</string>
     <string name="dlg_sharing_off_warning">Kalau berbagi data mati saat crash, informasi yang kami punya mungkin kurang untuk menyelidiki laporanmu. Secara bawaan mati dan bisa diubah di pengaturan Privasi.</string>
     <string name="dlg_keep_off">Tetap mati</string>
     <string name="dlg_got_it">Mengerti</string>
@@ -687,4 +691,51 @@
     <string name="console_edit">Ubah</string>
     <string name="console_done">Selesai</string>
     <string name="console_back_to_browse">↑ Kembali menjelajah</string>
+    <!-- Label pengaturan (sentuh/input/stream) -->
+    <string name="settings_share_usage_analytics">Bagikan data analitik</string>
+    <string name="settings_stream_sharpening">Penajaman gambar stream</string>
+    <string name="settings_sharpness_amount">Kekuatan penajaman</string>
+    <string name="settings_mouse_sensitivity">Sensitivitas mouse</string>
+    <string name="settings_mouse_acceleration">Akselerasi mouse</string>
+    <string name="settings_keyboard_layout">Tata letak keyboard</string>
+    <string name="settings_game_language">Bahasa dalam game</string>
+    <string name="settings_clipboard_paste">Tempel dari clipboard</string>
+    <string name="settings_phone_rumble_fallback">Getaran HP cadangan</string>
+    <string name="settings_touch_controls">Kontrol sentuh</string>
+    <string name="settings_touch_controller_style">Gaya kontrol sentuh</string>
+    <string name="settings_touch_joystick">Joystick sentuh</string>
+    <string name="settings_joystick_dead_zone">Zona mati joystick</string>
+    <string name="settings_finger_mouse">Mouse jari</string>
+    <string name="settings_direct_click">Klik langsung</string>
+    <string name="settings_touch_layout_scale">Skala tata letak sentuh</string>
+    <string name="settings_touch_button_size">Ukuran tombol sentuh</string>
+    <string name="settings_touch_stick_size">Ukuran stik analog</string>
+    <string name="settings_touch_opacity">Opasitas kontrol sentuh</string>
+    <string name="settings_touch_edge_padding">Jarak kontrol dari tepi</string>
+    <string name="settings_touch_bottom_padding">Jarak kontrol dari bawah</string>
+    <string name="settings_left_controls_horizontal_offset">Posisi horizontal kontrol kiri</string>
+    <string name="settings_left_controls_vertical_offset">Posisi vertikal kontrol kiri</string>
+    <string name="settings_right_controls_horizontal_offset">Posisi horizontal kontrol kanan</string>
+    <string name="settings_right_controls_vertical_offset">Posisi vertikal kontrol kanan</string>
+    <!-- Mode konsol -->
+    <string name="console_genre_all">Semua</string>
+    <string name="console_cc_home">Beranda</string>
+    <string name="console_cc_music">Musik</string>
+    <string name="console_content_show">Tampilkan</string>
+    <string name="console_content_hide">Sembunyikan</string>
+    <string name="console_remove_from_favorites">Hapus dari favorit</string>
+    <string name="console_add_to_favorites">Tambah ke favorit</string>
+    <string name="console_loading_games">Memuat game…</string>
+    <string name="console_no_games_yet">Belum ada game di sini</string>
+    <string name="console_pull_to_refresh">Tarik ke bawah untuk memuat ulang, atau periksa koneksi dan toko yang tertaut.</string>
+    <!-- Panel browser -->
+    <string name="browser_title">Browser</string>
+    <string name="browser_cycle_size">Ganti ukuran</string>
+    <string name="browser_expand">Perbesar</string>
+    <string name="browser_minimize">Perkecil</string>
+    <string name="browser_close">Tutup browser</string>
+    <string name="browser_back">Kembali</string>
+    <string name="browser_forward">Maju</string>
+    <string name="browser_clear">Hapus</string>
+    <string name="settings_show_floating_action_buttons">Tampilkan tombol aksi melayang</string>
 </resources>

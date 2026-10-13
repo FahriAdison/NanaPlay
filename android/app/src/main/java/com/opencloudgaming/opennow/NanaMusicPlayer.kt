@@ -14,7 +14,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -116,16 +115,37 @@ object NanaMusicPlayer {
     // restore, so a slow/dead network can no longer wipe the playlist.
     private const val MUSIC_PREFS = "nana_music_state"
     private const val KEY_STATE_JSON = "state_json"
-    private const val SAVE_INTERVAL_MS = 5000L
+
+    /** 1.0.59: extension fallback for validateAudioUri when the provider gives no MIME type. */
+    private val AUDIO_EXTENSIONS = setOf(
+        "mp3", "m4a", "m4b", "aac", "adts", "ogg", "oga", "opus",
+        "flac", "wav", "wave", "mid", "midi", "amr", "awb", "3gp", "3g2",
+    )
 
     /** 1.0.36: scheme marking online tracks whose stream URL isn't resolved yet. Never handed to ExoPlayer. */
     private const val PLACEHOLDER_SCHEME = "saavn"
 
     private val persistScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var saveJob: Job? = null
     private var appContextRef: Context? = null
     private var restored = false
     private var restoreJob: Job? = null
+
+    /**
+     * 1.0.59 — true while the user wants playback. togglePlayPause/next/play
+     * set it; pause/stop clear it. playInternal checks it AFTER the (slow,
+     * network) resolve: the user may have paused while resolving, and the
+     * resolve must not resurrect playback against their intent. Volatile
+     * because it is touched from UI callbacks and IO coroutines.
+     */
+    @Volatile
+    private var playRequested = false
+
+    /** 1.0.59 — call-state auto-pause bookkeeping (see NanaCallStateWatcher). */
+    @Volatile
+    private var pausedForCall = false
+
+    @Volatile
+    private var wasPlayingBeforeCall = false
 
     /** 1.0.36: playback position captured at restore; consumed by the first play. */
     private var pendingSeekMs: Long = 0L
@@ -158,31 +178,38 @@ object NanaMusicPlayer {
             append(t.javaClass.simpleName).append(": ").append(t.message)
         }
         lastCrashSummary = summary
-        runCatching {
-            val dir = java.io.File(context.applicationContext.filesDir, CRASH_DIR).apply { mkdirs() }
-            // Prune old logs so the folder can't grow forever.
-            dir.listFiles()?.sortedBy { it.lastModified() }?.let { files ->
-                if (files.size >= MAX_CRASH_FILES) {
-                    files.take(files.size - MAX_CRASH_FILES + 1).forEach { runCatching { it.delete() } }
-                }
-            }
-            val file = java.io.File(dir, "crash-${System.currentTimeMillis()}.txt")
-            val deviceLine = runCatching {
-                "device=${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} " +
-                    "sdk=${android.os.Build.VERSION.SDK_INT} app=1.0.38"
-            }.getOrDefault("device=unknown")
-            file.writeText(buildString {
-                appendLine(summary)
-                appendLine(deviceLine)
-                appendLine("--- stack trace ---")
-                append(t.stackTraceToString())
-                t.cause?.let { cause ->
-                    appendLine("--- cause ---")
-                    append(cause.stackTraceToString())
-                }
-            })
-        }
         android.util.Log.e("NanaMusicPlayer", "crash [$tag]", t)
+        // 1.0.59: file I/O moved off the calling thread. onPlayerError runs on
+        // the main thread and mkdirs()/listFiles()/writeText() used to block
+        // it (jank/ANR on slow storage or error bursts). Best-effort: if the
+        // process dies mid-write, the summary above + logcat still survive.
+        val appContext = context.applicationContext
+        persistScope.launch {
+            runCatching {
+                val dir = java.io.File(appContext.filesDir, CRASH_DIR).apply { mkdirs() }
+                // Prune old logs so the folder can't grow forever.
+                dir.listFiles()?.sortedBy { it.lastModified() }?.let { files ->
+                    if (files.size >= MAX_CRASH_FILES) {
+                        files.take(files.size - MAX_CRASH_FILES + 1).forEach { runCatching { it.delete() } }
+                    }
+                }
+                val file = java.io.File(dir, "crash-${System.currentTimeMillis()}.txt")
+                val deviceLine = runCatching {
+                    "device=${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} " +
+                        "sdk=${android.os.Build.VERSION.SDK_INT} app=1.0.59"
+                }.getOrDefault("device=unknown")
+                file.writeText(buildString {
+                    appendLine(summary)
+                    appendLine(deviceLine)
+                    appendLine("--- stack trace ---")
+                    append(t.stackTraceToString())
+                    t.cause?.let { cause ->
+                        appendLine("--- cause ---")
+                        append(cause.stackTraceToString())
+                    }
+                })
+            }
+        }
     }
 
     /**
@@ -212,21 +239,6 @@ object NanaMusicPlayer {
         restoreJob = persistScope.launch {
             runCatching { restoreState(appCtx) }
         }
-    }
-
-    private fun startPeriodicSave() {
-        saveJob?.cancel()
-        saveJob = persistScope.launch {
-            while (true) {
-                delay(SAVE_INTERVAL_MS)
-                appContextRef?.let { saveState(it) }
-            }
-        }
-    }
-
-    private fun stopPeriodicSave() {
-        saveJob?.cancel()
-        saveJob = null
     }
 
     /** Best-effort save of playlist + position. Never throws. */
@@ -443,10 +455,10 @@ object NanaMusicPlayer {
                     if (isPlaying) {
                         _lastError.value = null
                         lastRetrySaavnId = null
-                        startPeriodicSave()
                     } else {
-                        stopPeriodicSave()
                         // Persist position on every pause — cheap and exact.
+                        // (1.0.59: the old 5s periodic save is gone; saves now
+                        // happen on pause / track change / add / remove only.)
                         persistScope.launch { saveState(appContext) }
                     }
                 }
@@ -478,7 +490,12 @@ object NanaMusicPlayer {
                                     val cand = _currentIndex.value + 1
                                     if (cand < size) cand else -1
                                 }
-                                if (nextIdx >= 0) playInternal(appCtx, nextIdx)
+                                // 1.0.59: this is a genuine play intent (see
+                                // the playRequested guard in playInternal).
+                                if (nextIdx >= 0) {
+                                    playRequested = true
+                                    playInternal(appCtx, nextIdx)
+                                }
                             }
                         }
                     }
@@ -486,7 +503,56 @@ object NanaMusicPlayer {
             },
         )
         player = exo
+        // 1.0.59: pause music during phone calls. Audio focus is intentionally
+        // off (music must mix with game audio), so the system won't pause us
+        // by itself — NanaCallStateWatcher does it explicitly. No-op without
+        // the READ_PHONE_STATE permission (see its docs).
+        NanaCallStateWatcher.register(appContext)
         return exo
+    }
+
+    /**
+     * 1.0.59: player accessor for NanaMusicPlaybackService. The service wraps
+     * this player in a MediaSession; ownership stays with this singleton.
+     */
+    fun obtainServicePlayer(context: Context): androidx.media3.exoplayer.ExoPlayer =
+        ensurePlayer(context.applicationContext)
+
+    /** 1.0.59: let UI layers surface a message without going through playback. */
+    fun setLastError(message: String?) {
+        _lastError.value = message
+    }
+
+    /**
+     * 1.0.59: called by NanaCallStateWatcher when a call starts ringing or
+     * connects. Pauses only if we were actually playing; remembers that the
+     * pause was ours so resumeAfterCall() can undo exactly that.
+     */
+    fun pauseForCall() {
+        val exo = synchronized(this) { player } ?: return
+        if (exo.isPlaying) {
+            wasPlayingBeforeCall = true
+            pausedForCall = true
+            playRequested = false
+            runCatching { exo.pause() }
+        }
+    }
+
+    /**
+     * 1.0.59: called when the call ends. Resumes only if WE paused for the
+     * call — a manual user pause in the meantime cancels the auto-resume
+     * (togglePlayPause clears pausedForCall).
+     */
+    fun resumeAfterCall() {
+        if (!pausedForCall) return
+        pausedForCall = false
+        if (wasPlayingBeforeCall) {
+            wasPlayingBeforeCall = false
+            playRequested = true
+            runCatching { synchronized(this) { player }?.play() }
+        } else {
+            wasPlayingBeforeCall = false
+        }
     }
 
     /**
@@ -505,13 +571,16 @@ object NanaMusicPlayer {
             // Surface the HTTP status when the source was rejected to make
             // future diagnosis easier. The message from ExoPlayer usually
             // already contains the code.
+            // 1.0.59: .take(20) guards against a (pathological) cyclic cause
+            // chain hanging the main thread forever.
             val httpCode: Int? = generateSequence<Throwable>(error) { it.cause }
+                .take(20)
                 .filterIsInstance<androidx.media3.datasource.HttpDataSource.HttpDataSourceException>()
                 .mapNotNull { ex ->
-                    runCatching {
-                        val field = ex.javaClass.getField("responseCode")
-                        (field.get(ex) as? Int)?.takeIf { code -> code > 0 }
-                    }.getOrNull()
+                    // 1.0.59: responseCode only exists on the subclass — the
+                    // old reflective getField() never matched anything.
+                    (ex as? androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException)
+                        ?.responseCode?.takeIf { code -> code > 0 }
                 }
                 .firstOrNull()
             val failedTitle = (synchronized(this) { currentTrack?.title } ?: "lagu ini")
@@ -566,7 +635,9 @@ object NanaMusicPlayer {
                                     retryExo.prepare()
                                     if (pos > 1000L) retryExo.seekTo(pos)
                                     _lastError.value = null
+                                    playRequested = true
                                     retryExo.play()
+                                    runCatching { NanaMusicPlaybackService.start(appContext) }
                                 }
                             }
                         }
@@ -650,6 +721,23 @@ object NanaMusicPlayer {
             return null
         }
         if (!isPlaceholderUri(track)) return track
+        // 1.0.59: the resolve below is a network call (up to ~35s on bad
+        // networks). Surface it as buffering so the UI doesn't look dead —
+        // the online tab already renders _isBuffering.
+        _isBuffering.value = true
+        try {
+            return resolveOnlineUrl(appContext, track, saavnId)
+        } finally {
+            _isBuffering.value = false
+        }
+    }
+
+    /** 1.0.59: network half of resolvePlayable, extracted for the buffering wrapper above. */
+    private suspend fun resolveOnlineUrl(
+        appContext: Context,
+        track: NanaTrack,
+        saavnId: String,
+    ): NanaTrack? {
         val url = try {
             NanaSaavnApi.resolveAudioUrl(saavnId)
         } catch (t: Throwable) {
@@ -742,9 +830,23 @@ object NanaMusicPlayer {
                 pendingSeekMs.also { pendingSeekMs = 0L }
             }
             if (seekTo > 1000L) liveExo.seekTo(seekTo)
+            // 1.0.59: the user may have paused while the (network) resolve was
+            // in flight — togglePlayPause doesn't take playMutex, so a stale
+            // play() here would resurrect playback against their intent.
+            // The track stays loaded & selected, just not playing.
+            if (!playRequested) {
+                return true
+            }
             _lastError.value = null
             lastRetrySaavnId = null
             liveExo.play()
+            // 1.0.59: keep the process alive in the background + show system
+            // media controls. Started on every real play; harmless if already
+            // running. Wrapped: starting an FGS from background is illegal,
+            // and we'd rather skip the service than crash.
+            runCatching { NanaMusicPlaybackService.start(appContext) }
+            // Event-driven save (replaces the old 5s periodic save).
+            persistScope.launch { saveState(appContext) }
             return true
         } catch (t: Throwable) {
             if (t is CancellationException) throw t
@@ -763,6 +865,7 @@ object NanaMusicPlayer {
      */
     private fun serializedPlay(context: Context, indexProvider: () -> Int) {
         ensureRestored(context)
+        playRequested = true
         persistScope.launch {
             try {
                 playMutex.withLock {
@@ -814,6 +917,7 @@ object NanaMusicPlayer {
                 for (uri in valid) {
                     val track = runCatching {
                         probeTrackReadable(appContext, uri)
+                        validateAudioUri(appContext, uri)
                         NanaTrack(uri = uri, title = resolveTitle(appContext, uri))
                     }.getOrNull()
                     if (track != null) {
@@ -879,6 +983,29 @@ object NanaMusicPlayer {
         }
     }
 
+    /**
+     * 1.0.59: reject obvious non-audio files. The picker's "audio/*" MIME
+     * filter isn't honored by every file manager, so a video picked by
+     * mistake used to enter the queue and fail only at playback. Throws —
+     * the caller counts it in the "X of Y failed" message.
+     */
+    private fun validateAudioUri(context: Context, uri: Uri) {
+        val mime = runCatching { context.contentResolver.getType(uri) }.getOrNull()
+        if (mime != null) {
+            if (!mime.startsWith("audio/", ignoreCase = true)) {
+                throw IllegalArgumentException("not an audio file (MIME $mime): $uri")
+            }
+            return
+        }
+        // Provider gave no MIME type — fall back to the file extension.
+        val ext = uri.lastPathSegment
+            ?.substringAfterLast('.', "")
+            ?.lowercase(java.util.Locale.US)
+        if (ext.isNullOrEmpty() || ext !in AUDIO_EXTENSIONS) {
+            throw IllegalArgumentException("not an audio file: $uri")
+        }
+    }
+
     fun removeTrack(context: Context, index: Int) {
         val (wasCurrent, newSize) = synchronized(this) {
             val tracks = _tracks.value
@@ -891,6 +1018,9 @@ object NanaMusicPlayer {
         // Keep the persisted playlist in sync after deletions.
         persistScope.launch { appContextRef?.let { saveState(it) } }
         if (newSize == 0) {
+            // 1.0.59: nothing left to play — drop the foreground service too.
+            playRequested = false
+            appContextRef?.let { runCatching { NanaMusicPlaybackService.stop(it) } }
             player?.stop()
             player?.clearMediaItems()
             synchronized(this) { _currentIndex.value = -1 }
@@ -917,6 +1047,7 @@ object NanaMusicPlayer {
     suspend fun playOnlineTrack(context: Context, online: NanaOnlineTrack): Boolean {
         ensureRestored(context)
         val appContext = context.applicationContext
+        playRequested = true
         return playMutex.withLock {
             restoreJob?.join()
             val index = synchronized(this@NanaMusicPlayer) {
@@ -943,8 +1074,13 @@ object NanaMusicPlayer {
     fun togglePlayPause(context: Context) {
         guarded(context, "togglePlayPause") {
             ensureRestored(context)
-            val exo = ensurePlayer(context.applicationContext)
+            val appContext = context.applicationContext
+            val exo = ensurePlayer(appContext)
             if (exo.isPlaying) {
+                playRequested = false
+                // 1.0.59: a manual pause cancels any pending call auto-resume.
+                pausedForCall = false
+                wasPlayingBeforeCall = false
                 exo.pause()
                 return@guarded
             }
@@ -952,13 +1088,17 @@ object NanaMusicPlayer {
             // play() is a no-op while in STATE_ENDED, which left the play
             // button dead after a track completed.
             if (exo.playbackState == Player.STATE_ENDED) {
+                playRequested = true
                 exo.seekTo(0)
                 exo.play()
+                runCatching { NanaMusicPlaybackService.start(appContext) }
                 return@guarded
             }
             if (exo.currentMediaItem != null) {
                 // Resume the paused item without re-resolving.
+                playRequested = true
                 exo.play()
+                runCatching { NanaMusicPlaybackService.start(appContext) }
                 return@guarded
             }
             // Nothing loaded — start the current (or first) track.
@@ -990,6 +1130,10 @@ object NanaMusicPlayer {
     }
 
     fun stop() {
+        playRequested = false
+        pausedForCall = false
+        wasPlayingBeforeCall = false
+        appContextRef?.let { runCatching { NanaMusicPlaybackService.stop(it) } }
         player?.stop()
         player?.clearMediaItems()
         _currentIndex.value = -1
@@ -999,7 +1143,13 @@ object NanaMusicPlayer {
     fun release() {
         // Final save before the player goes away (process death, logout, ...).
         appContextRef?.let { saveState(it) }
-        stopPeriodicSave()
+        playRequested = false
+        pausedForCall = false
+        wasPlayingBeforeCall = false
+        appContextRef?.let {
+            runCatching { NanaMusicPlaybackService.stop(it) }
+            NanaCallStateWatcher.unregister(it)
+        }
         player?.release()
         player = null
         _isPlaying.value = false

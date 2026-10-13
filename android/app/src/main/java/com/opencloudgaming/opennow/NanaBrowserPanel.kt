@@ -183,7 +183,7 @@ fun NanaBrowserPanel(
                             .size(20.dp),
                     )
                     Text(
-                        "Browser",
+                        stringResource(R.string.browser_title),
                         color = MaterialTheme.colorScheme.onSurface,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
@@ -199,7 +199,7 @@ fun NanaBrowserPanel(
                     ) {
                         Icon(
                             imageVector = Icons.Filled.AspectRatio,
-                            contentDescription = "Cycle size",
+                            contentDescription = stringResource(R.string.browser_cycle_size),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(18.dp),
                         )
@@ -210,7 +210,7 @@ fun NanaBrowserPanel(
                     ) {
                         Icon(
                             imageVector = Icons.Filled.Remove,
-                            contentDescription = if (minimized) "Expand" else "Minimize",
+                            contentDescription = if (minimized) stringResource(R.string.browser_expand) else stringResource(R.string.browser_minimize),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(18.dp),
                         )
@@ -221,7 +221,7 @@ fun NanaBrowserPanel(
                     ) {
                         Icon(
                             imageVector = Icons.Filled.Close,
-                            contentDescription = "Close browser",
+                            contentDescription = stringResource(R.string.browser_close),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(18.dp),
                         )
@@ -244,7 +244,7 @@ fun NanaBrowserPanel(
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back",
+                                contentDescription = stringResource(R.string.browser_back),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(18.dp),
                             )
@@ -256,7 +256,7 @@ fun NanaBrowserPanel(
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = "Forward",
+                                contentDescription = stringResource(R.string.browser_forward),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(18.dp),
                             )
@@ -279,7 +279,7 @@ fun NanaBrowserPanel(
                                     IconButton(onClick = { addressText = "" }) {
                                         Icon(
                                             imageVector = Icons.Filled.Close,
-                                            contentDescription = "Clear",
+                                            contentDescription = stringResource(R.string.browser_clear),
                                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.size(18.dp),
                                         )

@@ -29,16 +29,16 @@ class OpenNowApplication : Application() {
     override fun onCreate() {
         super.onCreate()
 
-        if (isTelevisionDevice()) {
-            startupScope.launch {
-                val settings = SettingsStore(this@OpenNowApplication).settings.value
+        startupScope.launch {
+            // SettingsStore construction does disk I/O (XML parse) plus a
+            // PackageManager IPC (isAndroidTvProfile) — keep it off the main thread.
+            val settings = SettingsStore(this@OpenNowApplication).settings.value
+            if (isTelevisionDevice()) {
                 delay(TV_BACKGROUND_SERVICE_START_DELAY_MS)
-                withContext(Dispatchers.Main) {
-                    initializeBackgroundServices(settings)
-                }
             }
-        } else {
-            initializeBackgroundServices(SettingsStore(this).settings.value)
+            withContext(Dispatchers.Main) {
+                initializeBackgroundServices(settings)
+            }
         }
     }
 

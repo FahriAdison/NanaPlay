@@ -2,13 +2,11 @@ package com.opencloudgaming.opennow
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
-import java.util.concurrent.TimeUnit
 
 /**
  * NanaPlay 1.0.34 — GitHub-backed announcements.
@@ -40,14 +38,19 @@ object NanaAnnouncements {
         "2026-10-07-testing-hold",
     )
 
-    private val http = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .build()
+    // Reuse the shared client configuration (timeouts, DNS) instead of
+    // maintaining a second connection pool + dispatcher thread set.
+    private val http = defaultHttpClient()
 
-    private val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
-        timeZone = TimeZone.getTimeZone("UTC")
-    }
+    /**
+     * SimpleDateFormat is not thread-safe, so a fresh instance is created per
+     * call (isExpired runs on Dispatchers.IO and this is a shared singleton).
+     * java.time would be cleaner but needs desugaring below API 26 (minSdk 23).
+     */
+    private fun isoFormat() =
+        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
 
     /**
      * Fetch announcements, keeping only ones that are unread and unexpired.
@@ -90,6 +93,6 @@ object NanaAnnouncements {
 
     /** Unparseable showUntil = no expiry (show it). */
     private fun isExpired(showUntil: String, now: Long): Boolean =
-        runCatching { isoFormat.parse(showUntil)?.time?.let { it <= now } ?: false }
+        runCatching { isoFormat().parse(showUntil)?.time?.let { it <= now } ?: false }
             .getOrDefault(false)
 }

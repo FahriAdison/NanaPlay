@@ -1,6 +1,7 @@
 package com.opencloudgaming.opennow
 import com.papahchan.nanaplay.R
 
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateFloatAsState
@@ -79,6 +80,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
@@ -86,6 +88,28 @@ import coil3.size.Scale
 import com.opencloudgaming.opennow.ui.theme.OpenNowPalette
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
+/**
+ * Blur that degrades gracefully on API < 31: Modifier.blur() is silently
+ * ignored below API 31 (minSdk is 23), so without this branch old phones
+ * would show a sharp image where a blurred one was intended. The dark
+ * overlay and scrims drawn on top keep the result looking intentional.
+ */
+internal fun Modifier.blurCompat(radius: Dp): Modifier =
+    if (Build.VERSION.SDK_INT >= 31) blur(radius) else this
+
+/**
+ * Localized label for a control-center button key. Falls back to the
+ * capitalized key so a future/unknown key never renders blank.
+ */
+@Composable
+internal fun controlCenterButtonLabel(key: String): String = when (key) {
+    "home" -> stringResource(R.string.console_cc_home)
+    "library" -> stringResource(R.string.nav_library)
+    "music" -> stringResource(R.string.console_cc_music)
+    "settings" -> stringResource(R.string.nav_settings)
+    else -> key.replaceFirstChar { it.uppercase() }
+}
 
 /**
  * PS5-style "Console Mode" for the Store (Home) and Library pages.
@@ -194,6 +218,9 @@ internal fun ConsoleModeScreen(
 
     // NanaPlay 1.0.25: back closes an active search first (clear query + dismiss),
     // instead of exiting the app while the user is still searching.
+    // BackHandler priority: the LAST registered enabled handler wins, so the
+    // effective order is Control Center > Game Hub > Search. That matches the
+    // intended UX — an open overlay always dismisses before anything beneath it.
     BackHandler(enabled = showSearch) {
         onConsoleSearchQueryChange("")
     }
@@ -275,7 +302,7 @@ internal fun ConsoleModeScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .graphicsLayer(scaleX = 1.15f, scaleY = 1.15f)
-                            .blur(36.dp),
+                            .blurCompat(24.dp),
                     )
                     Box(
                         Modifier
@@ -359,7 +386,7 @@ internal fun ConsoleModeScreen(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         item {
-                            ConsoleGenreChip(label = "All", selected = genreFilter == null) {
+                            ConsoleGenreChip(label = stringResource(R.string.console_genre_all), selected = genreFilter == null) {
                                 genreFilter = null
                                 selectedIndex = 0
                             }
@@ -585,6 +612,9 @@ internal fun ConsoleModeScreen(
         // Control Center overlay (1.0.48): PS5-style quick actions
         // 1.0.49: editable layout (reorder + hide)
         if (showControlCenter) {
+            // Intentional: editMode resets every time the panel opens. The remember
+            // sits inside this `if` so its call-site is tied to the panel's
+            // composition — do NOT hoist it above without preserving the reset.
             var editMode by remember { mutableStateOf(false) }
             val ccOrder = state.settings.controlCenterOrder
             val ccHidden = state.settings.controlCenterHidden
@@ -648,7 +678,7 @@ internal fun ConsoleModeScreen(
                         ) {
                             effectiveOrder.filter { it !in ccHidden }.forEach { key ->
                                 val (icon, page) = ccButtons[key] ?: return@forEach
-                                val label = key.replaceFirstChar { it.uppercase() }
+                                val label = controlCenterButtonLabel(key)
                                 ControlCenterButton(
                                     icon = icon,
                                     label = label,
@@ -664,7 +694,7 @@ internal fun ConsoleModeScreen(
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             effectiveOrder.forEachIndexed { index, key ->
                                 val (icon, _) = ccButtons[key] ?: return@forEachIndexed
-                                val label = key.replaceFirstChar { it.uppercase() }
+                                val label = controlCenterButtonLabel(key)
                                 val hidden = key in ccHidden
                                 Row(
                                     Modifier.fillMaxWidth(),
@@ -710,7 +740,7 @@ internal fun ConsoleModeScreen(
                                         ) {
                                             Icon(
                                                 imageVector = if (hidden) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                                                contentDescription = if (hidden) "Show" else "Hide",
+                                                contentDescription = if (hidden) stringResource(R.string.console_content_show) else stringResource(R.string.console_content_hide),
                                                 tint = OpenNowPalette.TextPrimary.copy(alpha = 0.8f),
                                                 modifier = Modifier.size(20.dp),
                                             )
@@ -903,7 +933,7 @@ private fun ConsoleTopHeader(
             IconButton(onClick = onSearchClick, modifier = Modifier.size(36.dp)) {
                 Icon(
                     painter = painterResource(R.drawable.ic_search),
-                    contentDescription = "Search",
+                    contentDescription = stringResource(R.string.nav_search),
                     tint = OpenNowPalette.TextPrimary.copy(alpha = 0.75f),
                     modifier = Modifier.size(20.dp),
                 )
@@ -1014,7 +1044,7 @@ private fun ConsoleSelectedGamePanel(
             IconButton(onClick = onToggleFavorite) {
                 Icon(
                     painter = painterResource(if (isFavorite) R.drawable.ic_save_filled else R.drawable.ic_save),
-                    contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                    contentDescription = if (isFavorite) stringResource(R.string.console_remove_from_favorites) else stringResource(R.string.console_add_to_favorites),
                     tint = if (isFavorite) OpenNowPalette.AccentDefault else OpenNowPalette.TextPrimary,
                     modifier = Modifier.size(26.dp),
                 )
@@ -1037,7 +1067,7 @@ private fun ConsoleModeEmptyState(
             if (loading) {
                 CircularProgressIndicator(color = OpenNowPalette.AccentDefault)
                 Text(
-                    "Loading games…",
+                    stringResource(R.string.console_loading_games),
                     color = OpenNowPalette.TextMuted,
                     style = MaterialTheme.typography.bodyMedium,
                 )
@@ -1049,13 +1079,13 @@ private fun ConsoleModeEmptyState(
                     modifier = Modifier.size(56.dp),
                 )
                 Text(
-                    "No games here yet",
+                    stringResource(R.string.console_no_games_yet),
                     color = OpenNowPalette.TextPrimary,
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    "Pull down to refresh, or check your connection and linked stores.",
+                    stringResource(R.string.console_pull_to_refresh),
                     color = OpenNowPalette.TextMuted,
                     style = MaterialTheme.typography.bodyMedium,
                 )

@@ -41,10 +41,14 @@ internal class SessionTimerAnchorStore(context: Context) {
             preferredStartedAtMs = preferredStartedAtMs,
             nowMs = nowMs,
         )
+        // apply() (async) instead of commit() (sync): callers run on the main thread
+        // (withSessionTimerAnchor/toPendingSession), and a blocking disk write there
+        // risks an ANR. The in-memory SharedPreferences cache updates immediately,
+        // so a subsequent read in this process sees the new value.
         prefs.edit()
             .putString(KEY_SESSION_ID, sessionId)
             .putLong(KEY_STARTED_AT_MS, startedAtMs)
-            .commit()
+            .apply()
         startedAtMs
     }
 
@@ -54,7 +58,7 @@ internal class SessionTimerAnchorStore(context: Context) {
                 prefs.edit()
                     .remove(KEY_SESSION_ID)
                     .remove(KEY_STARTED_AT_MS)
-                    .commit()
+                    .apply()
             }
         }
     }

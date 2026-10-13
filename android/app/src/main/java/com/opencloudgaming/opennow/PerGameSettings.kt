@@ -15,7 +15,3 @@ package com.opencloudgaming.opennow
 /** Stream settings to use when launching [gameId]: its own saved override, or global. */
 fun AppSettings.streamSettingsFor(gameId: String): StreamSettings =
     perGameSettings[gameId] ?: stream
-
-/** True when [gameId] has a saved per-game override (shown as a badge in game details). */
-fun AppSettings.hasPerGameSettings(gameId: String): Boolean =
-    perGameSettings.containsKey(gameId)

@@ -912,6 +912,9 @@ object NativeStreamInputRouter {
         }
     }
 
+    /** 1.0.60: exposes the active stream client for the keyboard-to-gamepad mapper. */
+    fun getClient(): NativeStreamClient? = client
+
     /**
      * The system interrupted the touch session — entering PiP, or the activity going to background.
      * Releases any button we are holding so it cannot stick down on the host, and deliberately
@@ -3341,9 +3344,6 @@ class NativeStreamClient(
     private var controllerMouseAssistActive = false
     private var controllerMouseAssistAutoArmed = false
     private var controllerMouseEmulationActive = false
-    // 1.0.60: keyboard-to-gamepad mapping lives in KeymapInput.kt (separate file keeps the
-    // FIR data-flow analyzer's memory bounded — Streaming.kt OOMs the Kotlin daemon past ~7600 lines).
-    private val keymap = KeyboardToGamepadMapper(scope) { sendCurrentGamepadState() }
     private var controllerMouseMoveLogged = false
     private var controllerMouseLeftButtonDown = false
     private var controllerMouseRightButtonDown = false
@@ -3601,12 +3601,6 @@ class NativeStreamClient(
         sendCurrentGamepadState()
         NativeInputDiagnostics.add("controller mouse emulation ${if (enabled) "enabled" else "disabled"}")
     }
-
-    // 1.0.60: keyboard-to-gamepad mapping (logic in KeymapInput.kt).
-    fun setKeyboardToGamepadActive(enabled: Boolean) {
-        keymap.active = enabled
-    }
-
 
     private fun startControllerMouseLoop() {
         if (controllerMouseLoopJob?.isActive == true) return
@@ -3958,8 +3952,6 @@ class NativeStreamClient(
         controllerMouseMoveLogged = false
         controllerMouseLeftButtonDown = false
         controllerMouseRightButtonDown = false
-        // 1.0.60: drop keymap state too so no stuck keys survive a session.
-        keymap.active = false
         activeControllerId = 0
         controllerSlots.clear()
         controllerAxisAvailability.clear()
@@ -3977,11 +3969,6 @@ class NativeStreamClient(
 
     fun dispatchKey(event: KeyEvent): Boolean {
         if (event.isGamepadEvent() && dispatchGamepadKey(event)) {
-            return true
-        }
-        // 1.0.60: keyboard-to-gamepad mapping takes over hardware keyboard input first.
-        // Unmapped keys fall through to the normal keyboard path below.
-        if (keymap.active && event.isHardwareKeyboardSource() && keymap.onKeyEvent(event)) {
             return true
         }
         val key = InputEncoder.mapKeyEvent(event)
@@ -4067,13 +4054,6 @@ class NativeStreamClient(
             MotionEvent.ACTION_HOVER_MOVE,
             MotionEvent.ACTION_MOVE,
             -> {
-                // 1.0.60: keymap mode turns mouse movement into right-stick camera look.
-                if (keymap.active) {
-                    val kdx = if (Build.VERSION.SDK_INT >= 26) event.getAxisValue(MotionEvent.AXIS_RELATIVE_X) else 0f
-                    val kdy = if (Build.VERSION.SDK_INT >= 26) event.getAxisValue(MotionEvent.AXIS_RELATIVE_Y) else 0f
-                    if (abs(kdx) >= 0.5f || abs(kdy) >= 0.5f) keymap.onMouseMove(kdx, kdy)
-                    return true
-                }
                 val relativeDx = if (Build.VERSION.SDK_INT >= 26) event.getAxisValue(MotionEvent.AXIS_RELATIVE_X) else 0f
                 val relativeDy = if (Build.VERSION.SDK_INT >= 26) event.getAxisValue(MotionEvent.AXIS_RELATIVE_Y) else 0f
                 if (abs(relativeDx) >= 0.5f || abs(relativeDy) >= 0.5f) {
@@ -4123,11 +4103,6 @@ class NativeStreamClient(
                 }
             }
             MotionEvent.ACTION_DOWN -> {
-                // 1.0.60: keymap mode turns mouse buttons into triggers (LMB=RT attack, RMB=LT aim).
-                if (keymap.active) {
-                    keymap.onMouseButton(event.primaryMouseButton(), pressed = true)
-                    return true
-                }
                 mouseSuppressNextAbsoluteDelta = true
                 rememberMousePosition(event)
                 sendReliableInput(inputEncoder.encodeMouseButton(InputEncoder.INPUT_MOUSE_BUTTON_DOWN, event.primaryMouseButton()))
@@ -4135,19 +4110,11 @@ class NativeStreamClient(
             MotionEvent.ACTION_UP,
             MotionEvent.ACTION_CANCEL,
             -> {
-                if (keymap.active) {
-                    keymap.releaseMouseButtons()
-                    return true
-                }
                 mousePositionValid = false
                 mouseSuppressNextAbsoluteDelta = true
                 sendReliableInput(inputEncoder.encodeMouseButton(InputEncoder.INPUT_MOUSE_BUTTON_UP, event.primaryMouseButton()))
             }
             MotionEvent.ACTION_BUTTON_PRESS -> {
-                if (keymap.active) {
-                    keymap.onMouseButton(event.actionButton.toGfnMouseButton(), pressed = true)
-                    return true
-                }
                 mouseSuppressNextAbsoluteDelta = true
                 rememberMousePosition(event)
                 val handled = sendReliableInput(inputEncoder.encodeMouseButton(InputEncoder.INPUT_MOUSE_BUTTON_DOWN, event.actionButton.toGfnMouseButton()))
@@ -4157,10 +4124,6 @@ class NativeStreamClient(
                 return true
             }
             MotionEvent.ACTION_BUTTON_RELEASE -> {
-                if (keymap.active) {
-                    keymap.onMouseButton(event.actionButton.toGfnMouseButton(), pressed = false)
-                    return true
-                }
                 mousePositionValid = false
                 mouseSuppressNextAbsoluteDelta = true
                 val handled = sendReliableInput(inputEncoder.encodeMouseButton(InputEncoder.INPUT_MOUSE_BUTTON_UP, event.actionButton.toGfnMouseButton()))
@@ -5916,10 +5879,9 @@ class NativeStreamClient(
             physicalSteamOverlayChord.effectiveButtons(physicalButtons) or
                 physicalHatButtons or
                 virtualSteamOverlayChord.effectiveButtons(virtualButtons) or
-                steamMenuChordButtons or
-                keymap.mappedButtons
-        val leftTrigger = max(max(lastLeftTrigger, virtualLeftTrigger), keymap.mappedLeftTrigger)
-        val rightTrigger = max(max(lastRightTrigger, virtualRightTrigger), keymap.mappedRightTrigger)
+                steamMenuChordButtons
+        val leftTrigger = max(lastLeftTrigger, virtualLeftTrigger)
+        val rightTrigger = max(lastRightTrigger, virtualRightTrigger)
         val leftStickX = effectiveLeftStickX()
         val leftStickY = effectiveLeftStickY()
         val rightStickX = effectiveRightStickX()
@@ -5998,35 +5960,21 @@ class NativeStreamClient(
         }
     }
 
-    private fun effectiveLeftStickX(): Int = when {
-        virtualLeftStickActive -> virtualLeftStickX
-        keymap.mappedLeftStickActive -> keymap.mappedLeftStickX
-        else -> lastLeftStickX
-    }
-    private fun effectiveLeftStickY(): Int = when {
-        virtualLeftStickActive -> virtualLeftStickY
-        keymap.mappedLeftStickActive -> keymap.mappedLeftStickY
-        else -> lastLeftStickY
-    }
+    private fun effectiveLeftStickX(): Int = if (virtualLeftStickActive) virtualLeftStickX else lastLeftStickX
+    private fun effectiveLeftStickY(): Int = if (virtualLeftStickActive) virtualLeftStickY else lastLeftStickY
     private fun effectiveRightStickX(): Int =
-        if (virtualRightStickActive) virtualRightStickX else if (controllerMouseAssistActive) 0
-        else if (keymap.mappedRightStickX != 0f) normalizeToInt16(keymap.mappedRightStickX)
-        else lastRightStickX
+        if (virtualRightStickActive) virtualRightStickX else if (controllerMouseAssistActive) 0 else lastRightStickX
 
     private fun effectiveRightStickY(): Int =
-        if (virtualRightStickActive) virtualRightStickY else if (controllerMouseAssistActive) 0
-        else if (keymap.mappedRightStickY != 0f) normalizeToInt16(-keymap.mappedRightStickY)
-        else lastRightStickY
+        if (virtualRightStickActive) virtualRightStickY else if (controllerMouseAssistActive) 0 else lastRightStickY
 
     private fun hasAnyControllerState(): Boolean =
         physicalControllerConnected ||
             physicalControllerActive ||
             virtualControllerVisible ||
-            keymap.active ||
             physicalButtons != 0 ||
             physicalHatButtons != 0 ||
             virtualButtons != 0 ||
-            keymap.mappedButtons != 0 ||
             steamMenuChordButtons != 0 ||
             lastLeftTrigger != 0 ||
             lastRightTrigger != 0 ||

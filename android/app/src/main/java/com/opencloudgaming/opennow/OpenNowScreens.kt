@@ -7736,7 +7736,7 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
     }
     LaunchedEffect(client, keymapModeEnabled, streamReady) {
         if (streamReady) {
-            client.setKeyboardToGamepadActive(keymapModeEnabled)
+            KeymapMapper.active = keymapModeEnabled
         }
     }
     val activeStreamMode = activeStreamModeStatus(
@@ -8107,7 +8107,7 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                     onKeyboardToGamepadToggle = {
                         val newState = !keymapModeEnabled
                         keymapModeEnabled = newState
-                        client.setKeyboardToGamepadActive(newState)
+                        KeymapMapper.active = newState
                     },
                     onExit = {
                         controlsOpen = false

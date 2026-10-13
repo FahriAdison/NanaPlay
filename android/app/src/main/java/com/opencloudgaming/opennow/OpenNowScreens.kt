@@ -307,7 +307,6 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 import com.papahchan.nanaplay.keymap.KeymapMapper
-import com.papahchan.nanaplay.keymap.KeymapMapper
 
 // Aliases onto the shared token layer. The names stay so existing call sites keep working; the
 // values now live in exactly one place instead of being duplicated across two files.
@@ -8287,7 +8286,6 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                     onToggleRecording = { toggleStreamRecording() },
                     onToggleMusic = { musicMiniPlayerOpen = !musicMiniPlayerOpen },
                     onToggleBrowser = { browserOpen = !browserOpen },
-                    onTranslate = { startTapToTranslate() },
                 )
             }
             // NanaPlay 1.0.25: in-stream music mini player, bottom-center above the keyboard bar.
@@ -8400,7 +8398,6 @@ private fun QuickAccessFab(
     onToggleRecording: () -> Unit,
     onToggleMusic: () -> Unit,
     onToggleBrowser: () -> Unit,
-    onTranslate: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // 1.0.33: drawer collapsed by default — one button, tap to expand.

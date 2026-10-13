@@ -7210,6 +7210,8 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
     var videoTransportFallbackReason by remember { mutableStateOf<String?>(null) }
     var controllerMouseAssistEnabled by remember(session?.sessionId) { mutableStateOf(false) }
     var controllerMouseEmulationEnabled by remember(session?.sessionId) { mutableStateOf(state.settings.controllerMouseEmulation) }
+    // 1.0.60: keyboard-to-gamepad mapping toggle.
+    var keymapModeEnabled by remember(session?.sessionId) { mutableStateOf(state.settings.keyboardToGamepad) }
     val streamReady = state.isNativeStreamReady()
     val tvProfile = state.androidTvProfile
     LaunchedEffect(session?.sessionId) {
@@ -7732,6 +7734,11 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
             client.setControllerMouseEmulationActive(controllerMouseEmulationEnabled)
         }
     }
+    LaunchedEffect(client, keymapModeEnabled, streamReady) {
+        if (streamReady) {
+            client.setKeyboardToGamepadActive(keymapModeEnabled)
+        }
+    }
     val activeStreamMode = activeStreamModeStatus(
         requestedSettings = requestedStreamSettings,
         transportSettings = launchStreamSettings,
@@ -8015,6 +8022,7 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                     touchControlsVisible = touchControlsVisible,
                     controllerMouseAssistEnabled = controllerMouseAssistEnabled,
                     controllerMouseEmulationEnabled = controllerMouseEmulationEnabled,
+                    keymapModeEnabled = keymapModeEnabled,
                     showSessionTimer = state.settings.sessionCounterEnabled,
                     sessionTimerLimit = smartSessionLimit,
                     sessionStartedAtMs = sessionStartedAtMs,
@@ -8095,6 +8103,11 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                         val newState = !controllerMouseEmulationEnabled
                         controllerMouseEmulationEnabled = newState
                         client.setControllerMouseEmulationActive(newState)
+                    },
+                    onKeyboardToGamepadToggle = {
+                        val newState = !keymapModeEnabled
+                        keymapModeEnabled = newState
+                        client.setKeyboardToGamepadActive(newState)
                     },
                     onExit = {
                         controlsOpen = false
@@ -9587,6 +9600,7 @@ private fun StreamControlsPanel(
     touchControlsVisible: Boolean,
     controllerMouseAssistEnabled: Boolean,
     controllerMouseEmulationEnabled: Boolean,
+    keymapModeEnabled: Boolean,
     showSessionTimer: Boolean,
     sessionTimerLimit: SmartSessionLimit,
     sessionStartedAtMs: Long,
@@ -9616,6 +9630,7 @@ private fun StreamControlsPanel(
     onSteamMenuOpen: () -> Unit,
     onControllerMouseAssistToggle: () -> Unit,
     onControllerMouseEmulationToggle: () -> Unit,
+    onKeyboardToGamepadToggle: () -> Unit,
     onExit: () -> Unit,
     onTouchControlsToggle: () -> Unit,
     onMousePadToggle: () -> Unit,
@@ -9727,6 +9742,8 @@ private fun StreamControlsPanel(
                     settings = settings,
                     controllerMouseEmulationEnabled = controllerMouseEmulationEnabled,
                     onControllerMouseEmulationToggle = onControllerMouseEmulationToggle,
+                    keymapModeEnabled = keymapModeEnabled,
+                    onKeyboardToGamepadToggle = onKeyboardToGamepadToggle,
                     onMouseSensitivityChange = onMouseSensitivityChange,
                     onMouseScrollSensitivityChange = onMouseScrollSensitivityChange,
                     onNativeTouchScrollScaleChange = onNativeTouchScrollScaleChange,
@@ -10879,6 +10896,8 @@ private fun LazyListScope.mouseModePageItems(
     settings: AppSettings,
     controllerMouseEmulationEnabled: Boolean,
     onControllerMouseEmulationToggle: () -> Unit,
+    keymapModeEnabled: Boolean,
+    onKeyboardToGamepadToggle: () -> Unit,
     onMouseSensitivityChange: (Float) -> Unit,
     onMouseScrollSensitivityChange: (Int) -> Unit,
     onNativeTouchScrollScaleChange: (Float) -> Unit,
@@ -10894,6 +10913,17 @@ private fun LazyListScope.mouseModePageItems(
                 onControllerMouseEmulationToggle()
             },
             value = onOffLabel(controllerMouseEmulationEnabled),
+        )
+    }
+    item {
+        ControlSwitchRow(
+            label = stringResource(R.string.stream_panel_keymap_mode),
+            checked = keymapModeEnabled,
+            onCheckedChange = {
+                onButtonTone()
+                onKeyboardToGamepadToggle()
+            },
+            value = onOffLabel(keymapModeEnabled),
         )
     }
     if (controllerMouseEmulationEnabled) {

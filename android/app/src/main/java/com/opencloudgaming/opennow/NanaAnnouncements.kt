@@ -36,6 +36,7 @@ object NanaAnnouncements {
      */
     private val RETIRED_IDS = setOf(
         "2026-10-07-testing-hold",
+        "2026-10-12-update-break",
     )
 
     // Reuse the shared client configuration (timeouts, DNS) instead of

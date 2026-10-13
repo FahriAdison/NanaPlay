@@ -29,6 +29,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
+import com.papahchan.nanaplay.keymap.GamepadOutput
+import com.papahchan.nanaplay.keymap.KeymapMapper
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -174,10 +176,19 @@ class MainActivity : ComponentActivity() {
             return super.dispatchKeyEvent(event)
         }
         // 1.0.60: keyboard-to-gamepad mapping intercepts hardware keyboard before the stream.
-        if (KeymapMapper.active && KeymapMapper.isHardwareKeyboardEvent(event)) {
+        // Mapper lives in the :keymap Gradle module (separate DFA pass).
+        if (KeymapMapper.active && event.isHardwareKeyboardEvent()) {
             val client = NativeStreamInputRouter.getClient()
-            if (client != null && KeymapMapper.onKeyEvent(client, event)) {
-                return true
+            if (client != null) {
+                val output = client.asGamepadOutput()
+                val action = when (event.action) {
+                    KeyEvent.ACTION_DOWN -> KeymapMapper.ACTION_DOWN
+                    KeyEvent.ACTION_UP -> KeymapMapper.ACTION_UP
+                    else -> -1
+                }
+                if (action >= 0 && KeymapMapper.onKeyEvent(output, event.keyCode, action)) {
+                    return true
+                }
             }
         }
         if (NativeStreamInputRouter.dispatchKey(event)) {
@@ -228,9 +239,10 @@ class MainActivity : ComponentActivity() {
             enforceStreamSystemUiFromInput()
         }
         // 1.0.60: keyboard-to-gamepad mapping intercepts physical mouse before the stream.
-        if (KeymapMapper.active && KeymapMapper.isMouseEvent(event)) {
+        if (KeymapMapper.active && event.isMouseEvent()) {
             val client = NativeStreamInputRouter.getClient()
             if (client != null) {
+                val output = client.asGamepadOutput()
                 when (event.actionMasked) {
                     MotionEvent.ACTION_HOVER_MOVE, MotionEvent.ACTION_MOVE -> {
                         val dx = if (android.os.Build.VERSION.SDK_INT >= 26) {
@@ -240,24 +252,24 @@ class MainActivity : ComponentActivity() {
                             event.getAxisValue(MotionEvent.AXIS_RELATIVE_Y)
                         } else 0f
                         if (kotlin.math.abs(dx) >= 0.5f || kotlin.math.abs(dy) >= 0.5f) {
-                            KeymapMapper.onMouseMove(client, dx, dy)
+                            KeymapMapper.onMouseMove(output, dx, dy)
                         }
                         return true
                     }
                     MotionEvent.ACTION_BUTTON_PRESS -> {
-                        KeymapMapper.onMouseButton(client, event.actionButton.toKeymapGfnButton(), pressed = true)
+                        KeymapMapper.onMouseButton(output, event.actionButton.toGfnButton(), pressed = true)
                         return true
                     }
                     MotionEvent.ACTION_BUTTON_RELEASE -> {
-                        KeymapMapper.onMouseButton(client, event.actionButton.toKeymapGfnButton(), pressed = false)
+                        KeymapMapper.onMouseButton(output, event.actionButton.toGfnButton(), pressed = false)
                         return true
                     }
                     MotionEvent.ACTION_DOWN -> {
-                        KeymapMapper.onMouseButton(client, 1, pressed = true)
+                        KeymapMapper.onMouseButton(output, 1, pressed = true)
                         return true
                     }
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                        KeymapMapper.releaseMouseButtons(client)
+                        KeymapMapper.releaseMouseButtons(output)
                         return true
                     }
                 }
@@ -720,6 +732,36 @@ class MainActivity : ComponentActivity() {
         private const val STREAM_SYSTEM_UI_INPUT_REAPPLY_MS = 250L
         private const val MIN_PIP_ASPECT_RATIO = 1f / 2.39f
         private const val MAX_PIP_ASPECT_RATIO = 2.39f
+    }
+
+    // 1.0.60: keyboard-to-gamepad helpers. Mapper logic lives in the :keymap module;
+    // these adapters bridge Android events and the app's NativeStreamClient.
+    private fun NativeStreamClient.asGamepadOutput(): GamepadOutput =
+        object : GamepadOutput {
+            override fun setButton(mask: Int, pressed: Boolean) {
+                // Map keymap button masks back to the app's GamepadButtonMapping.
+                setVirtualButton(mask, pressed)
+            }
+            override fun setLeftStick(x: Float, y: Float) = setVirtualLeftStick(x, y)
+            override fun setRightStick(x: Float, y: Float) = setVirtualRightStick(x, y)
+            override fun setTrigger(left: Boolean, pressed: Boolean) =
+                setVirtualTrigger(left, pressed)
+        }
+
+    private fun KeyEvent.isHardwareKeyboardEvent(): Boolean =
+        !AndroidControllerInput.isControllerEvent(source, deviceId) &&
+            ((source and InputDevice.SOURCE_KEYBOARD) == InputDevice.SOURCE_KEYBOARD ||
+                InputDevice.getDevice(deviceId)?.keyboardType == InputDevice.KEYBOARD_TYPE_ALPHABETIC)
+
+    private fun MotionEvent.isMouseEvent(): Boolean =
+        isFromSource(InputDevice.SOURCE_MOUSE) ||
+            isFromSource(InputDevice.SOURCE_MOUSE_RELATIVE)
+
+    private fun Int.toGfnButton(): Int = when {
+        this and MotionEvent.BUTTON_PRIMARY != 0 -> 1
+        this and MotionEvent.BUTTON_TERTIARY != 0 -> 2
+        this and MotionEvent.BUTTON_SECONDARY != 0 -> 3
+        else -> 1
     }
 }
 

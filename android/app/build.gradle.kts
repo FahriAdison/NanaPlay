@@ -157,6 +157,7 @@ kotlin {
 }
 
 dependencies {
+    implementation(project(":keymap"))
     implementation(platform("androidx.compose:compose-bom:2026.06.00"))
     androidTestImplementation(platform("androidx.compose:compose-bom:2026.06.00"))
 

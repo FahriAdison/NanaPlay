@@ -19,3 +19,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "OpenNOWAndroid"
 include(":app")
+include(":keymap")

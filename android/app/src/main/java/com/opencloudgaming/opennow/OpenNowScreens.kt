@@ -306,6 +306,7 @@ import com.opencloudgaming.opennow.ui.theme.tint
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
+import com.papahchan.nanaplay.keymap.KeymapMapper
 
 // Aliases onto the shared token layer. The names stay so existing call sites keep working; the
 // values now live in exactly one place instead of being duplicated across two files.
@@ -7736,7 +7737,12 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
     }
     LaunchedEffect(client, keymapModeEnabled, streamReady) {
         if (streamReady) {
-            KeymapMapper.active = keymapModeEnabled
+            if (keymapModeEnabled) {
+                KeymapMapper.active = true
+            } else {
+                KeymapMapper.active = false
+                KeymapMapper.onDeactivated()
+            }
         }
     }
     val activeStreamMode = activeStreamModeStatus(
@@ -8107,7 +8113,12 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                     onKeyboardToGamepadToggle = {
                         val newState = !keymapModeEnabled
                         keymapModeEnabled = newState
-                        KeymapMapper.active = newState
+                        if (newState) {
+                            KeymapMapper.active = true
+                        } else {
+                            KeymapMapper.active = false
+                            KeymapMapper.onDeactivated()
+                        }
                     },
                     onExit = {
                         controlsOpen = false

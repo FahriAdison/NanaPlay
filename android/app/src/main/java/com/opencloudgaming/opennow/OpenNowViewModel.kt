@@ -3615,7 +3615,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             lastError = error
             if (attempt < CREATE_SESSION_MAX_ATTEMPTS - 1) {
                 val backoffMs = CREATE_SESSION_RETRY_BASE_MS shl attempt
-                recordDebugEvent("queue", "createSession attempt ${attempt + 1} failed transient (${error.debugMessage()}), retrying in ${backoffMs}ms")
+                recordDebugEvent("queue", "createSession attempt ${attempt + 1} failed transient (${error?.debugMessage()}), retrying in ${backoffMs}ms")
                 kotlinx.coroutines.delay(backoffMs)
             }
         }

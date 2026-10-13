@@ -187,10 +187,10 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
     implementation("com.posthog:posthog-android:3.51.2")
-    // Encrypted storage for auth tokens (Android Keystore). Note: Google has
-    // deprecated this library (1.1.0 line) in favour of direct Keystore use;
-    // 1.0.0 remains stable and functional, with a plaintext fallback in code.
-    implementation("androidx.security:security-crypto:1.0.0")
+    // Encrypted storage for auth tokens (Android Keystore). 1.1.0-alpha06 is
+    // needed for the MasterKey.Builder API (absent from 1.0.0); the code
+    // keeps a plaintext fallback if Keystore is unavailable on device.
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
     // Tap-to-translate: on-device OCR + translation
     // OCR via Play Services (thin client — model stays on device, not bundled in APK)
     implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.1")

@@ -984,8 +984,8 @@ object NanaMusicPlayer {
     }
 
     /**
-     * 1.0.59: reject obvious non-audio files. The picker's "audio/*" MIME
-     * filter isn't honored by every file manager, so a video picked by
+     * 1.0.59: reject obvious non-audio files. The picker's audio MIME filter
+     * isn't honored by every file manager, so a video picked by
      * mistake used to enter the queue and fail only at playback. Throws —
      * the caller counts it in the "X of Y failed" message.
      */

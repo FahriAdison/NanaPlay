@@ -173,13 +173,6 @@ class MainActivity : ComponentActivity() {
         if (streamSystemUiActive && event.isAndroidVolumeKey()) {
             return super.dispatchKeyEvent(event)
         }
-        // 1.0.60: keyboard-to-gamepad mapping intercepts hardware keyboard before the stream.
-        if (KeymapMapper.active && KeymapMapper.isHardwareKeyboardEvent(event)) {
-            val client = NativeStreamInputRouter.getClient()
-            if (client != null && KeymapMapper.onKeyEvent(client, event)) {
-                return true
-            }
-        }
         if (NativeStreamInputRouter.dispatchKey(event)) {
             return true
         }
@@ -226,42 +219,6 @@ class MainActivity : ComponentActivity() {
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
         if (streamSystemUiActive && (event.isMouseLikePointerEvent() || event.isControllerMotionEvent())) {
             enforceStreamSystemUiFromInput()
-        }
-        // 1.0.60: keyboard-to-gamepad mapping intercepts physical mouse before the stream.
-        if (KeymapMapper.active && KeymapMapper.isMouseEvent(event)) {
-            val client = NativeStreamInputRouter.getClient()
-            if (client != null) {
-                when (event.actionMasked) {
-                    MotionEvent.ACTION_HOVER_MOVE, MotionEvent.ACTION_MOVE -> {
-                        val dx = if (android.os.Build.VERSION.SDK_INT >= 26) {
-                            event.getAxisValue(MotionEvent.AXIS_RELATIVE_X)
-                        } else 0f
-                        val dy = if (android.os.Build.VERSION.SDK_INT >= 26) {
-                            event.getAxisValue(MotionEvent.AXIS_RELATIVE_Y)
-                        } else 0f
-                        if (kotlin.math.abs(dx) >= 0.5f || kotlin.math.abs(dy) >= 0.5f) {
-                            KeymapMapper.onMouseMove(client, dx, dy)
-                        }
-                        return true
-                    }
-                    MotionEvent.ACTION_BUTTON_PRESS -> {
-                        KeymapMapper.onMouseButton(client, event.actionButton.toKeymapGfnButton(), pressed = true)
-                        return true
-                    }
-                    MotionEvent.ACTION_BUTTON_RELEASE -> {
-                        KeymapMapper.onMouseButton(client, event.actionButton.toKeymapGfnButton(), pressed = false)
-                        return true
-                    }
-                    MotionEvent.ACTION_DOWN -> {
-                        KeymapMapper.onMouseButton(client, 1, pressed = true)
-                        return true
-                    }
-                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                        KeymapMapper.releaseMouseButtons(client)
-                        return true
-                    }
-                }
-            }
         }
         return NativeStreamInputRouter.dispatchMotion(event) ||
             dispatchGamepadHatNavigation(event) ||

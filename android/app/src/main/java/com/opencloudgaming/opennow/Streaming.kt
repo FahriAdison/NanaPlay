@@ -912,9 +912,6 @@ object NativeStreamInputRouter {
         }
     }
 
-    /** 1.0.60: exposes the active stream client for the keyboard-to-gamepad mapper. */
-    fun getClient(): NativeStreamClient? = client
-
     /**
      * The system interrupted the touch session — entering PiP, or the activity going to background.
      * Releases any button we are holding so it cannot stick down on the host, and deliberately

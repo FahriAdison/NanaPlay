@@ -121,8 +121,6 @@
     <string name="stream_panel_phone_rumble">Rumble HP cadangan</string>
     <string name="stream_panel_mouse_mode">Mode mouse (pakai gamepad)</string>
     <string name="stream_panel_mouse_mode_summary">Stick kiri gerakkan mouse · stick kanan scroll · A klik · B klik kanan</string>
-    <string name="stream_panel_keymap_mode">Keyboard → Gamepad</string>
-    <string name="stream_panel_keymap_mode_summary">WASD stick kiri · mouse stick kanan · Spasi A · E X · Q Y · Klik kiri RT</string>
     <string name="stream_mouse_mode_title">Mode mouse</string>
     <string name="stream_mouse_mode_subtitle">Atur emulasi mouse</string>
     <string name="stream_panel_drag_edit">Mode edit geser</string>

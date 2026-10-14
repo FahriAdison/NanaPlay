@@ -96,6 +96,8 @@ import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import com.papahchan.nanaplay.keymap.GamepadOutput
+import com.papahchan.nanaplay.keymap.KeymapMapper
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
@@ -4045,6 +4047,23 @@ class NativeStreamClient(
     }
 
     private fun dispatchMouseLikePointer(event: MotionEvent): Boolean {
+        // F-23: keyboard→gamepad mouse routing; single funnel for pointer-capture + touch + generic motion.
+        if (KeymapMapper.active) {
+            val rx = if (Build.VERSION.SDK_INT >= 26) event.getAxisValue(MotionEvent.AXIS_RELATIVE_X) else 0f
+            val ry = if (Build.VERSION.SDK_INT >= 26) event.getAxisValue(MotionEvent.AXIS_RELATIVE_Y) else 0f
+            when (event.actionMasked) {
+                MotionEvent.ACTION_HOVER_MOVE, MotionEvent.ACTION_MOVE -> {
+                    val dx = if (abs(rx) >= 0.5f || abs(ry) >= 0.5f) rx else if (event.isRelativeMousePointer()) event.x else 0f
+                    val dy = if (abs(rx) >= 0.5f || abs(ry) >= 0.5f) ry else if (event.isRelativeMousePointer()) event.y else 0f
+                    if (abs(dx) >= 0.5f || abs(dy) >= 0.5f) KeymapMapper.onMouseMove(keymapOutput, dx, dy)
+                }
+                MotionEvent.ACTION_BUTTON_PRESS -> KeymapMapper.onMouseButton(keymapOutput, event.actionButton.toGfnMouseButton(), true)
+                MotionEvent.ACTION_BUTTON_RELEASE -> KeymapMapper.onMouseButton(keymapOutput, event.actionButton.toGfnMouseButton(), false)
+                MotionEvent.ACTION_DOWN -> KeymapMapper.onMouseButton(keymapOutput, 1, true)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> KeymapMapper.releaseMouseButtons(keymapOutput)
+            }
+            return true
+        }
         if (!externalMouseEventLogged) {
             externalMouseEventLogged = true
             val relativeDx = if (Build.VERSION.SDK_INT >= 26) event.getAxisValue(MotionEvent.AXIS_RELATIVE_X) else 0f
@@ -4318,6 +4337,14 @@ class NativeStreamClient(
             setControllerMouseAssistActive(false)
         }
         return sent
+    }
+
+    // F-23: routes KeymapMapper output through the virtual controller methods.
+    private val keymapOutput = object : GamepadOutput {
+        override fun setButton(mask: Int, pressed: Boolean) = setVirtualButton(mask, pressed)
+        override fun setLeftStick(x: Float, y: Float) = setVirtualLeftStick(x, y)
+        override fun setRightStick(x: Float, y: Float) = setVirtualRightStick(x, y)
+        override fun setTrigger(left: Boolean, pressed: Boolean) = setVirtualTrigger(left, pressed)
     }
 
     fun setVirtualButton(buttonMask: Int, pressed: Boolean) {
@@ -6360,7 +6387,10 @@ class NativeStreamClient(
     }
 
     private fun currentGamepadBitmap(controllerId: Int): Int {
-        val connected = physicalControllerConnected ||
+        // F-24: keep the virtual controller connected while keyboard→gamepad
+        // mapping is active, even when all virtual buttons are released.
+        val connected = KeymapMapper.active ||
+            physicalControllerConnected ||
             physicalControllerActive ||
             virtualControllerVisible ||
             virtualButtons != 0 ||

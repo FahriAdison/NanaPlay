@@ -21,7 +21,6 @@ private const val QUEUE_ALERT_CHANNEL_ID = "opennow_queue_ready"
 private const val QUEUE_ALERT_NOTIFICATION_ID = 4212
 
 private const val QUEUE_SERVICE_ACTION_UPDATE = "com.papahchan.nanaplay.queue.UPDATE"
-private const val QUEUE_SERVICE_ACTION_STOP = "com.papahchan.nanaplay.queue.STOP"
 private const val QUEUE_SERVICE_EXTRA_TITLE = "title"
 private const val QUEUE_SERVICE_EXTRA_TEXT = "text"
 private const val QUEUE_SERVICE_TAG = "NanaPlayQueueService"
@@ -114,15 +113,10 @@ class AndroidQueueStatusNotifier(private val context: Context) {
     }
 
     fun cancel() {
-        val intent = Intent(appContext, AndroidQueueStatusService::class.java).apply {
-            action = QUEUE_SERVICE_ACTION_STOP
-        }
+        // F-18: stop directly; startService(ACTION_STOP) risks
+        // ForegroundServiceStartNotAllowedException on Android 12+ in background.
         runCatching {
-            if (serviceStartRequested) {
-                appContext.startService(intent)
-            } else {
-                appContext.stopService(intent)
-            }
+            appContext.stopService(Intent(appContext, AndroidQueueStatusService::class.java))
         }.onFailure { error ->
             Log.w(QUEUE_SERVICE_TAG, "Unable to stop queue foreground service", error)
         }
@@ -152,11 +146,6 @@ class AndroidQueueStatusService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         runCatching {
             when (intent?.action) {
-                QUEUE_SERVICE_ACTION_STOP -> {
-                    startQueueForeground("NanaPlay", getString(R.string.notif_queue_channel_name))
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                    stopSelf(startId)
-                }
                 QUEUE_SERVICE_ACTION_UPDATE, null -> {
                     val title = intent?.getStringExtra(QUEUE_SERVICE_EXTRA_TITLE) ?: "NanaPlay"
                     val text = intent?.getStringExtra(QUEUE_SERVICE_EXTRA_TEXT)

@@ -73,7 +73,11 @@ object NanaCallStateWatcher {
     }
 
     private fun handleAudioMode(mode: Int) {
-        if (mode == AudioManager.MODE_IN_CALL || mode == AudioManager.MODE_IN_COMMUNICATION) {
+        // F-26: MODE_IN_COMMUNICATION is also set by WebRTC when the in-stream
+        // mic is on — don't pause music for that, only for real calls.
+        if (mode == AudioManager.MODE_IN_CALL ||
+            (mode == AudioManager.MODE_IN_COMMUNICATION && NativeStreamInputRouter.getClient() == null)
+        ) {
             NanaMusicPlayer.pauseForCall()
         } else {
             NanaMusicPlayer.resumeAfterCall()

@@ -143,7 +143,10 @@ class MainActivity : ComponentActivity() {
                                 AppPage.Settings -> true
                                 else -> false
                             }
-                            if (stillShouldHide) {
+                            // F-20: also verify we're still in landscape — if the user
+                            // rotated back to portrait within the 500ms delay,
+                            // this callback must not hide the system bars.
+                            if (stillShouldHide && resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
                                 applyConsoleImmersiveUi(true, force = true)
                             }
                         }
@@ -239,42 +242,9 @@ class MainActivity : ComponentActivity() {
             enforceStreamSystemUiFromInput()
         }
         // 1.0.60: keyboard-to-gamepad mapping intercepts physical mouse before the stream.
-        if (KeymapMapper.active && event.isMouseEvent()) {
-            val client = NativeStreamInputRouter.getClient()
-            if (client != null) {
-                val output = client.asGamepadOutput()
-                when (event.actionMasked) {
-                    MotionEvent.ACTION_HOVER_MOVE, MotionEvent.ACTION_MOVE -> {
-                        val dx = if (android.os.Build.VERSION.SDK_INT >= 26) {
-                            event.getAxisValue(MotionEvent.AXIS_RELATIVE_X)
-                        } else 0f
-                        val dy = if (android.os.Build.VERSION.SDK_INT >= 26) {
-                            event.getAxisValue(MotionEvent.AXIS_RELATIVE_Y)
-                        } else 0f
-                        if (kotlin.math.abs(dx) >= 0.5f || kotlin.math.abs(dy) >= 0.5f) {
-                            KeymapMapper.onMouseMove(output, dx, dy)
-                        }
-                        return true
-                    }
-                    MotionEvent.ACTION_BUTTON_PRESS -> {
-                        KeymapMapper.onMouseButton(output, event.actionButton.toGfnButton(), pressed = true)
-                        return true
-                    }
-                    MotionEvent.ACTION_BUTTON_RELEASE -> {
-                        KeymapMapper.onMouseButton(output, event.actionButton.toGfnButton(), pressed = false)
-                        return true
-                    }
-                    MotionEvent.ACTION_DOWN -> {
-                        KeymapMapper.onMouseButton(output, 1, pressed = true)
-                        return true
-                    }
-                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                        KeymapMapper.releaseMouseButtons(output)
-                        return true
-                    }
-                }
-            }
-        }
+        // F-23: mouse routing moved to NativeStreamClient.dispatchMouseLikePointer
+        // (the single funnel for pointer capture + touch + generic motion); the
+        // old block here missed those paths and never ran onMouseDecay.
         return NativeStreamInputRouter.dispatchMotion(event) ||
             dispatchGamepadHatNavigation(event) ||
             super.dispatchGenericMotionEvent(event)
@@ -752,17 +722,6 @@ class MainActivity : ComponentActivity() {
         !AndroidControllerInput.isControllerEvent(source, deviceId) &&
             ((source and InputDevice.SOURCE_KEYBOARD) == InputDevice.SOURCE_KEYBOARD ||
                 InputDevice.getDevice(deviceId)?.keyboardType == InputDevice.KEYBOARD_TYPE_ALPHABETIC)
-
-    private fun MotionEvent.isMouseEvent(): Boolean =
-        isFromSource(InputDevice.SOURCE_MOUSE) ||
-            isFromSource(InputDevice.SOURCE_MOUSE_RELATIVE)
-
-    private fun Int.toGfnButton(): Int = when {
-        this and MotionEvent.BUTTON_PRIMARY != 0 -> 1
-        this and MotionEvent.BUTTON_TERTIARY != 0 -> 2
-        this and MotionEvent.BUTTON_SECONDARY != 0 -> 3
-        else -> 1
-    }
 }
 
 internal fun shouldPeriodicallyEnforceStreamSystemUi(

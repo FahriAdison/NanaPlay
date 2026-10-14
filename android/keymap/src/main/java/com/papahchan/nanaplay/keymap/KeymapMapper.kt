@@ -50,6 +50,12 @@ object KeymapMapper {
 
     private val heldKeys = mutableSetOf<Int>()
     private var rightStickX = 0f
+    // F-23: auto-decay — recenter the right stick shortly after the mouse
+    // stops moving, otherwise the camera keeps spinning on the last delta.
+    private val decayExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "keymap-mouse-decay").apply { isDaemon = true }
+    }
+    private var decayFuture: java.util.concurrent.ScheduledFuture<*>? = null
     private var rightStickY = 0f
     private var lastOutput: GamepadOutput? = null
 
@@ -85,7 +91,10 @@ object KeymapMapper {
         val mapped = mappedButton(keyCode)
         val isStickKey = keyCode == KEYCODE_W || keyCode == KEYCODE_A ||
             keyCode == KEYCODE_S || keyCode == KEYCODE_D
-        if (mapped == 0 && !isStickKey) return false
+        // F-22: Ctrl is handled as a trigger below, not via mappedButton —
+        // don't let the guard swallow it.
+        val isTriggerKey = keyCode == KEYCODE_CTRL_LEFT || keyCode == KEYCODE_CTRL_RIGHT
+        if (mapped == 0 && !isStickKey && !isTriggerKey) return false
         lastOutput = output
         when (action) {
             ACTION_DOWN -> if (!heldKeys.add(keyCode)) return true // ignore auto-repeat
@@ -102,13 +111,18 @@ object KeymapMapper {
         return true
     }
 
+    @Synchronized
     fun onMouseMove(output: GamepadOutput, dx: Float, dy: Float) {
         lastOutput = output
         rightStickX = (rightStickX + dx / MOUSE_SENSITIVITY_PX).coerceIn(-1f, 1f)
         rightStickY = (rightStickY + dy / MOUSE_SENSITIVITY_PX).coerceIn(-1f, 1f)
         output.setRightStick(rightStickX, rightStickY)
+        // F-23: re-arm the decay timer on every move.
+        decayFuture?.cancel(false)
+        decayFuture = decayExecutor.schedule({ onMouseDecay(output) }, 45L, java.util.concurrent.TimeUnit.MILLISECONDS)
     }
 
+    @Synchronized
     fun onMouseDecay(output: GamepadOutput) {
         rightStickX = 0f
         rightStickY = 0f

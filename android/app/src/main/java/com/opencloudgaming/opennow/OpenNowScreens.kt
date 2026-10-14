@@ -7533,6 +7533,10 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
             NativeStreamInputRouter.setAndroidTvProfile(false)
             NativeStreamInputRouter.setStreamUiActive(false)
             NativeStreamInputRouter.detach(client)
+            // F-24: release the keyboard→gamepad mapper so it doesn't leak
+            // the client reference or stay active after leaving the stream.
+            KeymapMapper.active = false
+            KeymapMapper.onDeactivated()
             client.release()
         }
     }
@@ -7705,12 +7709,13 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
             client.setControllerMouseEmulationActive(controllerMouseEmulationEnabled)
         }
     }
-    LaunchedEffect(client, keymapModeEnabled, streamReady) {
+    LaunchedEffect(client, keymapModeEnabled, streamReady, streamOverlayOpen) {
         if (streamReady) {
-            if (keymapModeEnabled) {
-                KeymapMapper.active = true
-            } else {
-                KeymapMapper.active = false
+            // F-24: disable mapping while an overlay (browser, etc.) is open so
+            // the physical keyboard can type there; release on deactivate.
+            val active = keymapModeEnabled && !streamOverlayOpen
+            KeymapMapper.active = active
+            if (!active) {
                 KeymapMapper.onDeactivated()
             }
         }

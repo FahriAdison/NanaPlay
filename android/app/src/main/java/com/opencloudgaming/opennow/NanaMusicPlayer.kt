@@ -244,7 +244,7 @@ object NanaMusicPlayer {
     /** Best-effort save of playlist + position. Never throws. */
     private fun saveState(context: Context) {
         runCatching {
-            val exo = player ?: return
+            player ?: return
             val tracks = _tracks.value
             val arr = JSONArray()
             tracks.forEach { t ->
@@ -263,7 +263,7 @@ object NanaMusicPlayer {
             val current = tracks.getOrNull(_currentIndex.value)
             val state = JSONObject()
                 .put("tracks", arr)
-                .put("positionMs", exo.currentPosition)
+                .put("positionMs", pendingSeekMs)
                 .put("currentUri", if (current?.isOnline == false) current.uri.toString() else null)
                 .put("currentSaavnId", if (current?.isOnline == true) current.saavnId else null)
             context.getSharedPreferences(MUSIC_PREFS, Context.MODE_PRIVATE)
@@ -457,8 +457,9 @@ object NanaMusicPlayer {
                         lastRetrySaavnId = null
                     } else {
                         // Persist position on every pause — cheap and exact.
-                        // (1.0.59: the old 5s periodic save is gone; saves now
-                        // happen on pause / track change / add / remove only.)
+                        // F-17: capture on main thread; saveState() runs on IO
+                        // where ExoPlayer.currentPosition would throw.
+                        pendingSeekMs = exo.currentPosition.coerceAtLeast(0L)
                         persistScope.launch { saveState(appContext) }
                     }
                 }

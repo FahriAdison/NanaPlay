@@ -478,6 +478,8 @@ private fun SettingsContent(
                 ) { language ->
                     if (language == AppLocale.getAppLanguage(settings)) return@ChoiceOptionRow
                     viewModel.updateSettings(settings.copy(appLanguage = language))
+                    // F-04: set in-memory first so recreate() doesn't race the disk write.
+                    AppLocale.pendingLanguage = language
                     // Recreate so every resource (including the settings list
                     // itself) reloads with the new locale.
                     activity?.recreate()

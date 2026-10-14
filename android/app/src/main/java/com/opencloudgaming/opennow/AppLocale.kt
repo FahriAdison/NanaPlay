@@ -25,6 +25,11 @@ object AppLocale {
     const val LANGUAGE_ENGLISH = "en"
     const val LANGUAGE_INDONESIAN = "in"
 
+    /** F-04: in-memory language set before recreate(), avoiding a race with the
+     * ExternalPrefs background disk write. */
+    @Volatile
+    var pendingLanguage: String? = null
+
     /** Validates a stored language value; anything unknown falls back to English. */
     fun getAppLanguage(settings: AppSettings): String =
         settings.appLanguage.takeIf { it == LANGUAGE_ENGLISH || it == LANGUAGE_INDONESIAN }
@@ -68,6 +73,8 @@ object AppLocale {
         applyAppLocale(base, readStoredLanguage(base))
 
     private fun readStoredLanguage(base: Context): String {
+        // F-04: prefer the in-memory value; the disk write may not have flushed yet.
+        pendingLanguage?.let { return if (it == LANGUAGE_INDONESIAN) LANGUAGE_INDONESIAN else LANGUAGE_ENGLISH }
         return try {
             val json = readSettingsJson(base) ?: return LANGUAGE_ENGLISH
             // Minimal parse: find "appLanguage":"xx" without full JSON deserialization

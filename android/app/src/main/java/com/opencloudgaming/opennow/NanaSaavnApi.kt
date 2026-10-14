@@ -55,8 +55,8 @@ object NanaSaavnApi {
     private var preferredBase: String = BASE_URLS[0]
 
     private val http = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
         // 1.0.59: bound the total call — resolveAudioUrl runs while the UI
         // shows "buffering", and an unbounded hang used to leave it stuck.
         .callTimeout(35, TimeUnit.SECONDS)

@@ -540,9 +540,9 @@ internal class LocalTvConnector {
         val remote4 = remote as? Inet4Address ?: return false
         val local4 = local as? Inet4Address ?: return false
         if (!remote4.isSiteLocalAddress || !local4.isSiteLocalAddress) return false
-        val remoteBytes = remote4.address
-        val localBytes = local4.address
-        return remoteBytes[0] == localBytes[0] && remoteBytes[1] == localBytes[1]
+        // F-07: only the first octet must match; requiring the second breaks
+        // pairing on 10.x.y.z/8 networks (mesh Wi-Fi, campuses, multi-subnet).
+        return remote4.address[0] == local4.address[0]
     }
 
     private fun isPrivateIpv4Text(value: String): Boolean =

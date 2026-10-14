@@ -213,7 +213,7 @@ class LowLatencyVideoDecoder(
                         "lowLatency=$lowLatencyEnabled before=$format",
                 )
                 applyDecoderPerformanceFormat(format, requestedFps, lowLatencyEnabled)
-                if (lowLatencyEnabled) applyLowLatencyFormat(format, codecName)
+                if (lowLatencyEnabled) applyLowLatencyFormat(format, codecName, requestedFps)
                 NativeInputDiagnostics.add("MediaCodecVideoDecoder: configured format=$format")
             }
             val result = invokeDelegate(delegateCodec, method, args)
@@ -251,13 +251,11 @@ class LowLatencyVideoDecoder(
             if (exactTargetFps != null) {
                 putInt(format, MediaFormat.KEY_FRAME_RATE, exactTargetFps)
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && (exactTargetFps != null || lowLatencyEnabled)) {
+            // F-19: skip when low-latency is on — applyLowLatencyFormat sets
+            // priority/operating-rate itself; keeping both was a duplicate.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && exactTargetFps != null && !lowLatencyEnabled) {
                 putInt(format, MediaFormat.KEY_PRIORITY, 0)
-                putInt(
-                    format,
-                    MediaFormat.KEY_OPERATING_RATE,
-                    if (lowLatencyEnabled) OPERATING_RATE else exactTargetFps!!,
-                )
+                putInt(format, MediaFormat.KEY_OPERATING_RATE, exactTargetFps)
             }
         }
 
@@ -293,7 +291,7 @@ class LowLatencyVideoDecoder(
             }
         }
 
-        private fun applyLowLatencyFormat(format: MediaFormat, codecName: String) {
+        private fun applyLowLatencyFormat(format: MediaFormat, codecName: String, requestedFps: Int) {
             putInt(format, "low-latency", 1)
 
             val normalizedCodecName = codecName.lowercase(Locale.US)
@@ -301,8 +299,8 @@ class LowLatencyVideoDecoder(
                 putInt(format, "priority", 0)
                 // Use Short.MAX_VALUE (0x7FFF) for non-Snapdragon decoders; for Qualcomm,
                 // forcing 32767 fps operating rate forces Adreno GPU/VPU clocks to maximum state,
-                // causing extreme power drain and overheating. Use 120 (or target FPS) instead.
-                val operatingRate = if (isQualcommDecoder(normalizedCodecName)) 120 else OPERATING_RATE
+                // causing extreme power drain and overheating. Use target FPS instead.
+                val operatingRate = if (isQualcommDecoder(normalizedCodecName)) requestedFps.coerceAtLeast(60) else OPERATING_RATE
                 putInt(format, "operating-rate", operatingRate)
             }
             putInt(format, "allow-frame-drop", 1)

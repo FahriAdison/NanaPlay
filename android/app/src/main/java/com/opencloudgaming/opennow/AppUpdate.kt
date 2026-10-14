@@ -548,9 +548,13 @@ class AndroidAppUpdater(
     /** S-04: rejects update APKs not signed by the installed app's certificate. */
     private fun verifyApkSignature(apk: File) {
         val pm = appContext.packageManager
+        // F-25: GET_SIGNING_CERTIFICATES is API 28+; on older APIs the flag is
+        // ignored and signatures comes back null. Use the right flag per API.
+        val sigFlags = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES
+        else @Suppress("DEPRECATION") PackageManager.GET_SIGNATURES
         val archiveInfo = pm.getPackageArchiveInfo(
             apk.absolutePath,
-            PackageManager.GET_SIGNING_CERTIFICATES,
+            sigFlags,
         ) ?: run {
             apk.delete()
             error("Could not read update APK signatures.")
@@ -563,7 +567,7 @@ class AndroidAppUpdater(
         }
         val installedInfo = pm.getPackageInfo(
             appContext.packageName,
-            PackageManager.GET_SIGNING_CERTIFICATES,
+            sigFlags,
         )
         val installedSigners = if (Build.VERSION.SDK_INT >= 28) {
             installedInfo.signingInfo?.apkContentsSigners?.map { it.toCharsString() }.orEmpty()

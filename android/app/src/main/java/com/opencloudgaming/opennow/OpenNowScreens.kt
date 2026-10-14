@@ -7783,6 +7783,9 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                         )
                     )
                 }
+                // F-10: rememberUpdatedState so the drag-end callback always sees the
+                // latest settings, not the snapshot from first composition.
+                val currentSettings by rememberUpdatedState(state.settings)
                 StreamStatsPill(
                     streamStats = streamStats,
                     streamSettings = launchStreamSettings,
@@ -7802,7 +7805,7 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                             detectDragGestures(
                                 onDragEnd = {
                                     viewModel.updateSettings(
-                                        state.settings.copy(
+                                        currentSettings.copy(
                                             streamStatsOffsetX = statsDragOffset.x,
                                             streamStatsOffsetY = statsDragOffset.y,
                                         )

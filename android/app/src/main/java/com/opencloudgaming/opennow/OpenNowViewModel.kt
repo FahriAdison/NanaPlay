@@ -1307,19 +1307,25 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
     /** 1.0.49: toggle Control Center button visibility. */
     fun toggleControlCenterHidden(key: String) {
         val current = state.value.settings
+        // F-13: normalize with defaults so users upgrading from older versions
+        // (whose stored order lacks newer keys like "music") get correct counts.
+        val defaults = listOf("home", "library", "music", "settings")
+        val order = (current.controlCenterOrder + defaults).distinct().toMutableList()
         val hidden = current.controlCenterHidden.toMutableSet()
         if (key in hidden) hidden.remove(key) else hidden.add(key)
         // Keep at least one visible
-        val visibleCount = current.controlCenterOrder.count { it !in hidden }
+        val visibleCount = order.count { it !in hidden }
         if (visibleCount > 0) {
-            updateSettings(current.copy(controlCenterHidden = hidden))
+            updateSettings(current.copy(controlCenterOrder = order, controlCenterHidden = hidden))
         }
     }
 
     /** 1.0.49: move Control Center button up/down in order. */
     fun moveControlCenterButton(key: String, direction: Int) {
         val current = state.value.settings
-        val order = current.controlCenterOrder.toMutableList()
+        // F-13: normalize with defaults (see toggleControlCenterHidden).
+        val defaults = listOf("home", "library", "music", "settings")
+        val order = (current.controlCenterOrder + defaults).distinct().toMutableList()
         val idx = order.indexOf(key)
         val newIdx = (idx + direction).coerceIn(0, order.size - 1)
         if (idx >= 0 && newIdx != idx) {
@@ -2770,6 +2776,10 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     it.copy(
                         error = normalizeLaunchError(error, game?.title),
                         streamStatus = "idle",
+                        // F-14: reset session state like the timeout branch does;
+                        // otherwise a stale non-null streamSession blocks update checks.
+                        streamSession = null,
+                        activeSessionDecision = null,
                         activeStreamSettings = null,
                         streamReturnPage = null,
                         launchPhase = "",

@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -240,32 +241,37 @@ internal fun ConsoleModeScreen(
             .focusable()
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown || games.isEmpty()) return@onPreviewKeyEvent false
+                // F-08: only intercept carousel keys when no overlay/search is open;
+                // otherwise let the event fall through to the search field or overlay.
+                val carouselActive = !showGameHub && !showControlCenter && !showSearch
                 when (event.key) {
                     Key.DirectionLeft, Key.DirectionUp -> {
                         if (showGameHub) {
                             showGameHub = false
-                        } else if (!showControlCenter) {
+                        } else if (!showControlCenter && !showSearch) {
                             selectedIndex = (selectedIndex - 1).coerceAtLeast(0)
                         }
-                        true
+                        // F-08: don't consume D-Pad when search is open (text cursor needs it).
+                        !showSearch
                     }
                     Key.DirectionRight -> {
                         // 1.0.50: don't change selection while overlays are open
-                        if (!showGameHub && !showControlCenter) {
+                        if (carouselActive) {
                             selectedIndex = (selectedIndex + 1).coerceAtMost(games.size - 1)
                         }
-                        true
+                        !showSearch
                     }
                     Key.DirectionDown -> {
                         // PS5-style: Down opens Game Hub
-                        if (!showGameHub && !showControlCenter && selectedGame != null) {
+                        if (carouselActive && selectedGame != null) {
                             showGameHub = true
-                        } else if (!showGameHub && !showControlCenter) {
+                        } else if (carouselActive) {
                             selectedIndex = (selectedIndex + 1).coerceAtMost(games.size - 1)
                         }
-                        true
+                        !showSearch
                     }
                     Key.Enter, Key.NumPadEnter, Key.DirectionCenter -> {
+                        if (!carouselActive) return@onPreviewKeyEvent false
                         games.getOrNull(selectedIndex)?.let { viewModel.play(it) }
                         true
                     }
@@ -548,7 +554,13 @@ internal fun ConsoleModeScreen(
                         .fillMaxWidth(0.9f)
                         .background(OpenNowPalette.Panel, RoundedCornerShape(16.dp))
                         .border(1.dp, OpenNowPalette.AccentDefault.copy(alpha = 0.3f), RoundedCornerShape(16.dp))
-                        .padding(20.dp),
+                        .padding(20.dp)
+                        // F-12: consume taps inside the card so they don't propagate
+                        // to the backdrop and close the modal.
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) {},
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Text(
@@ -649,7 +661,13 @@ internal fun ConsoleModeScreen(
                             OpenNowPalette.AccentDefault.copy(alpha = 0.25f),
                             RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
                         )
-                        .padding(20.dp),
+                        .padding(20.dp)
+                        // F-12: consume taps inside the card so they don't propagate
+                        // to the backdrop and close the modal.
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) {},
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     Row(

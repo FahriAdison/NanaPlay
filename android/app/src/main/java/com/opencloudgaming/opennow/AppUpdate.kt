@@ -726,7 +726,7 @@ private fun readBoundedManifestBody(response: Response): String? {
             out.write(buffer, 0, minOf(read.toLong(), remaining).toInt())
             total += read
         }
-        return out.toString(Charsets.UTF_8)
+        return String(out.toByteArray(), Charsets.UTF_8)
     }
 }
 

@@ -49,6 +49,7 @@ object KeymapMapper {
     var active: Boolean = false
 
     private val heldKeys = mutableSetOf<Int>()
+    private val heldMouseButtons = mutableSetOf<Int>()
     private var rightStickX = 0f
     // F-23: auto-decay — recenter the right stick shortly after the mouse
     // stops moving, otherwise the camera keeps spinning on the last delta.
@@ -79,6 +80,10 @@ object KeymapMapper {
     private const val KEYCODE_4 = 11
     private const val KEYCODE_ESCAPE = 111
     private const val KEYCODE_TAB = 61
+    private const val KEYCODE_C = 31
+    private const val KEYCODE_M = 41
+    private const val KEYCODE_ALT_LEFT = 57
+    private const val KEYCODE_ALT_RIGHT = 58
 
     const val ACTION_DOWN = 0
     const val ACTION_UP = 1
@@ -88,6 +93,12 @@ object KeymapMapper {
      * Unmapped keys return false so the caller can fall through.
      */
     fun onKeyEvent(output: GamepadOutput, keyCode: Int, action: Int): Boolean {
+        // Alt held = bypass mapper (show cursor for menu clicks)
+        if (keyCode == KEYCODE_ALT_LEFT || keyCode == KEYCODE_ALT_RIGHT) {
+            if (action == ACTION_DOWN) heldKeys.add(keyCode) else heldKeys.remove(keyCode)
+            return false
+        }
+        if (heldKeys.contains(KEYCODE_ALT_LEFT) || heldKeys.contains(KEYCODE_ALT_RIGHT)) return false
         val mapped = mappedButton(keyCode)
         val isStickKey = keyCode == KEYCODE_W || keyCode == KEYCODE_A ||
             keyCode == KEYCODE_S || keyCode == KEYCODE_D
@@ -106,7 +117,7 @@ object KeymapMapper {
         }
         if (isStickKey) updateLeftStick(output)
         if (keyCode == KEYCODE_CTRL_LEFT || keyCode == KEYCODE_CTRL_RIGHT) {
-            output.setTrigger(left = true, pressed = action == ACTION_DOWN)
+            output.setButton(KeymapButtons.LEFT_THUMB, action == ACTION_DOWN)
         }
         return true
     }
@@ -132,6 +143,9 @@ object KeymapMapper {
     /** GFN mouse button ids: 1=left, 2=middle, 3=right. */
     fun onMouseButton(output: GamepadOutput, gfnButton: Int, pressed: Boolean) {
         lastOutput = output
+        // F-25: track held buttons so a release that happens mid-drag can be
+        // reconciled via syncMouseButtons() instead of sticking forever.
+        if (pressed) heldMouseButtons.add(gfnButton) else heldMouseButtons.remove(gfnButton)
         when (gfnButton) {
             1 -> output.setTrigger(left = false, pressed = pressed) // LMB = RT attack
             3 -> output.setTrigger(left = true, pressed = pressed) // RMB = LT aim
@@ -140,8 +154,24 @@ object KeymapMapper {
     }
 
     fun releaseMouseButtons(output: GamepadOutput) {
+        heldMouseButtons.clear()
         output.setTrigger(left = true, pressed = false)
         output.setTrigger(left = false, pressed = false)
+    }
+
+    /**
+     * F-25: reconcile held mouse buttons against the live MotionEvent buttonState.
+     * Call on every MOVE/HOVER_MOVE. Pure booleans — no android.view dependency.
+     */
+    fun syncMouseButtons(
+        output: GamepadOutput,
+        primaryHeld: Boolean,
+        secondaryHeld: Boolean,
+        tertiaryHeld: Boolean,
+    ) {
+        if (!primaryHeld && heldMouseButtons.remove(1)) output.setTrigger(left = false, pressed = false)
+        if (!secondaryHeld && heldMouseButtons.remove(3)) output.setTrigger(left = true, pressed = false)
+        if (!tertiaryHeld && heldMouseButtons.remove(2)) output.setButton(KeymapButtons.RIGHT_THUMB, false)
     }
 
     fun releaseAll(output: GamepadOutput) {
@@ -183,14 +213,15 @@ object KeymapMapper {
         KEYCODE_E -> KeymapButtons.X
         KEYCODE_Q -> KeymapButtons.Y
         KEYCODE_F -> KeymapButtons.B
-        KEYCODE_R -> KeymapButtons.RIGHT_SHOULDER
-        KEYCODE_SHIFT_LEFT, KEYCODE_SHIFT_RIGHT -> KeymapButtons.LEFT_SHOULDER
+        KEYCODE_SHIFT_LEFT, KEYCODE_SHIFT_RIGHT -> KeymapButtons.RIGHT_SHOULDER
         KEYCODE_1 -> KeymapButtons.DPAD_UP
         KEYCODE_2 -> KeymapButtons.DPAD_RIGHT
         KEYCODE_3 -> KeymapButtons.DPAD_DOWN
         KEYCODE_4 -> KeymapButtons.DPAD_LEFT
         KEYCODE_ESCAPE -> KeymapButtons.START
-        KEYCODE_TAB -> KeymapButtons.BACK
+        KEYCODE_TAB -> KeymapButtons.LEFT_SHOULDER
+        KEYCODE_C -> KeymapButtons.LEFT_THUMB
+        KEYCODE_M -> KeymapButtons.BACK
         else -> 0
     }
 

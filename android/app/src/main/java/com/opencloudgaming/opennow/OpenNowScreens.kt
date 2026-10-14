@@ -7717,6 +7717,9 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
             KeymapMapper.active = active
             if (!active) {
                 KeymapMapper.onDeactivated()
+                // F-25: push zeroed state so keys held when the mapper turns off
+                // (overlay opened, toggle off) can't stick on the server.
+                client.resetVirtualGamepadState()
             }
         }
     }

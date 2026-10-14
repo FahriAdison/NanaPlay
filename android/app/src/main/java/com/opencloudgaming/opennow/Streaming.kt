@@ -3357,6 +3357,9 @@ class NativeStreamClient(
     private var mouseLastX = 0f
     private var mouseLastY = 0f
     private var mousePositionValid = false
+    // F-25: sub-threshold mouse accumulator for keymap micro-aiming.
+    private var keymapMouseRemainderX = 0f
+    private var keymapMouseRemainderY = 0f
     private var mouseSuppressNextAbsoluteDelta = false
     private var inputDropLogged = false
     private var externalMouseEventLogged = false
@@ -3921,6 +3924,8 @@ class NativeStreamClient(
         virtualRightStickActive = false
         virtualRightStickX = 0
         virtualRightStickY = 0
+        // F-25: also release keymap-side state (held keys/buttons, stick deflection).
+        KeymapMapper.releaseAll(keymapOutput)
         virtualControllerVisible = false
         physicalControllerConnected = false
         physicalControllerActive = false
@@ -3970,6 +3975,28 @@ class NativeStreamClient(
         physicalGamepadAxisLogged = false
         inputEncoder.resetGamepadSequences()
         emitControllerMouseAssistChanged(false)
+    }
+
+    /**
+     * F-25: public virtual-gamepad-only reset. Zeroes sticks, buttons and triggers
+     * (both app-side and KeymapMapper-side state) and pushes the zeroed state.
+     * Call on lifecycle transitions (onStop), keymap deactivation, and disconnect
+     * so a key held during the transition can't stick forever.
+     */
+    fun resetVirtualGamepadState() {
+        KeymapMapper.releaseAll(keymapOutput)
+        virtualButtons = 0
+        virtualLeftTrigger = 0
+        virtualRightTrigger = 0
+        virtualLeftStickActive = false
+        virtualLeftStickX = 0
+        virtualLeftStickY = 0
+        virtualRightStickActive = false
+        virtualRightStickX = 0
+        virtualRightStickY = 0
+        keymapMouseRemainderX = 0f
+        keymapMouseRemainderY = 0f
+        sendCurrentGamepadState()
     }
 
     fun dispatchKey(event: KeyEvent): Boolean {
@@ -4053,14 +4080,46 @@ class NativeStreamClient(
             val ry = if (Build.VERSION.SDK_INT >= 26) event.getAxisValue(MotionEvent.AXIS_RELATIVE_Y) else 0f
             when (event.actionMasked) {
                 MotionEvent.ACTION_HOVER_MOVE, MotionEvent.ACTION_MOVE -> {
-                    val dx = if (abs(rx) >= 0.5f || abs(ry) >= 0.5f) rx else if (event.isRelativeMousePointer()) event.x else 0f
-                    val dy = if (abs(rx) >= 0.5f || abs(ry) >= 0.5f) ry else if (event.isRelativeMousePointer()) event.y else 0f
-                    if (abs(dx) >= 0.5f || abs(dy) >= 0.5f) KeymapMapper.onMouseMove(keymapOutput, dx, dy)
+                    // F-25: lower deadband 0.5 -> 0.1 for micro-aiming; absolute-delta
+                    // fallback when pointer capture is off; remainder accumulator so
+                    // sub-threshold motion isn't lost.
+                    val hasRelative = abs(rx) >= 0.1f || abs(ry) >= 0.1f
+                    val rawDx = if (hasRelative) rx
+                        else if (event.isRelativeMousePointer()) event.x
+                        else if (mousePositionValid && mouseLastDeviceId == event.deviceId && mouseLastSource == event.source) event.x - mouseLastX
+                        else 0f
+                    val rawDy = if (hasRelative) ry
+                        else if (event.isRelativeMousePointer()) event.y
+                        else if (mousePositionValid && mouseLastDeviceId == event.deviceId && mouseLastSource == event.source) event.y - mouseLastY
+                        else 0f
+                    keymapMouseRemainderX += rawDx
+                    keymapMouseRemainderY += rawDy
+                    if (abs(keymapMouseRemainderX) >= 0.1f || abs(keymapMouseRemainderY) >= 0.1f) {
+                        KeymapMapper.onMouseMove(keymapOutput, keymapMouseRemainderX, keymapMouseRemainderY)
+                        keymapMouseRemainderX = 0f
+                        keymapMouseRemainderY = 0f
+                    }
+                    // F-25: drag-release fix — reconcile held buttons with buttonState
+                    // so a release that happens mid-drag can't stick the trigger.
+                    val bs = event.buttonState
+                    KeymapMapper.syncMouseButtons(
+                        keymapOutput,
+                        primaryHeld = bs and MotionEvent.BUTTON_PRIMARY != 0,
+                        secondaryHeld = bs and MotionEvent.BUTTON_SECONDARY != 0,
+                        tertiaryHeld = bs and MotionEvent.BUTTON_TERTIARY != 0,
+                    )
+                    rememberMousePosition(event)
                 }
                 MotionEvent.ACTION_BUTTON_PRESS -> KeymapMapper.onMouseButton(keymapOutput, event.actionButton.toGfnMouseButton(), true)
                 MotionEvent.ACTION_BUTTON_RELEASE -> KeymapMapper.onMouseButton(keymapOutput, event.actionButton.toGfnMouseButton(), false)
-                MotionEvent.ACTION_DOWN -> KeymapMapper.onMouseButton(keymapOutput, 1, true)
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> KeymapMapper.releaseMouseButtons(keymapOutput)
+                // F-25: don't hardcode left click — a right-click often arrives as
+                // ACTION_DOWN first, which used to fire a phantom left-click (RT).
+                MotionEvent.ACTION_DOWN -> KeymapMapper.onMouseButton(keymapOutput, event.primaryMouseButton(), true)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    KeymapMapper.releaseMouseButtons(keymapOutput)
+                    keymapMouseRemainderX = 0f
+                    keymapMouseRemainderY = 0f
+                }
             }
             return true
         }
@@ -4349,7 +4408,7 @@ class NativeStreamClient(
 
     fun setVirtualButton(buttonMask: Int, pressed: Boolean) {
         // When left-stick mouse emulation is active, intercept A (left click) and B (right click).
-        if (controllerMouseEmulationActive) {
+        if (controllerMouseEmulationActive && !KeymapMapper.active) {
             val mouseButton = AndroidControllerMouseAssist.mouseButtonForGamepad(buttonMask)
             if (mouseButton != null) {
                 setControllerMouseButton(mouseButton, pressed)
@@ -4396,7 +4455,7 @@ class NativeStreamClient(
         val scale = radialDeadzoneScale(x, y, deadzone = 0.08f)
         val normalizedX = x * scale
         val normalizedY = y * scale
-        if (controllerMouseEmulationActive) {
+        if (controllerMouseEmulationActive && !KeymapMapper.active) {
             // Redirect left-stick input to mouse movement; keep virtual stick zeroed so the game
             // receives no stick deflection from the touch controller either.
             physicalLeftStickX = normalizedX
@@ -4417,7 +4476,7 @@ class NativeStreamClient(
         val scale = radialDeadzoneScale(x, y, deadzone = 0.08f)
         val normalizedX = x * scale
         val normalizedY = y * scale
-        if (controllerMouseEmulationActive) {
+        if (controllerMouseEmulationActive && !KeymapMapper.active) {
             // Redirect right-stick input to scrolling; keep virtual stick zeroed.
             physicalRightStickX = normalizedX
             physicalRightStickY = normalizedY

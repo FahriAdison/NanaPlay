@@ -181,6 +181,9 @@ class MainActivity : ComponentActivity() {
         // 1.0.60: keyboard-to-gamepad mapping intercepts hardware keyboard before the stream.
         // Mapper lives in the :keymap Gradle module (separate DFA pass).
         if (KeymapMapper.active && event.isHardwareKeyboardEvent()) {
+            // F-25: swallow OS auto-repeat floods; the mapper tracks held keys itself
+            // and ignores repeats, so forwarding them would only waste data-channel bandwidth.
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount > 0) return true
             val client = NativeStreamInputRouter.getClient()
             if (client != null) {
                 val output = client.asGamepadOutput()
@@ -230,6 +233,9 @@ class MainActivity : ComponentActivity() {
         // Backgrounding mid-tap gives us no UP or CANCEL, so without this the host keeps the mouse
         // button held down. PiP does not stop the activity, hence the separate call above.
         NativeStreamInputRouter.releaseTouchMouseForLifecycle()
+        // F-25: also zero virtual gamepad state so a key/button held during
+        // backgrounding can't stick forever (no UP event will ever arrive).
+        NativeStreamInputRouter.getClient()?.resetVirtualGamepadState()
     }
 
     private fun KeyEvent.isAndroidVolumeKey(): Boolean =

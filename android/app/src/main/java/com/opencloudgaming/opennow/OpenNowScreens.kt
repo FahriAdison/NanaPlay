@@ -7510,6 +7510,9 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
             captureScreenshotInFolder(folder, fileName)
         } else {
             pendingScreenshotFileName = fileName
+            // F-01 fix: actually open the folder picker, otherwise the screenshot
+            // feature silently dies on first use when no folder is set yet.
+            screenshotFolderLauncher.launch(null)
         }
     }
 

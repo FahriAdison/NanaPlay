@@ -62,6 +62,10 @@ private fun deleteKnownAppDataDirectories(context: Context) {
         context.noBackupFilesDir,
         File(context.dataDir, "shared_prefs"),
         File(context.dataDir, "databases"),
+        // F-02 fix: ExternalPrefs stores opennow_native.xml in getExternalFilesDir(null);
+        // without this the "reset" leaves the main settings file behind.
+        context.getExternalFilesDir(null),
+        context.externalCacheDir,
     ).forEach(::deleteAppDataPath)
 }
 

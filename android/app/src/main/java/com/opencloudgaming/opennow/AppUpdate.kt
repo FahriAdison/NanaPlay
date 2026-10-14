@@ -522,19 +522,58 @@ class AndroidAppUpdater(
                     }
                 }
             }
-            candidate.sha256?.takeIf { it.isNotBlank() }?.let { expected ->
-                val actual = tmp.sha256()
-                if (!actual.equals(expected.cleanHex(), ignoreCase = true)) {
+            // S-04 fix: a missing/blank SHA-256 is now a hard error, not a silent skip.
+            val expectedHash = candidate.sha256?.takeIf { it.isNotBlank() }
+                ?: run {
                     tmp.delete()
-                    error("Downloaded APK failed SHA-256 verification.")
+                    error("Update manifest must provide a SHA-256 hash.")
                 }
+            val actualHash = tmp.sha256()
+            if (!actualHash.equals(expectedHash.cleanHex(), ignoreCase = true)) {
+                tmp.delete()
+                error("Downloaded APK failed SHA-256 verification.")
             }
+            // S-04 fix: verify the downloaded APK is signed by the same certificate
+            // as the currently installed app before it can be installed.
+            verifyApkSignature(tmp)
             if (outputFile.exists()) outputFile.delete()
             if (!tmp.renameTo(outputFile)) {
                 tmp.copyTo(outputFile, overwrite = true)
                 tmp.delete()
             }
             return outputFile
+        }
+    }
+
+    /** S-04: rejects update APKs not signed by the installed app's certificate. */
+    private fun verifyApkSignature(apk: File) {
+        val pm = appContext.packageManager
+        val archiveInfo = pm.getPackageArchiveInfo(
+            apk.absolutePath,
+            PackageManager.GET_SIGNING_CERTIFICATES,
+        ) ?: run {
+            apk.delete()
+            error("Could not read update APK signatures.")
+        }
+        val newSigners = if (Build.VERSION.SDK_INT >= 28) {
+            archiveInfo.signingInfo?.apkContentsSigners?.map { it.toCharsString() }.orEmpty()
+        } else {
+            @Suppress("DEPRECATION")
+            archiveInfo.signatures?.map { it.toCharsString() }.orEmpty()
+        }
+        val installedInfo = pm.getPackageInfo(
+            appContext.packageName,
+            PackageManager.GET_SIGNING_CERTIFICATES,
+        )
+        val installedSigners = if (Build.VERSION.SDK_INT >= 28) {
+            installedInfo.signingInfo?.apkContentsSigners?.map { it.toCharsString() }.orEmpty()
+        } else {
+            @Suppress("DEPRECATION")
+            installedInfo.signatures?.map { it.toCharsString() }.orEmpty()
+        }
+        if (newSigners.isEmpty() || installedSigners.isEmpty() || newSigners != installedSigners) {
+            apk.delete()
+            error("Update APK signing certificate does not match the installed app.")
         }
     }
 

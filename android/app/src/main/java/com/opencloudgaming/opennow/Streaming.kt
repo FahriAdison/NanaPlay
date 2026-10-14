@@ -722,6 +722,9 @@ class GfnSignalingClient(
         heartbeatJob?.cancel()
         webSocket?.close(1000, "closed")
         webSocket = null
+        // F-05 fix: cancel the client's own scope, otherwise each reconnect leaks
+        // the Dispatchers.IO worker threads held by this CoroutineScope.
+        scope.cancel()
     }
 
     private fun buildSignInUrl(): String {
@@ -4426,8 +4429,17 @@ class NativeStreamClient(
             "transport start generation=$generation reconnectAttempts=$reconnectAttempts session=${streamDiagnosticId(session.sessionId)} iceServers=${session.iceServers.size} media=${session.mediaConnectionInfo?.let { "${it.ip}:${it.port}" } ?: "unknown"}",
         )
         emitState(if (reconnectAttempts > 0) "Reconnecting signaling" else "Connecting signaling")
-        signaling = GfnSignalingClient(session, settings = settings) { event ->
-            handleSignaling(event, generation)
+        // F-05 fix: reuse the app's shared OkHttpClient instead of building a new one
+        // (with its own connection pool + dispatcher thread pool) on every reconnect.
+        val sharedHttp = (appContext as? OpenNowApplication)?.httpClient
+        signaling = if (sharedHttp != null) {
+            GfnSignalingClient(session, settings = settings, http = sharedHttp) { event ->
+                handleSignaling(event, generation)
+            }
+        } else {
+            GfnSignalingClient(session, settings = settings) { event ->
+                handleSignaling(event, generation)
+            }
         }.also { it.connect() }
     }
 

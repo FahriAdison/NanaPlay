@@ -328,13 +328,25 @@ fun NanaBrowserPanel(
                             WebView(ctx).apply {
                                 settings.javaScriptEnabled = true
                                 settings.domStorageEnabled = true
+                                // S-03 fix: block file:// and content:// access from web content.
+                                settings.allowFileAccess = false
+                                settings.allowContentAccess = false
+                                @Suppress("DEPRECATION")
+                                settings.allowFileAccessFromFileURLs = false
+                                @Suppress("DEPRECATION")
+                                settings.allowUniversalAccessFromFileURLs = false
                                 settings.cacheMode = WebSettings.LOAD_DEFAULT
                                 settings.mediaPlaybackRequiresUserGesture = false
                                 webViewClient = object : WebViewClient() {
                                     override fun shouldOverrideUrlLoading(
                                         view: WebView,
                                         request: WebResourceRequest,
-                                    ): Boolean = false // stay inside the panel
+                                    ): Boolean {
+                                        // S-03 fix: only http/https stay in the panel;
+                                        // block file://, intent://, market://, etc.
+                                        val scheme = request.url?.scheme?.lowercase(java.util.Locale.US)
+                                        return scheme != "http" && scheme != "https"
+                                    }
 
                                     override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
                                         // 1.0.35: don't overwrite what the user is

@@ -806,6 +806,7 @@ internal class AndroidStreamRecorder(
         audioOutputFormat = null
         runCatching { glDrawer?.release() }
         glDrawer = null
+        runCatching { videoDrawer?.release() }
         videoDrawer = null
         runCatching { eglBase?.release() }
         eglBase = null

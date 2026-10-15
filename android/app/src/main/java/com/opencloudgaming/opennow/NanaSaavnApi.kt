@@ -91,6 +91,7 @@ object NanaSaavnApi {
             for (j in 0 until downloads.length()) {
                 val entry = downloads.optJSONObject(j) ?: continue
                 val url = entry.optString("url").takeIf { it.isNotBlank() } ?: continue
+                if (!url.startsWith("https://", ignoreCase = true) && !url.startsWith("http://", ignoreCase = true)) continue
                 // Quality looks like "320kbps" — parse the leading number.
                 val kbps = entry.optString("quality").takeWhile { it.isDigit() }
                     .toIntOrNull() ?: 0

@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
@@ -148,6 +149,9 @@ object NanaMusicPlayer {
     private var wasPlayingBeforeCall = false
 
     /** 1.0.36: playback position captured at restore; consumed by the first play. */
+    // 1.0.67 (F-05): read on the IO thread, written on Main — @Volatile
+    // avoids torn reads on 32-bit CPUs.
+    @Volatile
     private var pendingSeekMs: Long = 0L
 
     /** 1.0.36: saavnId we already auto-retried after an error (prevents retry loops). */
@@ -631,14 +635,20 @@ object NanaMusicPlayer {
                                                 .also { list -> list[idx] = updated }
                                         }
                                     }
-                                    val pos = retryExo.currentPosition.coerceAtLeast(0L)
-                                    retryExo.setMediaItem(MediaItem.fromUri(updated.uri))
-                                    retryExo.prepare()
-                                    if (pos > 1000L) retryExo.seekTo(pos)
-                                    _lastError.value = null
-                                    playRequested = true
-                                    retryExo.play()
-                                    runCatching { NanaMusicPlaybackService.start(appContext) }
+                                    // 1.0.67 (A-05): ExoPlayer must be touched on the
+                                    // Main thread — currentPosition/setMediaItem/
+                                    // prepare/seekTo/play all throw
+                                    // IllegalStateException from Dispatchers.IO.
+                                    withContext(Dispatchers.Main) {
+                                        val pos = retryExo.currentPosition.coerceAtLeast(0L)
+                                        retryExo.setMediaItem(MediaItem.fromUri(updated.uri))
+                                        retryExo.prepare()
+                                        if (pos > 1000L) retryExo.seekTo(pos)
+                                        _lastError.value = null
+                                        playRequested = true
+                                        retryExo.play()
+                                        runCatching { NanaMusicPlaybackService.start(appContext) }
+                                    }
                                 }
                             }
                         }
@@ -694,8 +704,12 @@ object NanaMusicPlayer {
             } else {
                 // Every track failed (or the queue is empty) — stop safely.
                 val exo = synchronized(this@NanaMusicPlayer) { player }
-                runCatching { exo?.stop() }
-                runCatching { exo?.clearMediaItems() }
+                // 1.0.67 (A-05): stop()/clearMediaItems() must run on the
+                // Main thread — IllegalStateException from Dispatchers.IO.
+                withContext(Dispatchers.Main) {
+                    runCatching { exo?.stop() }
+                    runCatching { exo?.clearMediaItems() }
+                }
                 _lastError.value =
                     appContext.getString(R.string.music_err_play_failed_end, failedTitle)
             }
@@ -824,23 +838,31 @@ object NanaMusicPlayer {
                 }
             // Single-item mode: the queue lives in _tracks; ExoPlayer only ever
             // holds the current track. This kills the old add/replace races.
-            liveExo.setMediaItem(MediaItem.fromUri(playable.uri))
-            liveExo.prepare()
+            // 1.0.67 (F-03): ExoPlayer's verifyApplicationThread() throws
+            // IllegalStateException when touched from Dispatchers.IO — all
+            // direct player calls must run on the Main thread.
             val seekTo = synchronized(this) {
                 _currentIndex.value = index
                 pendingSeekMs.also { pendingSeekMs = 0L }
             }
-            if (seekTo > 1000L) liveExo.seekTo(seekTo)
+            val shouldPlay = playRequested
+            withContext(Dispatchers.Main) {
+                liveExo.setMediaItem(MediaItem.fromUri(playable.uri))
+                liveExo.prepare()
+                if (seekTo > 1000L) liveExo.seekTo(seekTo)
+                if (shouldPlay) {
+                    _lastError.value = null
+                    lastRetrySaavnId = null
+                    liveExo.play()
+                }
+            }
             // 1.0.59: the user may have paused while the (network) resolve was
             // in flight — togglePlayPause doesn't take playMutex, so a stale
             // play() here would resurrect playback against their intent.
             // The track stays loaded & selected, just not playing.
-            if (!playRequested) {
+            if (!shouldPlay) {
                 return true
             }
-            _lastError.value = null
-            lastRetrySaavnId = null
-            liveExo.play()
             // 1.0.59: keep the process alive in the background + show system
             // media controls. Started on every real play; harmless if already
             // running. Wrapped: starting an FGS from background is illegal,
@@ -1141,6 +1163,9 @@ object NanaMusicPlayer {
         synchronized(this) { pendingSeekMs = 0L }
     }
 
+    // 1.0.67 (F-05): synchronize with playInternal's Guard 3 — a concurrent
+    // release() must not null out `player` while playInternal is using it.
+    @Synchronized
     fun release() {
         // Final save before the player goes away (process death, logout, ...).
         appContextRef?.let { saveState(it) }

@@ -92,11 +92,21 @@ object KeymapMapper {
      * Returns true if the key was consumed as gamepad input.
      * Unmapped keys return false so the caller can fall through.
      */
+    @Synchronized
     fun onKeyEvent(output: GamepadOutput, keyCode: Int, action: Int): Boolean {
         // Argon-2: consume the Alt event itself so it never leaks to the PC
         // as a raw keyboard key. Alt-held = bypass window for menu cursor.
         if (keyCode == KEYCODE_ALT_LEFT || keyCode == KEYCODE_ALT_RIGHT) {
-            if (action == ACTION_DOWN) heldKeys.add(keyCode) else heldKeys.remove(keyCode)
+            // A-01: entering the bypass window — recenter the right stick and
+            // release mouse buttons so camera deflection / triggers can't stick
+            // while the mouse is handed back to the PC as a menu cursor.
+            if (action == ACTION_DOWN) {
+                onMouseDecay(output)
+                releaseMouseButtons(output)
+                heldKeys.add(keyCode)
+            } else {
+                heldKeys.remove(keyCode)
+            }
             return true
         }
         // Argon-2: while Alt is held, still honor ACTION_UP for held keys so
@@ -131,14 +141,28 @@ object KeymapMapper {
     }
 
     /**
+     * A-01: true while Alt is held — callers (e.g. Streaming.kt's mouse path)
+     * must skip the gamepad mapping so the mouse works as a PC menu cursor.
+     */
+    @Synchronized
+    fun isAltBypassActive(): Boolean =
+        heldKeys.contains(KEYCODE_ALT_LEFT) || heldKeys.contains(KEYCODE_ALT_RIGHT)
+
+    /**
      * Argon-2: releases a mapped button. L3 is shared by C and both Ctrls —
      * only release it when none of them is still held.
+     * A-03: same guard for RB, shared by R and both Shifts.
      */
     private fun releaseMappedButton(output: GamepadOutput, mapped: Int) {
         if (mapped == KeymapButtons.LEFT_THUMB) {
             val stillHolding = heldKeys.contains(KEYCODE_C) ||
                 heldKeys.contains(KEYCODE_CTRL_LEFT) ||
                 heldKeys.contains(KEYCODE_CTRL_RIGHT)
+            if (!stillHolding) output.setButton(mapped, false)
+        } else if (mapped == KeymapButtons.RIGHT_SHOULDER) {
+            val stillHolding = heldKeys.contains(KEYCODE_R) ||
+                heldKeys.contains(KEYCODE_SHIFT_LEFT) ||
+                heldKeys.contains(KEYCODE_SHIFT_RIGHT)
             if (!stillHolding) output.setButton(mapped, false)
         } else {
             output.setButton(mapped, false)
@@ -167,6 +191,7 @@ object KeymapMapper {
     }
 
     /** GFN mouse button ids: 1=left, 2=middle, 3=right. */
+    @Synchronized
     fun onMouseButton(output: GamepadOutput, gfnButton: Int, pressed: Boolean) {
         lastOutput = output
         // F-25: track held buttons so a release that happens mid-drag can be
@@ -191,6 +216,7 @@ object KeymapMapper {
      * F-25: reconcile held mouse buttons against the live MotionEvent buttonState.
      * Call on every MOVE/HOVER_MOVE. Pure booleans — no android.view dependency.
      */
+    @Synchronized
     fun syncMouseButtons(
         output: GamepadOutput,
         primaryHeld: Boolean,
@@ -202,7 +228,11 @@ object KeymapMapper {
         if (!tertiaryHeld && heldMouseButtons.remove(2)) output.setButton(KeymapButtons.RIGHT_THUMB, false)
     }
 
+    @Synchronized
     fun releaseAll(output: GamepadOutput) {
+        // A-02: stop the decay thread from firing after teardown.
+        decayFuture?.cancel(false)
+        decayFuture = null
         for (keyCode in heldKeys.toList()) {
             val mapped = mappedButton(keyCode)
             if (mapped != 0) output.setButton(mapped, false)
@@ -241,6 +271,8 @@ object KeymapMapper {
         KEYCODE_E -> KeymapButtons.X
         KEYCODE_Q -> KeymapButtons.Y
         KEYCODE_F -> KeymapButtons.B
+        // A-03: R was dropped from the map in v1.0.63–v1.0.66 — restore it on RB.
+        KEYCODE_R -> KeymapButtons.RIGHT_SHOULDER
         KEYCODE_SHIFT_LEFT, KEYCODE_SHIFT_RIGHT -> KeymapButtons.RIGHT_SHOULDER
         KEYCODE_1 -> KeymapButtons.DPAD_UP
         KEYCODE_2 -> KeymapButtons.DPAD_RIGHT

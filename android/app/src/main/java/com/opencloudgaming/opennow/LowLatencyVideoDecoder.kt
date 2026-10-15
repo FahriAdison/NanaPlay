@@ -21,7 +21,7 @@ class LowLatencyVideoDecoder(
     private val lowLatencyEnabled: Boolean,
 ) : VideoDecoder {
 
-    private var patched = false
+    @Volatile private var patched = false
 
     override fun initDecode(settings: VideoDecoder.Settings?, decodeCallback: VideoDecoder.Callback?): VideoCodecStatus {
         NativeInputDiagnostics.add(

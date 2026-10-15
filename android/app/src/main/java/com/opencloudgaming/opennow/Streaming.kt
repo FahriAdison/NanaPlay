@@ -4075,7 +4075,18 @@ class NativeStreamClient(
 
     private fun dispatchMouseLikePointer(event: MotionEvent): Boolean {
         // F-23: keyboard→gamepad mouse routing; single funnel for pointer-capture + touch + generic motion.
-        if (KeymapMapper.active) {
+        // A-01: while Alt is held, let mouse events fall through to normal handling (PC menu cursor).
+        if (KeymapMapper.active && !KeymapMapper.isAltBypassActive()) {
+            // F-01: Android 14 drops pointer capture on any screen touch — re-acquire
+            // it on mouse click so the camera doesn't freeze at the screen edge.
+            if (Build.VERSION.SDK_INT >= 26 &&
+                (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_BUTTON_PRESS)
+            ) {
+                runCatching {
+                    val v = renderer
+                    if (v != null && v.isAttachedToWindow && !v.hasPointerCapture()) v.requestPointerCapture()
+                }
+            }
             val rx = if (Build.VERSION.SDK_INT >= 26) event.getAxisValue(MotionEvent.AXIS_RELATIVE_X) else 0f
             val ry = if (Build.VERSION.SDK_INT >= 26) event.getAxisValue(MotionEvent.AXIS_RELATIVE_Y) else 0f
             when (event.actionMasked) {
@@ -4121,7 +4132,9 @@ class NativeStreamClient(
                     keymapMouseRemainderY = 0f
                 }
             }
-            return true
+            // A-04: don't swallow the scroll wheel — let ACTION_SCROLL fall through
+            // to the scroll handler below.
+            return event.actionMasked != MotionEvent.ACTION_SCROLL
         }
         if (!externalMouseEventLogged) {
             externalMouseEventLogged = true
@@ -4473,7 +4486,9 @@ class NativeStreamClient(
     }
 
     fun setVirtualRightStick(x: Float, y: Float) {
-        val scale = radialDeadzoneScale(x, y, deadzone = 0.08f)
+        // F-02: mouse has no mechanical stick drift — don't cut micro-aiming (< 12.8px)
+        // with the gamepad radial deadzone.
+        val scale = if (KeymapMapper.active) 1f else radialDeadzoneScale(x, y, deadzone = 0.08f)
         val normalizedX = x * scale
         val normalizedY = y * scale
         if (controllerMouseEmulationActive && !KeymapMapper.active) {
@@ -4550,8 +4565,16 @@ class NativeStreamClient(
         livenessWatchdog.reset()
         signaling?.disconnect()
         signaling = null
+        // F-06: dispose native DataChannel objects — nulling the Kotlin refs alone
+        // leaks the C++ observer and risks SIGSEGV on late packets.
+        runCatching { reliableInput?.unregisterObserver() }
+        runCatching { reliableInput?.dispose() }
         reliableInput = null
+        runCatching { partiallyReliableInput?.unregisterObserver() }
+        runCatching { partiallyReliableInput?.dispose() }
         partiallyReliableInput = null
+        runCatching { statsChannel?.unregisterObserver() }
+        runCatching { statsChannel?.dispose() }
         statsChannel = null
         lastParsedGameFps = null
         partiallyReliableGamepadMask = 0

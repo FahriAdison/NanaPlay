@@ -226,7 +226,7 @@ class AndroidStreamKeepAliveService : Service() {
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "NanaPlay:ActiveStream")
             .apply {
                 setReferenceCounted(false)
-                acquire()
+                acquire(4 * 60 * 60 * 1000L)
             }
     }
 

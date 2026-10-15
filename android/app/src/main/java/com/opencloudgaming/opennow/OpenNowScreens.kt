@@ -8951,6 +8951,14 @@ private fun View.configureAndroidMousePointerCapture(enabled: Boolean, onCapture
         onCaptureInput()
         onMotion(event)
     }
+    // Argon-2: Android 14 drops pointer capture on any screen touch — re-acquire
+    // it when the user taps the view so the camera doesn't freeze at the edge.
+    setOnClickListener {
+        if (Build.VERSION.SDK_INT >= 26 && !hasPointerCapture()) {
+            runCatching { requestPointerCapture() }
+                .onFailure { error -> NativeInputDiagnostics.add("pointer capture re-acquire failed error=${error.javaClass.simpleName}") }
+        }
+    }
     post {
         if (isAttachedToWindow && hasWindowFocus() && !hasPointerCapture()) {
             isFocusable = true

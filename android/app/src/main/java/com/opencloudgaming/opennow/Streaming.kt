@@ -4080,21 +4080,21 @@ class NativeStreamClient(
             val ry = if (Build.VERSION.SDK_INT >= 26) event.getAxisValue(MotionEvent.AXIS_RELATIVE_Y) else 0f
             when (event.actionMasked) {
                 MotionEvent.ACTION_HOVER_MOVE, MotionEvent.ACTION_MOVE -> {
-                    // F-25: lower deadband 0.5 -> 0.1 for micro-aiming; absolute-delta
-                    // fallback when pointer capture is off; remainder accumulator so
-                    // sub-threshold motion isn't lost.
-                    val hasRelative = abs(rx) >= 0.1f || abs(ry) >= 0.1f
-                    val rawDx = if (hasRelative) rx
+                    // Argon-2: no premature hasRelative threshold — accumulate EVERY raw
+                    // delta so micro-aiming (< 0.1px) isn't discarded before the
+                    // accumulator ever sees it. Absolute-delta fallback when pointer
+                    // capture is off.
+                    val rawDx = if (Build.VERSION.SDK_INT >= 26 && (rx != 0f || ry != 0f)) rx
                         else if (event.isRelativeMousePointer()) event.x
                         else if (mousePositionValid && mouseLastDeviceId == event.deviceId && mouseLastSource == event.source) event.x - mouseLastX
                         else 0f
-                    val rawDy = if (hasRelative) ry
+                    val rawDy = if (Build.VERSION.SDK_INT >= 26 && (rx != 0f || ry != 0f)) ry
                         else if (event.isRelativeMousePointer()) event.y
                         else if (mousePositionValid && mouseLastDeviceId == event.deviceId && mouseLastSource == event.source) event.y - mouseLastY
                         else 0f
                     keymapMouseRemainderX += rawDx
                     keymapMouseRemainderY += rawDy
-                    if (abs(keymapMouseRemainderX) >= 0.1f || abs(keymapMouseRemainderY) >= 0.1f) {
+                    if (abs(keymapMouseRemainderX) >= 0.05f || abs(keymapMouseRemainderY) >= 0.05f) {
                         KeymapMapper.onMouseMove(keymapOutput, keymapMouseRemainderX, keymapMouseRemainderY)
                         keymapMouseRemainderX = 0f
                         keymapMouseRemainderY = 0f
@@ -7090,7 +7090,9 @@ object SdpTools {
 
 class InputEncoder {
     private var protocolVersion = 3
-    private val gamepadSequences = mutableMapOf<Int, Int>()
+    // Argon-2: touched from the main thread AND the keymap mouse-decay thread —
+    // use a thread-safe map to avoid ConcurrentModificationException/ANR.
+    private val gamepadSequences = java.util.concurrent.ConcurrentHashMap<Int, Int>()
 
     fun setProtocolVersion(version: Int) {
         protocolVersion = version.coerceAtLeast(1)

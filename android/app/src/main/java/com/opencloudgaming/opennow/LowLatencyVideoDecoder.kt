@@ -230,7 +230,6 @@ class LowLatencyVideoDecoder(
 
     companion object {
         private const val TAG = "LowLatencyDecoder"
-        private const val OPERATING_RATE = 0x7FFF
 
         /**
          * Cache for [isCodecSupported]: enumerating MediaCodecList involves
@@ -297,10 +296,10 @@ class LowLatencyVideoDecoder(
             val normalizedCodecName = codecName.lowercase(Locale.US)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 putInt(format, "priority", 0)
-                // Use Short.MAX_VALUE (0x7FFF) for non-Snapdragon decoders; for Qualcomm,
-                // forcing 32767 fps operating rate forces Adreno GPU/VPU clocks to maximum state,
-                // causing extreme power drain and overheating. Use target FPS instead.
-                val operatingRate = if (isQualcommDecoder(normalizedCodecName)) requestedFps.coerceAtLeast(60) else OPERATING_RATE
+                // Argon-2: cap operating-rate to a sane FPS for ALL decoders. 0x7FFF
+                // (32767) forces budget chipsets (e.g. Unisoc) to maximum clock,
+                // causing overheat and video stutter on low-end devices.
+                val operatingRate = requestedFps.coerceIn(60, 120)
                 putInt(format, "operating-rate", operatingRate)
             }
             putInt(format, "allow-frame-drop", 1)

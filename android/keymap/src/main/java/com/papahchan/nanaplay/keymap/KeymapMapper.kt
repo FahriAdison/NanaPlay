@@ -93,19 +93,29 @@ object KeymapMapper {
      * Unmapped keys return false so the caller can fall through.
      */
     fun onKeyEvent(output: GamepadOutput, keyCode: Int, action: Int): Boolean {
-        // Alt held = bypass mapper (show cursor for menu clicks)
+        // Argon-2: consume the Alt event itself so it never leaks to the PC
+        // as a raw keyboard key. Alt-held = bypass window for menu cursor.
         if (keyCode == KEYCODE_ALT_LEFT || keyCode == KEYCODE_ALT_RIGHT) {
             if (action == ACTION_DOWN) heldKeys.add(keyCode) else heldKeys.remove(keyCode)
-            return false
+            return true
         }
-        if (heldKeys.contains(KEYCODE_ALT_LEFT) || heldKeys.contains(KEYCODE_ALT_RIGHT)) return false
+        // Argon-2: while Alt is held, still honor ACTION_UP for held keys so
+        // movement keys can't stick when released during the bypass window.
+        if (heldKeys.contains(KEYCODE_ALT_LEFT) || heldKeys.contains(KEYCODE_ALT_RIGHT)) {
+            if (action == ACTION_UP && heldKeys.remove(keyCode)) {
+                val mapped = mappedButton(keyCode)
+                if (mapped != 0) releaseMappedButton(output, mapped)
+                if (keyCode == KEYCODE_W || keyCode == KEYCODE_A ||
+                    keyCode == KEYCODE_S || keyCode == KEYCODE_D) {
+                    updateLeftStick(output)
+                }
+            }
+            return true
+        }
         val mapped = mappedButton(keyCode)
         val isStickKey = keyCode == KEYCODE_W || keyCode == KEYCODE_A ||
             keyCode == KEYCODE_S || keyCode == KEYCODE_D
-        // F-22: Ctrl is handled as a trigger below, not via mappedButton —
-        // don't let the guard swallow it.
-        val isTriggerKey = keyCode == KEYCODE_CTRL_LEFT || keyCode == KEYCODE_CTRL_RIGHT
-        if (mapped == 0 && !isStickKey && !isTriggerKey) return false
+        if (mapped == 0 && !isStickKey) return false
         lastOutput = output
         when (action) {
             ACTION_DOWN -> if (!heldKeys.add(keyCode)) return true // ignore auto-repeat
@@ -113,24 +123,40 @@ object KeymapMapper {
             else -> return false
         }
         if (mapped != 0) {
-            output.setButton(mapped, action == ACTION_DOWN)
+            if (action == ACTION_DOWN) output.setButton(mapped, true)
+            else releaseMappedButton(output, mapped)
         }
         if (isStickKey) updateLeftStick(output)
-        if (keyCode == KEYCODE_CTRL_LEFT || keyCode == KEYCODE_CTRL_RIGHT) {
-            output.setButton(KeymapButtons.LEFT_THUMB, action == ACTION_DOWN)
-        }
         return true
+    }
+
+    /**
+     * Argon-2: releases a mapped button. L3 is shared by C and both Ctrls —
+     * only release it when none of them is still held.
+     */
+    private fun releaseMappedButton(output: GamepadOutput, mapped: Int) {
+        if (mapped == KeymapButtons.LEFT_THUMB) {
+            val stillHolding = heldKeys.contains(KEYCODE_C) ||
+                heldKeys.contains(KEYCODE_CTRL_LEFT) ||
+                heldKeys.contains(KEYCODE_CTRL_RIGHT)
+            if (!stillHolding) output.setButton(mapped, false)
+        } else {
+            output.setButton(mapped, false)
+        }
     }
 
     @Synchronized
     fun onMouseMove(output: GamepadOutput, dx: Float, dy: Float) {
         lastOutput = output
-        rightStickX = (rightStickX + dx / MOUSE_SENSITIVITY_PX).coerceIn(-1f, 1f)
-        rightStickY = (rightStickY + dy / MOUSE_SENSITIVITY_PX).coerceIn(-1f, 1f)
+        // Argon-2: instantaneous deflection (per-event velocity), NOT accumulation.
+        // Accumulating pinned the stick at 1.0f and reversing the mouse couldn't
+        // reverse the camera until the positive buildup drained.
+        rightStickX = (dx / MOUSE_SENSITIVITY_PX).coerceIn(-1f, 1f)
+        rightStickY = (dy / MOUSE_SENSITIVITY_PX).coerceIn(-1f, 1f)
         output.setRightStick(rightStickX, rightStickY)
-        // F-23: re-arm the decay timer on every move.
+        // F-23: re-arm the decay timer on every move (~1 frame at 60fps).
         decayFuture?.cancel(false)
-        decayFuture = decayExecutor.schedule({ onMouseDecay(output) }, 45L, java.util.concurrent.TimeUnit.MILLISECONDS)
+        decayFuture = decayExecutor.schedule({ onMouseDecay(output) }, 20L, java.util.concurrent.TimeUnit.MILLISECONDS)
     }
 
     @Synchronized
@@ -157,6 +183,8 @@ object KeymapMapper {
         heldMouseButtons.clear()
         output.setTrigger(left = true, pressed = false)
         output.setTrigger(left = false, pressed = false)
+        // Argon-2: R3 (middle click) was never released here — it stuck forever.
+        output.setButton(KeymapButtons.RIGHT_THUMB, false)
     }
 
     /**
@@ -220,7 +248,7 @@ object KeymapMapper {
         KEYCODE_4 -> KeymapButtons.DPAD_LEFT
         KEYCODE_ESCAPE -> KeymapButtons.START
         KEYCODE_TAB -> KeymapButtons.LEFT_SHOULDER
-        KEYCODE_C -> KeymapButtons.LEFT_THUMB
+        KEYCODE_C, KEYCODE_CTRL_LEFT, KEYCODE_CTRL_RIGHT -> KeymapButtons.LEFT_THUMB
         KEYCODE_M -> KeymapButtons.BACK
         else -> 0
     }

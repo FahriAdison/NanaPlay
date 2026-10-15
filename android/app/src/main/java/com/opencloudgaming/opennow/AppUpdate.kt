@@ -387,7 +387,7 @@ class AndroidAppUpdater(
         }
 
         val uri = FileProvider.getUriForFile(appContext, updateFileProviderAuthority(), apk)
-        val installIntent = Intent(Intent.ACTION_INSTALL_PACKAGE)
+        val installIntent = Intent(Intent.ACTION_VIEW)
             .setDataAndType(uri, APK_MIME_TYPE)
             .putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)

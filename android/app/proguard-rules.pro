@@ -10,3 +10,9 @@
 -assumenosideeffects class android.util.Log {
     *;
 }
+
+# JNI static registration: C++ functions are named Java_com_opencloudgaming_opennow_NativeCodecProbe_*,
+# so R8 must not rename this class in release builds (would cause UnsatisfiedLinkError).
+-keep class com.opencloudgaming.opennow.NativeCodecProbe {
+    native <methods>;
+}

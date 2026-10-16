@@ -24,6 +24,7 @@ interface GamepadOutput {
     fun setLeftStick(x: Float, y: Float)
     fun setRightStick(x: Float, y: Float)
     fun setTrigger(left: Boolean, pressed: Boolean)
+    fun sendTouchDrag(phase: Int, x: Float, y: Float) {}
 }
 
 /** Gamepad button bit masks, mirroring the app's GamepadButtonMapping. */
@@ -49,10 +50,31 @@ object KeymapMapper {
     @Volatile
     var active: Boolean = false
 
+    // Touch phases (mirrors TouchPhase on wire).
+    const val TOUCH_PHASE_DOWN = 1
+    const val TOUCH_PHASE_UP = 2
+    const val TOUCH_PHASE_MOVE = 4
+    const val TOUCH_PHASE_CANCEL = 8
+
+    // Constants for NTE / touch-game camera drag mapping.
+    // Tweakable in ONE place without searching through logic.
+    const val CAMERA_DRAG_ANCHOR_X = 0.72f
+    const val CAMERA_DRAG_ANCHOR_Y = 0.50f
+    const val CAMERA_DRAG_SENSITIVITY = 0.0025f // delta pixels -> normalized screen fraction
+    const val CAMERA_DRAG_MIN_X = 0.52f
+    const val CAMERA_DRAG_MAX_X = 0.94f
+    const val CAMERA_DRAG_MIN_Y = 0.15f
+    const val CAMERA_DRAG_MAX_Y = 0.85f
+    const val MOUSE_DECAY_TIMEOUT_MS = 50L
+
+    private var isTouchDragging = false
+    private var currentTouchX = CAMERA_DRAG_ANCHOR_X
+    private var currentTouchY = CAMERA_DRAG_ANCHOR_Y
+
     private val heldKeys = mutableSetOf<Int>()
     private val heldMouseButtons = mutableSetOf<Int>()
     private var rightStickX = 0f
-    // F-23: auto-decay — recenter the right stick shortly after the mouse
+    // F-23: auto-decay — recenter the right stick / lift touch shortly after the mouse
     // stops moving, otherwise the camera keeps spinning on the last delta.
     private val decayExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "keymap-mouse-decay").apply { isDaemon = true }
@@ -174,8 +196,32 @@ object KeymapMapper {
     fun onMouseMove(output: GamepadOutput, dx: Float, dy: Float) {
         lastOutput = output
         val magnitude = sqrt(dx * dx + dy * dy)
-        // Abaikan noise sub-piksel (< 0.35px) agar anti-deadzone floor tidak memicu drift.
-        if (magnitude < 0.35f) return
+        // Abaikan noise sub-piksel (< 0.15px)
+        if (magnitude < 0.15f) return
+
+        if (!isTouchDragging) {
+            currentTouchX = CAMERA_DRAG_ANCHOR_X
+            currentTouchY = CAMERA_DRAG_ANCHOR_Y
+            output.sendTouchDrag(TOUCH_PHASE_DOWN, currentTouchX, currentTouchY)
+            isTouchDragging = true
+        }
+
+        var nextX = currentTouchX + dx * CAMERA_DRAG_SENSITIVITY
+        var nextY = currentTouchY + dy * CAMERA_DRAG_SENSITIVITY
+
+        // Re-centering when hitting boundaries: lift and re-anchor
+        if (nextX !in CAMERA_DRAG_MIN_X..CAMERA_DRAG_MAX_X || nextY !in CAMERA_DRAG_MIN_Y..CAMERA_DRAG_MAX_Y) {
+            output.sendTouchDrag(TOUCH_PHASE_UP, currentTouchX, currentTouchY)
+            currentTouchX = CAMERA_DRAG_ANCHOR_X
+            currentTouchY = CAMERA_DRAG_ANCHOR_Y
+            output.sendTouchDrag(TOUCH_PHASE_DOWN, currentTouchX, currentTouchY)
+            nextX = currentTouchX + dx * CAMERA_DRAG_SENSITIVITY
+            nextY = currentTouchY + dy * CAMERA_DRAG_SENSITIVITY
+        }
+
+        currentTouchX = nextX.coerceIn(CAMERA_DRAG_MIN_X, CAMERA_DRAG_MAX_X)
+        currentTouchY = nextY.coerceIn(CAMERA_DRAG_MIN_Y, CAMERA_DRAG_MAX_Y)
+        output.sendTouchDrag(TOUCH_PHASE_MOVE, currentTouchX, currentTouchY)
 
         val unitX = dx / magnitude
         val unitY = dy / magnitude
@@ -187,7 +233,7 @@ object KeymapMapper {
         rightStickY = (unitY * stickDeflection).coerceIn(-1f, 1f)
         output.setRightStick(rightStickX, rightStickY)
 
-        // K-01: 50ms (~3 frame @ 60fps) agar engine UE5 sempat mengintegrasikan rotasi kamera.
+        // 50ms decay timeout: lifts touch finger & recenters stick when mouse stops
         decayFuture?.cancel(false)
         decayFuture = decayExecutor.schedule(
             { onMouseDecay(output) },
@@ -198,6 +244,10 @@ object KeymapMapper {
 
     @Synchronized
     fun onMouseDecay(output: GamepadOutput) {
+        if (isTouchDragging) {
+            output.sendTouchDrag(TOUCH_PHASE_UP, currentTouchX, currentTouchY)
+            isTouchDragging = false
+        }
         rightStickX = 0f
         rightStickY = 0f
         output.setRightStick(0f, 0f)
@@ -246,6 +296,10 @@ object KeymapMapper {
         // A-02: stop the decay thread from firing after teardown.
         decayFuture?.cancel(false)
         decayFuture = null
+        if (isTouchDragging) {
+            output.sendTouchDrag(TOUCH_PHASE_UP, currentTouchX, currentTouchY)
+            isTouchDragging = false
+        }
         for (keyCode in heldKeys.toList()) {
             val mapped = mappedButton(keyCode)
             if (mapped != 0) output.setButton(mapped, false)
@@ -301,5 +355,4 @@ object KeymapMapper {
     private const val ANTI_DEADZONE_FLOOR = 0.20f
     private const val MAX_MOUSE_DELTA_PX = 45f
     private const val POWER_EXPONENT = 0.75f
-    private const val MOUSE_DECAY_TIMEOUT_MS = 50L
 }

@@ -733,6 +733,21 @@ private fun SettingsContent(
                 ) { enabled ->
                     viewModel.updateStreamSettings { s -> s.copy(persistentReconnect = enabled) }
                 }
+                ChoiceMenuRow(
+                    label = stringResource(R.string.settings_dynamic_network_adjustment),
+                    options = listOf(
+                        ChoiceMenuOption(DynamicNetworkAdjustment.NoAdjustment.name, stringResource(R.string.network_adjustment_none)),
+                        ChoiceMenuOption(DynamicNetworkAdjustment.OptimalQuality.name, stringResource(R.string.network_adjustment_optimal_quality)),
+                        ChoiceMenuOption(DynamicNetworkAdjustment.OptimalLatency.name, stringResource(R.string.network_adjustment_optimal_latency)),
+                    ),
+                    selectedLabel = when (settings.stream.dynamicNetworkAdjustment) {
+                        DynamicNetworkAdjustment.NoAdjustment -> stringResource(R.string.network_adjustment_none)
+                        DynamicNetworkAdjustment.OptimalQuality -> stringResource(R.string.network_adjustment_optimal_quality)
+                        DynamicNetworkAdjustment.OptimalLatency -> stringResource(R.string.network_adjustment_optimal_latency)
+                    },
+                ) { value ->
+                    viewModel.updateStreamSettings { s -> s.copy(dynamicNetworkAdjustment = DynamicNetworkAdjustment.valueOf(value)) }
+                }
                 SettingSwitch(
                     label = stringResource(R.string.settings_native_streamer),
                     checked = settings.nativeLowLatencyDecoder,

@@ -740,4 +740,9 @@
     <string name="browser_forward">Maju</string>
     <string name="browser_clear">Hapus</string>
     <string name="settings_show_floating_action_buttons">Tampilkan tombol aksi melayang</string>
+    <!-- Network condition adjustment -->
+    <string name="settings_dynamic_network_adjustment">Sesuaikan dengan kondisi jaringan</string>
+    <string name="network_adjustment_none">Tanpa penyesuaian</string>
+    <string name="network_adjustment_optimal_quality">Kualitas optimal</string>
+    <string name="network_adjustment_optimal_latency">Latensi optimal</string>
 </resources>

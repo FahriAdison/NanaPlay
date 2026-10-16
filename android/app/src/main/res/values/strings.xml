@@ -741,4 +741,9 @@
     <string name="browser_forward">Forward</string>
     <string name="browser_clear">Clear</string>
     <string name="settings_show_floating_action_buttons">Show floating action buttons</string>
+    <!-- Network condition adjustment -->
+    <string name="settings_dynamic_network_adjustment">Adjust for network conditions</string>
+    <string name="network_adjustment_none">No adjustment</string>
+    <string name="network_adjustment_optimal_quality">Optimal quality</string>
+    <string name="network_adjustment_optimal_latency">Optimal latency</string>
 </resources>

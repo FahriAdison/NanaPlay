@@ -1288,6 +1288,20 @@ object NativeStreamInputRouter {
         touchSlots.clear()
     }
 
+    fun dispatchSyntheticTouch(phase: Int, normX: Float, normY: Float, pointerId: Int = 0x5443414D): Boolean {
+        val current = client ?: return false
+        val lifting = phase == TouchPhase.UP || phase == TouchPhase.CANCEL
+        val slot = (if (lifting) touchSlots.release(pointerId) else touchSlots.acquire(pointerId)) ?: return false
+        val record = TouchRecord(
+            slot = slot,
+            phase = phase,
+            x = (normX * TOUCH_COORDINATE_MAX).toInt().coerceIn(0, TOUCH_COORDINATE_MAX),
+            y = (normY * TOUCH_COORDINATE_MAX).toInt().coerceIn(0, TOUCH_COORDINATE_MAX),
+            timestampUs = timestampUs(),
+        )
+        return current.sendNativeTouch(listOf(record))
+    }
+
     fun dispatchExternalMouseTouch(event: MotionEvent, width: Int, height: Int): Boolean {
         if (streamUiActive) return false
         if (!event.isExternalMousePointerEvent()) return false
@@ -3305,6 +3319,7 @@ class NativeStreamClient(
     private var iceRecoveryJob: Job? = null
     private var offerTimeoutJob: Job? = null
     internal var settings: StreamSettings = StreamSettings()
+    private var networkAdaptor = NetworkConditionAdaptor(DynamicNetworkAdjustment.NoAdjustment)
     private var session: SessionInfo? = null
     private var transportGeneration = 0
     private var reconnectAttempts = 0
@@ -3652,6 +3667,7 @@ class NativeStreamClient(
         if (released) return
         this.session = session
         this.settings = settings
+        this.networkAdaptor = NetworkConditionAdaptor(settings.dynamicNetworkAdjustment)
         transportGeneration += 1
         reconnectAttempts = 0
         persistentStallStartMs = 0L
@@ -4423,6 +4439,9 @@ class NativeStreamClient(
         override fun setLeftStick(x: Float, y: Float) = setVirtualLeftStick(x, y)
         override fun setRightStick(x: Float, y: Float) = setVirtualRightStick(x, y)
         override fun setTrigger(left: Boolean, pressed: Boolean) = setVirtualTrigger(left, pressed)
+        override fun sendTouchDrag(phase: Int, x: Float, y: Float) {
+            NativeStreamInputRouter.dispatchSyntheticTouch(phase, x, y)
+        }
     }
 
     fun setVirtualButton(buttonMask: Int, pressed: Boolean) {
@@ -5467,6 +5486,7 @@ class NativeStreamClient(
             val snapshot = buildRuntimeStatsSnapshot(report.timestampUs / 1000.0, report.statsMap.values)
             scope.launch {
                 if (generation != transportGeneration) return@launch
+                networkAdaptor.onStats(snapshot.stats)
                 if (handleCatastrophicFirstDecodedResolution(snapshot)) {
                     onStats(snapshot.stats)
                     return@launch
@@ -6884,7 +6904,11 @@ object SdpTools {
         val threshold = Regex("a=ri\\.partialReliableThresholdMs:(\\d+)").find(offerSdp)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 30
         val bitDepth = if (settings.hdrEnabled || settings.colorQuality == ColorQuality.TenBit420 || settings.colorQuality == ColorQuality.TenBit444) 10 else 8
         val maxBitrate = max(OFFICIAL_MIN_BITRATE_KBPS, settings.maxBitrateMbps * 1000)
-        val minBitrate = OFFICIAL_MIN_BITRATE_KBPS
+        val minBitrate = when (settings.dynamicNetworkAdjustment) {
+            DynamicNetworkAdjustment.OptimalQuality -> max(OFFICIAL_MIN_BITRATE_KBPS, maxBitrate / 2)
+            DynamicNetworkAdjustment.OptimalLatency,
+            DynamicNetworkAdjustment.NoAdjustment -> OFFICIAL_MIN_BITRATE_KBPS
+        }
         val initialBitrate = max(minBitrate, maxBitrate / 4)
         val isHighFps = settings.fps > 60
         val isAtLeast120Fps = settings.fps >= 120
@@ -6988,18 +7012,34 @@ object SdpTools {
             add("a=vqos.adjustStreamingFpsDuringOutOfFocus:1")
             add("a=vqos.resControl.cpmRtc.ignoreOutOfFocusWindowState:1")
             add("a=vqos.resControl.perfHistory.rtcIgnoreOutOfFocusWindowState:1")
-            add("a=vqos.resControl.cpmRtc.featureMask:0")
-            add("a=vqos.resControl.cpmRtc.enable:0")
-            add("a=vqos.resControl.cpmRtc.minResolutionPercent:100")
-            add("a=vqos.resControl.cpmRtc.resolutionChangeHoldonMs:999999")
+            val cpmEnabled = settings.dynamicNetworkAdjustment != DynamicNetworkAdjustment.NoAdjustment
+            val minResPercent = when (settings.dynamicNetworkAdjustment) {
+                DynamicNetworkAdjustment.OptimalLatency -> 50
+                DynamicNetworkAdjustment.OptimalQuality -> 75
+                DynamicNetworkAdjustment.NoAdjustment -> 100
+            }
+            val resHoldonMs = when (settings.dynamicNetworkAdjustment) {
+                DynamicNetworkAdjustment.OptimalLatency -> 2000
+                DynamicNetworkAdjustment.OptimalQuality -> 10000
+                DynamicNetworkAdjustment.NoAdjustment -> 999999
+            }
+            val qpMaxResAdj = when (settings.dynamicNetworkAdjustment) {
+                DynamicNetworkAdjustment.OptimalLatency -> 0
+                DynamicNetworkAdjustment.OptimalQuality -> 10
+                DynamicNetworkAdjustment.NoAdjustment -> 4
+            }
+            add("a=vqos.resControl.cpmRtc.featureMask:${if (cpmEnabled) 1 else 0}")
+            add("a=vqos.resControl.cpmRtc.enable:${if (cpmEnabled) 1 else 0}")
+            add("a=vqos.resControl.cpmRtc.minResolutionPercent:$minResPercent")
+            add("a=vqos.resControl.cpmRtc.resolutionChangeHoldonMs:$resHoldonMs")
             add("a=packetPacing.numGroups:${if (is120Fps) 3 else 5}")
             add("a=packetPacing.maxDelayUs:1000")
             add("a=packetPacing.minNumPacketsFrame:10")
             add("a=video.rtpNackQueueLength:1024")
             add("a=video.rtpNackQueueMaxPackets:512")
             add("a=video.rtpNackMaxPacketCount:25")
-            add("a=vqos.drc.qpMaxResThresholdAdj:4")
-            add("a=vqos.grc.qpMaxResThresholdAdj:4")
+            add("a=vqos.drc.qpMaxResThresholdAdj:$qpMaxResAdj")
+            add("a=vqos.grc.qpMaxResThresholdAdj:$qpMaxResAdj")
             add("a=vqos.drc.iirFilterFactor:100")
             if (isAv1) {
                 add("a=vqos.drc.minQpHeadroom:20")

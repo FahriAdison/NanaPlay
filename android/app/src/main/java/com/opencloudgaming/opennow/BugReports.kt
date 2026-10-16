@@ -94,7 +94,7 @@ internal suspend fun uploadAndroidBugReport(
     report: AndroidBugReport,
 ): AndroidBugReportReceipt = withContext(Dispatchers.IO) {
     http.newCall(buildAndroidBugReportRequest(report)).execute().use { response ->
-        val body = response.body.string().take(MAX_BUG_REPORT_RESPONSE_CHARS)
+        val body = response.body?.string().orEmpty().take(MAX_BUG_REPORT_RESPONSE_CHARS)
         if (!response.isSuccessful) {
             val detail = body
                 .lineSequence()

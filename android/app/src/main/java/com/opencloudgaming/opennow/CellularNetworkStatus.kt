@@ -19,6 +19,9 @@ internal object CellularNetworkStatus {
     @Volatile
     private var monitoringStarted = false
 
+    @Volatile
+    private var monitoringFailed = false
+
     private var retainedCallback: Any? = null
 
     fun displayLabel(context: Context): String? {
@@ -34,7 +37,7 @@ internal object CellularNetworkStatus {
 
     @Synchronized
     private fun startMonitoring(context: Context) {
-        if (monitoringStarted || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        if (monitoringStarted || monitoringFailed || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
         val telephony = context.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager ?: return
         monitoringStarted = true
         runCatching {
@@ -45,6 +48,7 @@ internal object CellularNetworkStatus {
             }
         }.onFailure {
             monitoringStarted = false
+            monitoringFailed = true
             retainedCallback = null
         }
     }
@@ -56,6 +60,7 @@ internal object CellularNetworkStatus {
      */
     @Synchronized
     fun stopMonitoring(context: Context) {
+        monitoringFailed = false
         if (!monitoringStarted) return
         monitoringStarted = false
         val callback = retainedCallback

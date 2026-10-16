@@ -67,7 +67,7 @@ object NanaAnnouncements {
                     .build()
                 http.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) return@withContext emptyList<NanaAnnouncement>()
-                    val body = response.body.string()
+                    val body = response.body?.string().orEmpty()
                     parse(body, dismissedIds)
                 }
             }.getOrDefault(emptyList())

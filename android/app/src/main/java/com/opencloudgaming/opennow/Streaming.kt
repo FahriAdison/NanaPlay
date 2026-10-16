@@ -1274,7 +1274,7 @@ object NativeStreamInputRouter {
      * Lifts every finger the host still believes is down. Called when touch is turned off or the
      * session is interrupted, because in neither case will the platform deliver the missing UP.
      */
-    private fun releaseAllNativeTouches() {
+    internal fun releaseAllNativeTouches() {
         val current = client
         val pointerIds = touchSlots.activePointerIds()
         if (current != null && pointerIds.isNotEmpty()) {
@@ -4083,13 +4083,11 @@ class NativeStreamClient(
         // keymap path can't double-handle it.
         if (KeymapMapper.active) {
             if (KeymapMapper.isAltBypassActive()) return true
-            // F-01: Android 14 drops pointer capture on any screen touch — re-acquire
-            // it on mouse click so the camera doesn't freeze at the screen edge.
+            // F-01/K-09: Android 14 drops pointer capture on any screen touch or Alt release.
+            // Re-acquire capture on any mouse activity when not captured so camera aiming never freezes at the screen edge.
             // K-04: capture on the DecorView (rootView, the focused view holding the
             // OnCapturedPointerListener), not the renderer (isFocusable=false).
-            if (Build.VERSION.SDK_INT >= 26 &&
-                (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_BUTTON_PRESS)
-            ) {
+            if (Build.VERSION.SDK_INT >= 26) {
                 runCatching {
                     val root = renderer?.rootView
                     if (root != null && root.isAttachedToWindow && !root.hasPointerCapture()) root.requestPointerCapture()

@@ -196,6 +196,7 @@ class MainActivity : ComponentActivity() {
                     } else if (event.action == KeyEvent.ACTION_UP) {
                         decor.hideAndroidPointerTree()
                         decor.requestPointerCapture()
+                        NativeStreamInputRouter.releaseAllNativeTouches()
                     }
                 }
             }
@@ -241,6 +242,7 @@ class MainActivity : ComponentActivity() {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         viewModel.setAndroidPictureInPictureActive(isInPictureInPictureMode)
         NativeStreamInputRouter.releaseTouchMouseForLifecycle()
+        NativeStreamInputRouter.releaseAllNativeTouches()
     }
 
     override fun onStop() {
@@ -248,6 +250,7 @@ class MainActivity : ComponentActivity() {
         // Backgrounding mid-tap gives us no UP or CANCEL, so without this the host keeps the mouse
         // button held down. PiP does not stop the activity, hence the separate call above.
         NativeStreamInputRouter.releaseTouchMouseForLifecycle()
+        NativeStreamInputRouter.releaseAllNativeTouches()
         // F-25: also zero virtual gamepad state so a key/button held during
         // backgrounding can't stick forever (no UP event will ever arrive).
         NativeStreamInputRouter.getClient()?.resetVirtualGamepadState()

@@ -7,6 +7,7 @@ import android.content.Intent
 import android.os.Process
 import android.os.SystemClock
 import android.util.Log
+import androidx.core.content.ContextCompat
 import java.io.File
 import kotlin.system.exitProcess
 
@@ -41,9 +42,12 @@ private fun buildAppRelaunchIntent(context: Context): Intent =
         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
     }
 
+private fun getAppDataDir(context: Context): File? =
+    ContextCompat.getDataDir(context) ?: File(context.applicationInfo.dataDir)
+
 private fun clearAppDataDirectories(context: Context) {
-    val dataDir = context.dataDir
-    val children = dataDir.listFiles().orEmpty()
+    val dataDir = getAppDataDir(context)
+    val children = dataDir?.listFiles().orEmpty()
     if (children.isEmpty()) {
         deleteKnownAppDataDirectories(context)
         return
@@ -55,13 +59,14 @@ private fun clearAppDataDirectories(context: Context) {
 }
 
 private fun deleteKnownAppDataDirectories(context: Context) {
-    listOf(
+    val dataDir = getAppDataDir(context)
+    listOfNotNull(
         context.filesDir,
         context.cacheDir,
         context.codeCacheDir,
         context.noBackupFilesDir,
-        File(context.dataDir, "shared_prefs"),
-        File(context.dataDir, "databases"),
+        dataDir?.let { File(it, "shared_prefs") },
+        dataDir?.let { File(it, "databases") },
         // F-02 fix: ExternalPrefs stores opennow_native.xml in getExternalFilesDir(null);
         // without this the "reset" leaves the main settings file behind.
         context.getExternalFilesDir(null),

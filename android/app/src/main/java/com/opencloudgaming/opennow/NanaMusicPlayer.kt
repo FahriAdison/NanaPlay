@@ -78,6 +78,7 @@ data class NanaTrack(
 
 object NanaMusicPlayer {
 
+    @Volatile
     private var player: androidx.media3.exoplayer.ExoPlayer? = null
 
     private val _tracks = MutableStateFlow<List<NanaTrack>>(emptyList())
@@ -500,6 +501,10 @@ object NanaMusicPlayer {
                                 if (nextIdx >= 0) {
                                     playRequested = true
                                     playInternal(appCtx, nextIdx)
+                                } else {
+                                    playRequested = false
+                                    _isPlaying.value = false
+                                    runCatching { NanaMusicPlaybackService.stop(appCtx) }
                                 }
                             }
                         }

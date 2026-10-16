@@ -231,7 +231,7 @@ internal suspend fun uploadAndroidDiagnosticPaste(
         .put(sanitizedText.toRequestBody("text/plain; charset=utf-8".toMediaType()))
         .build()
     http.newCall(request).execute().use { response ->
-        val body = response.body.string().trim()
+        val body = response.body?.string().orEmpty().trim()
         if (!response.isSuccessful) {
             error("Diagnostics upload failed (HTTP ${response.code})")
         }

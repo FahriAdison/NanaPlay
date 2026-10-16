@@ -102,9 +102,9 @@ object KeymapMapper {
             // release mouse buttons so camera deflection / triggers can't stick
             // while the mouse is handed back to the PC as a menu cursor.
             if (action == ACTION_DOWN) {
+                if (!heldKeys.add(keyCode)) return true
                 onMouseDecay(output)
                 releaseMouseButtons(output)
-                heldKeys.add(keyCode)
             } else {
                 heldKeys.remove(keyCode)
             }

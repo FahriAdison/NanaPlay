@@ -887,6 +887,10 @@ object NativeStreamInputRouter {
     @Volatile
     private var nativeTouchEnabled = false
     private val touchSlots = TouchSlotAllocator()
+
+    init {
+        KeymapMapper.logger = { NativeInputDiagnostics.add(it) }
+    }
     /**
      * Tracks the initial DOWN position per pointer ID for jitter guard in native touch mode.
      * Entries are added on DOWN and removed on UP/CANCEL.
@@ -1288,10 +1292,27 @@ object NativeStreamInputRouter {
         touchSlots.clear()
     }
 
+    private var lastSyntheticMoveLogMs = 0L
+
     fun dispatchSyntheticTouch(phase: Int, normX: Float, normY: Float, pointerId: Int = 0x5443414D): Boolean {
-        val current = client ?: return false
+        val phaseName = when (phase) {
+            TouchPhase.DOWN -> "DOWN"
+            TouchPhase.UP -> "UP"
+            TouchPhase.MOVE -> "MOVE"
+            TouchPhase.CANCEL -> "CANCEL"
+            else -> phase.toString()
+        }
+        val current = client
+        if (current == null) {
+            NativeInputDiagnostics.add("touch-drag $phaseName FAIL client=null ptr=0x${Integer.toHexString(pointerId)}")
+            return false
+        }
         val lifting = phase == TouchPhase.UP || phase == TouchPhase.CANCEL
-        val slot = (if (lifting) touchSlots.release(pointerId) else touchSlots.acquire(pointerId)) ?: return false
+        val slot = if (lifting) touchSlots.release(pointerId) else touchSlots.acquire(pointerId)
+        if (slot == null) {
+            NativeInputDiagnostics.add("touch-drag $phaseName FAIL slot=null (active=${touchSlots.activeCount}) ptr=0x${Integer.toHexString(pointerId)}")
+            return false
+        }
         val record = TouchRecord(
             slot = slot,
             phase = phase,
@@ -1299,7 +1320,16 @@ object NativeStreamInputRouter {
             y = (normY * TOUCH_COORDINATE_MAX).toInt().coerceIn(0, TOUCH_COORDINATE_MAX),
             timestampUs = timestampUs(),
         )
-        return current.sendNativeTouch(listOf(record))
+        val sent = current.sendNativeTouch(listOf(record))
+        val now = SystemClock.uptimeMillis()
+        if (phase != TouchPhase.MOVE || !sent || now - lastSyntheticMoveLogMs >= 200L) {
+            if (phase == TouchPhase.MOVE) lastSyntheticMoveLogMs = now
+            val slotDesc = if (lifting) "$slot (released)" else "$slot"
+            NativeInputDiagnostics.add(
+                "touch-drag $phaseName x=${"%.2f".format(normX)} y=${"%.2f".format(normY)} slot=$slotDesc ptr=0x${Integer.toHexString(pointerId)} sent=$sent"
+            )
+        }
+        return sent
     }
 
     fun dispatchExternalMouseTouch(event: MotionEvent, width: Int, height: Int): Boolean {
@@ -3668,6 +3698,7 @@ class NativeStreamClient(
         this.session = session
         this.settings = settings
         this.networkAdaptor = NetworkConditionAdaptor(settings.dynamicNetworkAdjustment)
+        KeymapMapper.logger = { NativeInputDiagnostics.add(it) }
         transportGeneration += 1
         reconnectAttempts = 0
         persistentStallStartMs = 0L
@@ -4439,8 +4470,8 @@ class NativeStreamClient(
         override fun setLeftStick(x: Float, y: Float) = setVirtualLeftStick(x, y)
         override fun setRightStick(x: Float, y: Float) = setVirtualRightStick(x, y)
         override fun setTrigger(left: Boolean, pressed: Boolean) = setVirtualTrigger(left, pressed)
-        override fun sendTouchDrag(phase: Int, x: Float, y: Float) {
-            NativeStreamInputRouter.dispatchSyntheticTouch(phase, x, y)
+        override fun sendTouchDrag(phase: Int, x: Float, y: Float): Boolean {
+            return NativeStreamInputRouter.dispatchSyntheticTouch(phase, x, y)
         }
     }
 

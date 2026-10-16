@@ -24,7 +24,7 @@ interface GamepadOutput {
     fun setLeftStick(x: Float, y: Float)
     fun setRightStick(x: Float, y: Float)
     fun setTrigger(left: Boolean, pressed: Boolean)
-    fun sendTouchDrag(phase: Int, x: Float, y: Float) {}
+    fun sendTouchDrag(phase: Int, x: Float, y: Float): Boolean = false
 }
 
 /** Gamepad button bit masks, mirroring the app's GamepadButtonMapping. */
@@ -50,6 +50,9 @@ object KeymapMapper {
     @Volatile
     var active: Boolean = false
 
+    @Volatile
+    var logger: ((String) -> Unit)? = null
+
     // Touch phases (mirrors TouchPhase on wire).
     const val TOUCH_PHASE_DOWN = 1
     const val TOUCH_PHASE_UP = 2
@@ -70,17 +73,16 @@ object KeymapMapper {
     private var isTouchDragging = false
     private var currentTouchX = CAMERA_DRAG_ANCHOR_X
     private var currentTouchY = CAMERA_DRAG_ANCHOR_Y
+    private var lastNoiseLogMs = 0L
+    private var lastMoveLogMs = 0L
 
     private val heldKeys = mutableSetOf<Int>()
     private val heldMouseButtons = mutableSetOf<Int>()
-    private var rightStickX = 0f
-    // F-23: auto-decay — recenter the right stick / lift touch shortly after the mouse
-    // stops moving, otherwise the camera keeps spinning on the last delta.
+    // F-23: auto-decay — lift touch shortly after the mouse stops moving.
     private val decayExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "keymap-mouse-decay").apply { isDaemon = true }
     }
     private var decayFuture: java.util.concurrent.ScheduledFuture<*>? = null
-    private var rightStickY = 0f
     private var lastOutput: GamepadOutput? = null
 
     // Android KeyEvent key codes (hardcoded to avoid android.view dependency).
@@ -196,13 +198,21 @@ object KeymapMapper {
     fun onMouseMove(output: GamepadOutput, dx: Float, dy: Float) {
         lastOutput = output
         val magnitude = sqrt(dx * dx + dy * dy)
-        // Abaikan noise sub-piksel (< 0.15px)
-        if (magnitude < 0.15f) return
+        val passed = magnitude >= 0.15f
+        val now = System.currentTimeMillis()
+        if (!passed) {
+            if (now - lastNoiseLogMs >= 1000L) {
+                lastNoiseLogMs = now
+                logger?.invoke("mouse-move: dx=${"%.2f".format(java.util.Locale.US, dx)} dy=${"%.2f".format(java.util.Locale.US, dy)} mag=${"%.3f".format(java.util.Locale.US, magnitude)} noiseGate=reject active=$isTouchDragging")
+            }
+            return
+        }
 
         if (!isTouchDragging) {
             currentTouchX = CAMERA_DRAG_ANCHOR_X
             currentTouchY = CAMERA_DRAG_ANCHOR_Y
-            output.sendTouchDrag(TOUCH_PHASE_DOWN, currentTouchX, currentTouchY)
+            val downSent = output.sendTouchDrag(TOUCH_PHASE_DOWN, currentTouchX, currentTouchY)
+            logger?.invoke("mouse-move: dx=${"%.2f".format(java.util.Locale.US, dx)} dy=${"%.2f".format(java.util.Locale.US, dy)} mag=${"%.2f".format(java.util.Locale.US, magnitude)} noiseGate=pass active=false -> DOWN sent=$downSent")
             isTouchDragging = true
         }
 
@@ -211,29 +221,24 @@ object KeymapMapper {
 
         // Re-centering when hitting boundaries: lift and re-anchor
         if (nextX !in CAMERA_DRAG_MIN_X..CAMERA_DRAG_MAX_X || nextY !in CAMERA_DRAG_MIN_Y..CAMERA_DRAG_MAX_Y) {
-            output.sendTouchDrag(TOUCH_PHASE_UP, currentTouchX, currentTouchY)
+            val upSent = output.sendTouchDrag(TOUCH_PHASE_UP, currentTouchX, currentTouchY)
             currentTouchX = CAMERA_DRAG_ANCHOR_X
             currentTouchY = CAMERA_DRAG_ANCHOR_Y
-            output.sendTouchDrag(TOUCH_PHASE_DOWN, currentTouchX, currentTouchY)
+            val downSent = output.sendTouchDrag(TOUCH_PHASE_DOWN, currentTouchX, currentTouchY)
+            logger?.invoke("mouse-move recenter: upSent=$upSent downSent=$downSent x=${"%.2f".format(java.util.Locale.US, currentTouchX)} y=${"%.2f".format(java.util.Locale.US, currentTouchY)}")
             nextX = currentTouchX + dx * CAMERA_DRAG_SENSITIVITY
             nextY = currentTouchY + dy * CAMERA_DRAG_SENSITIVITY
         }
 
         currentTouchX = nextX.coerceIn(CAMERA_DRAG_MIN_X, CAMERA_DRAG_MAX_X)
         currentTouchY = nextY.coerceIn(CAMERA_DRAG_MIN_Y, CAMERA_DRAG_MAX_Y)
-        output.sendTouchDrag(TOUCH_PHASE_MOVE, currentTouchX, currentTouchY)
+        val moveSent = output.sendTouchDrag(TOUCH_PHASE_MOVE, currentTouchX, currentTouchY)
+        if (now - lastMoveLogMs >= 250L || !moveSent) {
+            lastMoveLogMs = now
+            logger?.invoke("mouse-move: dx=${"%.2f".format(java.util.Locale.US, dx)} dy=${"%.2f".format(java.util.Locale.US, dy)} mag=${"%.2f".format(java.util.Locale.US, magnitude)} noiseGate=pass active=true -> MOVE sent=$moveSent")
+        }
 
-        val unitX = dx / magnitude
-        val unitY = dy / magnitude
-        val normalizedSpeed = (magnitude / MAX_MOUSE_DELTA_PX).coerceIn(0f, 1f)
-        val curvedSpeed = normalizedSpeed.pow(POWER_EXPONENT)
-        val stickDeflection = ANTI_DEADZONE_FLOOR + (1f - ANTI_DEADZONE_FLOOR) * curvedSpeed
-
-        rightStickX = (unitX * stickDeflection).coerceIn(-1f, 1f)
-        rightStickY = (unitY * stickDeflection).coerceIn(-1f, 1f)
-        output.setRightStick(rightStickX, rightStickY)
-
-        // 50ms decay timeout: lifts touch finger & recenters stick when mouse stops
+        // 50ms decay timeout: lifts touch finger when mouse stops
         decayFuture?.cancel(false)
         decayFuture = decayExecutor.schedule(
             { onMouseDecay(output) },
@@ -245,12 +250,10 @@ object KeymapMapper {
     @Synchronized
     fun onMouseDecay(output: GamepadOutput) {
         if (isTouchDragging) {
-            output.sendTouchDrag(TOUCH_PHASE_UP, currentTouchX, currentTouchY)
+            val sent = output.sendTouchDrag(TOUCH_PHASE_UP, currentTouchX, currentTouchY)
+            logger?.invoke("mouse-decay: UP sent=$sent x=${"%.2f".format(java.util.Locale.US, currentTouchX)} y=${"%.2f".format(java.util.Locale.US, currentTouchY)}")
             isTouchDragging = false
         }
-        rightStickX = 0f
-        rightStickY = 0f
-        output.setRightStick(0f, 0f)
     }
 
     /** GFN mouse button ids: 1=left, 2=middle, 3=right. */
@@ -297,7 +300,8 @@ object KeymapMapper {
         decayFuture?.cancel(false)
         decayFuture = null
         if (isTouchDragging) {
-            output.sendTouchDrag(TOUCH_PHASE_UP, currentTouchX, currentTouchY)
+            val sent = output.sendTouchDrag(TOUCH_PHASE_UP, currentTouchX, currentTouchY)
+            logger?.invoke("keymap-releaseAll: UP sent=$sent")
             isTouchDragging = false
         }
         for (keyCode in heldKeys.toList()) {
@@ -307,8 +311,6 @@ object KeymapMapper {
         heldKeys.clear()
         releaseMouseButtons(output)
         output.setLeftStick(0f, 0f)
-        rightStickX = 0f
-        rightStickY = 0f
         output.setRightStick(0f, 0f)
         lastOutput = null
     }
@@ -351,8 +353,4 @@ object KeymapMapper {
         KEYCODE_M -> KeymapButtons.BACK
         else -> 0
     }
-
-    private const val ANTI_DEADZONE_FLOOR = 0.20f
-    private const val MAX_MOUSE_DELTA_PX = 45f
-    private const val POWER_EXPONENT = 0.75f
 }

@@ -1,5 +1,6 @@
 package com.papahchan.nanaplay.keymap
 
+import kotlin.math.pow
 import kotlin.math.sqrt
 
 /**
@@ -172,15 +173,27 @@ object KeymapMapper {
     @Synchronized
     fun onMouseMove(output: GamepadOutput, dx: Float, dy: Float) {
         lastOutput = output
-        // Argon-2: instantaneous deflection (per-event velocity), NOT accumulation.
-        // Accumulating pinned the stick at 1.0f and reversing the mouse couldn't
-        // reverse the camera until the positive buildup drained.
-        rightStickX = (dx / MOUSE_SENSITIVITY_PX).coerceIn(-1f, 1f)
-        rightStickY = (dy / MOUSE_SENSITIVITY_PX).coerceIn(-1f, 1f)
+        val magnitude = sqrt(dx * dx + dy * dy)
+        // Abaikan noise sub-piksel (< 0.35px) agar anti-deadzone floor tidak memicu drift.
+        if (magnitude < 0.35f) return
+
+        val unitX = dx / magnitude
+        val unitY = dy / magnitude
+        val normalizedSpeed = (magnitude / MAX_MOUSE_DELTA_PX).coerceIn(0f, 1f)
+        val curvedSpeed = normalizedSpeed.pow(POWER_EXPONENT)
+        val stickDeflection = ANTI_DEADZONE_FLOOR + (1f - ANTI_DEADZONE_FLOOR) * curvedSpeed
+
+        rightStickX = (unitX * stickDeflection).coerceIn(-1f, 1f)
+        rightStickY = (unitY * stickDeflection).coerceIn(-1f, 1f)
         output.setRightStick(rightStickX, rightStickY)
-        // F-23: re-arm the decay timer on every move (~1 frame at 60fps).
+
+        // K-01: 50ms (~3 frame @ 60fps) agar engine UE5 sempat mengintegrasikan rotasi kamera.
         decayFuture?.cancel(false)
-        decayFuture = decayExecutor.schedule({ onMouseDecay(output) }, 20L, java.util.concurrent.TimeUnit.MILLISECONDS)
+        decayFuture = decayExecutor.schedule(
+            { onMouseDecay(output) },
+            MOUSE_DECAY_TIMEOUT_MS,
+            java.util.concurrent.TimeUnit.MILLISECONDS,
+        )
     }
 
     @Synchronized
@@ -285,5 +298,8 @@ object KeymapMapper {
         else -> 0
     }
 
-    private const val MOUSE_SENSITIVITY_PX = 160f
+    private const val ANTI_DEADZONE_FLOOR = 0.20f
+    private const val MAX_MOUSE_DELTA_PX = 45f
+    private const val POWER_EXPONENT = 0.75f
+    private const val MOUSE_DECAY_TIMEOUT_MS = 50L
 }

@@ -184,6 +184,21 @@ class MainActivity : ComponentActivity() {
             // F-25: swallow OS auto-repeat floods; the mapper tracks held keys itself
             // and ignores repeats, so forwarding them would only waste data-channel bandwidth.
             if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount > 0) return true
+            // K-03: toggle pointer capture + OS cursor tree while Alt is held so the
+            // Android cursor is visible for menu taps, then restore capture on release.
+            if (Build.VERSION.SDK_INT >= 26 &&
+                (event.keyCode == KeyEvent.KEYCODE_ALT_LEFT || event.keyCode == KeyEvent.KEYCODE_ALT_RIGHT)
+            ) {
+                window?.decorView?.let { decor ->
+                    if (event.action == KeyEvent.ACTION_DOWN) {
+                        decor.releasePointerCapture()
+                        decor.showAndroidPointerTree()
+                    } else if (event.action == KeyEvent.ACTION_UP) {
+                        decor.hideAndroidPointerTree()
+                        decor.requestPointerCapture()
+                    }
+                }
+            }
             val client = NativeStreamInputRouter.getClient()
             if (client != null) {
                 val output = client.asGamepadOutput()

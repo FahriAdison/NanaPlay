@@ -8848,7 +8848,7 @@ private fun StreamVideoSurface(
                         }
                         renderer.setOnKeyListener(null)
                         renderer.setOnGenericMotionListener { _, event ->
-                            if (hideExternalMousePointer) pointerRootView.hideAndroidPointerTree()
+                            if (hideExternalMousePointer && !KeymapMapper.isAltBypassActive()) pointerRootView.hideAndroidPointerTree()
                             client.dispatchMotion(event)
                         }
                         renderer.setOnTouchListener { view, event ->
@@ -8978,13 +8978,13 @@ private fun View.clearAndroidMousePointerCapture() {
         .onFailure { error -> NativeInputDiagnostics.add("pointer capture release failed error=${error.javaClass.simpleName}") }
 }
 
-private fun android.view.View.hideAndroidPointerTree() {
+internal fun android.view.View.hideAndroidPointerTree() {
     if (Build.VERSION.SDK_INT < 24) return
     val icon = androidNullPointerIcon(this)
     applyAndroidPointerIconTree(icon)
 }
 
-private fun android.view.View.showAndroidPointerTree() {
+internal fun android.view.View.showAndroidPointerTree() {
     if (Build.VERSION.SDK_INT < 24) return
     applyAndroidPointerIconTree(null)
 }

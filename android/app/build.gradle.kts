@@ -64,8 +64,8 @@ android {
         applicationId = "com.papahchan.nanaplay"
         minSdk = 23
         targetSdk = 36
-        versionCode = 123
-        versionName = "1.0.68"
+        versionCode = 124
+        versionName = "1.0.69"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "POSTHOG_PROJECT_TOKEN", buildConfigString(postHogProjectToken))

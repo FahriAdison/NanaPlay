@@ -1291,6 +1291,9 @@ object NativeStreamInputRouter {
     fun dispatchExternalMouseTouch(event: MotionEvent, width: Int, height: Int): Boolean {
         if (streamUiActive) return false
         if (!event.isExternalMousePointerEvent()) return false
+        if (KeymapMapper.active && KeymapMapper.isAltBypassActive()) {
+            return client?.let { dispatchNativeTouch(event, it, width, height) } == true
+        }
         if (mouseDirectClick) return false // Handled in dispatchTouch instead
         if (shouldPassTouchToNativeUi(event, width, height)) return false
         return client?.dispatchMotion(event) == true
@@ -3323,9 +3326,9 @@ class NativeStreamClient(
     private var virtualLeftStickActive = false
     private var virtualLeftStickX = 0
     private var virtualLeftStickY = 0
-    private var virtualRightStickActive = false
-    private var virtualRightStickX = 0
-    private var virtualRightStickY = 0
+    @Volatile private var virtualRightStickActive = false
+    @Volatile private var virtualRightStickX = 0
+    @Volatile private var virtualRightStickY = 0
     private var virtualControllerVisible = false
     private var physicalControllerConnected = false
     private var physicalControllerActive = false
@@ -4075,16 +4078,21 @@ class NativeStreamClient(
 
     private fun dispatchMouseLikePointer(event: MotionEvent): Boolean {
         // F-23: keyboard→gamepad mouse routing; single funnel for pointer-capture + touch + generic motion.
-        // A-01: while Alt is held, let mouse events fall through to normal handling (PC menu cursor).
-        if (KeymapMapper.active && !KeymapMapper.isAltBypassActive()) {
+        // K-02: while Alt is held, mouse tap/drag is handled in
+        // NativeStreamInputRouter.dispatchExternalMouseTouch — consume here so the
+        // keymap path can't double-handle it.
+        if (KeymapMapper.active) {
+            if (KeymapMapper.isAltBypassActive()) return true
             // F-01: Android 14 drops pointer capture on any screen touch — re-acquire
             // it on mouse click so the camera doesn't freeze at the screen edge.
+            // K-04: capture on the DecorView (rootView, the focused view holding the
+            // OnCapturedPointerListener), not the renderer (isFocusable=false).
             if (Build.VERSION.SDK_INT >= 26 &&
                 (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_BUTTON_PRESS)
             ) {
                 runCatching {
-                    val v = renderer
-                    if (v != null && v.isAttachedToWindow && !v.hasPointerCapture()) v.requestPointerCapture()
+                    val root = renderer?.rootView
+                    if (root != null && root.isAttachedToWindow && !root.hasPointerCapture()) root.requestPointerCapture()
                 }
             }
             val rx = if (Build.VERSION.SDK_INT >= 26) event.getAxisValue(MotionEvent.AXIS_RELATIVE_X) else 0f
@@ -6090,7 +6098,8 @@ class NativeStreamClient(
         if (virtualRightStickActive) virtualRightStickY else if (controllerMouseAssistActive) 0 else lastRightStickY
 
     private fun hasAnyControllerState(): Boolean =
-        physicalControllerConnected ||
+            KeymapMapper.active ||
+            physicalControllerConnected ||
             physicalControllerActive ||
             virtualControllerVisible ||
             physicalButtons != 0 ||

@@ -30,7 +30,10 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Warning
@@ -121,6 +124,8 @@ fun NanaMusicScreen(modifier: Modifier = Modifier) {
     val tracks by NanaMusicPlayer.tracks.collectAsState()
     val isPlaying by NanaMusicPlayer.isPlaying.collectAsState()
     val currentIndex by NanaMusicPlayer.currentIndex.collectAsState()
+    val repeatMode by NanaMusicPlayer.repeatMode.collectAsState()
+    val shuffleEnabled by NanaMusicPlayer.shuffleEnabled.collectAsState()
 
     var tab by remember { mutableIntStateOf(0) }
     // 1.0.33: NanaOnlineSearchState is now a singleton — no remember needed,
@@ -206,21 +211,36 @@ fun NanaMusicScreen(modifier: Modifier = Modifier) {
                 )
             }
             if (tab == 0) {
-                OutlinedButton(
-                    onClick = {
-                        if (!permissionGranted) {
-                            permissionLauncher.launch(musicReadPermission())
-                        } else {
-                            filePicker.launch(arrayOf("audio/*"))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    val hasLocalTracks = remember(tracks) { tracks.any { !it.isOnline } }
+                    if (hasLocalTracks) {
+                        OutlinedButton(
+                            onClick = { NanaMusicPlayer.clearQueue(context) },
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Delete,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Text("Clear", modifier = Modifier.padding(start = 4.dp))
                         }
-                    },
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Add,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Text(stringResource(R.string.music_add), modifier = Modifier.padding(start = 4.dp))
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            if (!permissionGranted) {
+                                permissionLauncher.launch(musicReadPermission())
+                            } else {
+                                filePicker.launch(arrayOf("audio/*"))
+                            }
+                        },
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Add,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(stringResource(R.string.music_add), modifier = Modifier.padding(start = 4.dp))
+                    }
                 }
             }
         }
@@ -259,6 +279,10 @@ fun NanaMusicScreen(modifier: Modifier = Modifier) {
                 onToggle = { NanaMusicPlayer.togglePlayPause(context) },
                 onNext = { NanaMusicPlayer.next(context) },
                 onPrevious = { NanaMusicPlayer.previous(context) },
+                repeatMode = repeatMode,
+                shuffleEnabled = shuffleEnabled,
+                onToggleRepeat = { NanaMusicPlayer.toggleRepeatMode() },
+                onToggleShuffle = { NanaMusicPlayer.toggleShuffle() },
                 modifier = Modifier.weight(1f),
             )
         } else {
@@ -281,6 +305,10 @@ private fun NanaMusicLocalTab(
     onToggle: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
+    repeatMode: NanaRepeatMode = NanaRepeatMode.OFF,
+    shuffleEnabled: Boolean = false,
+    onToggleRepeat: (() -> Unit)? = null,
+    onToggleShuffle: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier.fillMaxSize()) {
@@ -402,6 +430,10 @@ private fun NanaMusicLocalTab(
                 onToggle = onToggle,
                 onNext = onNext,
                 onPrevious = onPrevious,
+                repeatMode = repeatMode,
+                shuffleEnabled = shuffleEnabled,
+                onToggleRepeat = onToggleRepeat,
+                onToggleShuffle = onToggleShuffle,
             )
         }
     }
@@ -423,6 +455,8 @@ private fun NanaMusicOnlineTab(
     val isPlaying by NanaMusicPlayer.isPlaying.collectAsState()
     val currentIndex by NanaMusicPlayer.currentIndex.collectAsState()
     val tracks by NanaMusicPlayer.tracks.collectAsState()
+    val repeatMode by NanaMusicPlayer.repeatMode.collectAsState()
+    val shuffleEnabled by NanaMusicPlayer.shuffleEnabled.collectAsState()
     // 1.0.29: surface playback failures + buffering so "can't play" is diagnosable.
     val playbackError by NanaMusicPlayer.lastError.collectAsState()
     val isBuffering by NanaMusicPlayer.isBuffering.collectAsState()
@@ -659,6 +693,10 @@ private fun NanaMusicOnlineTab(
                     onToggle = { NanaMusicPlayer.togglePlayPause(context) },
                     onNext = { NanaMusicPlayer.next(context) },
                     onPrevious = { NanaMusicPlayer.previous(context) },
+                    repeatMode = repeatMode,
+                    shuffleEnabled = shuffleEnabled,
+                    onToggleRepeat = { NanaMusicPlayer.toggleRepeatMode() },
+                    onToggleShuffle = { NanaMusicPlayer.toggleShuffle() },
                 )
             }
         }
@@ -676,6 +714,10 @@ fun NanaMusicControlBar(
     onToggle: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
+    repeatMode: NanaRepeatMode = NanaRepeatMode.OFF,
+    shuffleEnabled: Boolean = false,
+    onToggleRepeat: (() -> Unit)? = null,
+    onToggleShuffle: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -689,36 +731,61 @@ fun NanaMusicControlBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            IconButton(onClick = onPrevious, enabled = hasTracks, modifier = Modifier.size(44.dp)) {
+            if (onToggleShuffle != null) {
+                IconButton(onClick = onToggleShuffle, enabled = hasTracks, modifier = Modifier.size(36.dp)) {
+                    Icon(
+                        imageVector = Icons.Filled.Shuffle,
+                        contentDescription = "Shuffle",
+                        tint = if (shuffleEnabled) OpenNowPalette.AccentDefault else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+            IconButton(onClick = onPrevious, enabled = hasTracks, modifier = Modifier.size(40.dp)) {
                 Icon(
                     imageVector = Icons.Filled.SkipPrevious,
                     contentDescription = "Previous",
                     tint = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(26.dp),
+                    modifier = Modifier.size(24.dp),
                 )
             }
-            IconButton(onClick = onToggle, enabled = hasTracks, modifier = Modifier.size(52.dp)) {
+            IconButton(onClick = onToggle, enabled = hasTracks, modifier = Modifier.size(48.dp)) {
                 Surface(
                     shape = RoundedCornerShape(999.dp),
                     color = OpenNowPalette.AccentDefault,
                 ) {
-                    Box(Modifier.size(52.dp), contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                             contentDescription = if (isPlaying) "Pause" else "Play",
                             tint = OpenNowPalette.OnAccent,
-                            modifier = Modifier.size(30.dp),
+                            modifier = Modifier.size(28.dp),
                         )
                     }
                 }
             }
-            IconButton(onClick = onNext, enabled = hasTracks, modifier = Modifier.size(44.dp)) {
+            IconButton(onClick = onNext, enabled = hasTracks, modifier = Modifier.size(40.dp)) {
                 Icon(
                     imageVector = Icons.Filled.SkipNext,
                     contentDescription = "Next",
                     tint = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(26.dp),
+                    modifier = Modifier.size(24.dp),
                 )
+            }
+            if (onToggleRepeat != null) {
+                IconButton(onClick = onToggleRepeat, enabled = hasTracks, modifier = Modifier.size(36.dp)) {
+                    val (icon, tint) = when (repeatMode) {
+                        NanaRepeatMode.ONE -> Icons.Filled.RepeatOne to OpenNowPalette.AccentDefault
+                        NanaRepeatMode.ALL -> Icons.Filled.Repeat to OpenNowPalette.AccentDefault
+                        NanaRepeatMode.OFF -> Icons.Filled.Repeat to MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                    }
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = "Repeat",
+                        tint = tint,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
             }
             Text(
                 title,

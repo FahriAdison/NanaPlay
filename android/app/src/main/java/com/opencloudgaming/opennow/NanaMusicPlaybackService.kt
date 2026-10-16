@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import androidx.core.content.ContextCompat
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.Player
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
@@ -14,38 +15,8 @@ import com.papahchan.nanaplay.R
 
 /**
  * NanaPlay 1.0.59 — foreground service hosting the music MediaSession.
- *
- * Problem it fixes: the music ExoPlayer used to live in the bare app process
- * with no service, so once the user left the app (outside a stream) the OS
- * could kill the process at any time and the music just stopped — contradicting
- * the "keeps playing in the background" promise. Now the OS treats music as
- * real media playback: the process survives backgrounding, and the user gets
- * a system media notification + lock-screen / Bluetooth controls for free.
- *
- * Design notes:
- * - The ExoPlayer itself is still owned by the NanaMusicPlayer singleton
- *   (queue, restore, JioSaavn resolve all live there). This service only wraps
- *   that player in a MediaSession. obtainServicePlayer() hops to the main
- *   thread internally if needed, so calling it from onCreate() is safe.
- * - MediaSessionService automatically promotes itself to foreground with a
- *   media notification (DefaultMediaNotificationProvider) while the player is
- *   playing, and drops foreground when it pauses. We only start this service
- *   at moments playback is definitely active (see NanaMusicPlayer), so the
- *   foreground-service timeout can never bite.
- * - onDestroy() releases the session but NOT the player — the singleton owns
- *   it and may outlive the service (e.g. UI-driven playback while the app is
- *   in the foreground).
- *
- * NOT in this file (owned by other agents):
- * - Manifest: <service android:name="...NanaMusicPlaybackService"
- *     android:exported="false" android:foregroundServiceType="mediaPlayback">
- *     <intent-filter>
- *       <action android:name="androidx.media3.session.MediaSessionService" />
- *     </intent-filter>
- *   </service>
- * - Build: implementation("androidx.media3:media3-session:1.10.1")
- *   (media3-session is NOT a dependency yet — the service won't compile
- *   without it).
+ * 1.0.71 — wraps ExoPlayer in a ForwardingPlayer so MediaSession exposes
+ * working Next and Previous actions to notifications, lockscreen, and Bluetooth.
  */
 class NanaMusicPlaybackService : MediaSessionService() {
 
@@ -54,22 +25,64 @@ class NanaMusicPlaybackService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        // Custom provider so the notification uses our channel/id instead of
-        // the Media3 defaults.
         setMediaNotificationProvider(
             DefaultMediaNotificationProvider.Builder(this)
                 .setChannelId(CHANNEL_ID)
                 .setNotificationId(NOTIFICATION_ID)
                 .build(),
         )
-        val player = NanaMusicPlayer.obtainServicePlayer(this)
-        session = MediaSession.Builder(this, player)
+        val basePlayer = NanaMusicPlayer.obtainServicePlayer(this)
+        val forwardingPlayer = NanaForwardingPlayer(basePlayer, this)
+        session = MediaSession.Builder(this, forwardingPlayer)
             .setId("nana-music")
             .build()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? =
         session
+
+    private class NanaForwardingPlayer(
+        player: Player,
+        private val context: Context,
+    ) : ForwardingPlayer(player) {
+
+        override fun getAvailableCommands(): Player.Commands {
+            val base = super.getAvailableCommands()
+            return base.buildUpon()
+                .add(Player.COMMAND_SEEK_TO_NEXT)
+                .add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+                .add(Player.COMMAND_SEEK_TO_PREVIOUS)
+                .add(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+                .build()
+        }
+
+        override fun isCommandAvailable(command: Int): Boolean {
+            if (command == Player.COMMAND_SEEK_TO_NEXT ||
+                command == Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM ||
+                command == Player.COMMAND_SEEK_TO_PREVIOUS ||
+                command == Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM
+            ) {
+                return true
+            }
+            return super.isCommandAvailable(command)
+        }
+
+        override fun seekToNext() {
+            NanaMusicPlayer.next(context)
+        }
+
+        override fun seekToNextMediaItem() {
+            NanaMusicPlayer.next(context)
+        }
+
+        override fun seekToPrevious() {
+            NanaMusicPlayer.previous(context)
+        }
+
+        override fun seekToPreviousMediaItem() {
+            NanaMusicPlayer.previous(context)
+        }
+    }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         // Swiping the app away must NOT stop the music — background playback

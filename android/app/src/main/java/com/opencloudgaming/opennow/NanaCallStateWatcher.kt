@@ -73,11 +73,15 @@ object NanaCallStateWatcher {
     }
 
     private fun handleAudioMode(mode: Int) {
-        // F-26: MODE_IN_COMMUNICATION is also set by WebRTC when the in-stream
-        // mic is on — don't pause music for that, only for real calls.
-        if (mode == AudioManager.MODE_IN_CALL ||
+        // M-04: MODE_RINGTONE (1) pauses music when the phone is ringing with an incoming call;
+        // MODE_IN_CALL (2) pauses during active calls; mode 4 (MODE_CALL_SCREENING) during screening;
+        // F-26: MODE_IN_COMMUNICATION (3) pauses during VoIP calls outside an active game stream.
+        val isCallActiveOrRinging = mode == AudioManager.MODE_IN_CALL ||
+            mode == AudioManager.MODE_RINGTONE ||
+            mode == 4 ||
             (mode == AudioManager.MODE_IN_COMMUNICATION && NativeStreamInputRouter.getClient() == null)
-        ) {
+
+        if (isCallActiveOrRinging) {
             NanaMusicPlayer.pauseForCall()
         } else {
             NanaMusicPlayer.resumeAfterCall()

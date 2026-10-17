@@ -1146,6 +1146,31 @@ private val primaryCatalogStoreKeys = setOf(
 
 private val ownedLibraryStatuses = setOf("MANUAL", "PLATFORM_SYNC", "IN_LIBRARY")
 
+enum class GamePlayabilityStatus {
+    NORMAL,
+    MAINTENANCE,
+    PATCHING,
+}
+
+internal fun gamePlayabilityStatus(raw: String?): GamePlayabilityStatus {
+    if (raw.isNullOrBlank()) return GamePlayabilityStatus.NORMAL
+    val normalized = raw.trim().lowercase()
+    return when {
+        normalized.contains("patch") -> GamePlayabilityStatus.PATCHING
+        normalized.contains("maintenance") || normalized.contains("offline") -> GamePlayabilityStatus.MAINTENANCE
+        else -> GamePlayabilityStatus.NORMAL
+    }
+}
+
+internal fun GameInfo.effectivePlayabilityStatus(): GamePlayabilityStatus {
+    val stateStatus = gamePlayabilityStatus(playabilityState)
+    if (stateStatus != GamePlayabilityStatus.NORMAL) return stateStatus
+    val selectedVariant = variants.getOrNull(selectedVariantIndex) ?: variants.firstOrNull()
+    val variantStatus = gamePlayabilityStatus(selectedVariant?.gfnStatus)
+    if (variantStatus != GamePlayabilityStatus.NORMAL) return variantStatus
+    return GamePlayabilityStatus.NORMAL
+}
+
 internal fun isOwnedLibraryStatus(status: String?): Boolean =
     status in ownedLibraryStatuses
 

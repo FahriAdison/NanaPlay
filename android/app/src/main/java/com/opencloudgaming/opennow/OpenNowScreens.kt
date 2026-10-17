@@ -138,6 +138,8 @@ import androidx.compose.material.icons.rounded.FiberManualRecord
 import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material.icons.rounded.Language
+import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PhotoCamera
 import androidx.compose.material.icons.rounded.SportsEsports
@@ -5763,6 +5765,47 @@ private fun GameDetailsSheet(
                         )
                     }
                 }
+            val playabilityStatus = game.effectivePlayabilityStatus()
+            var showWarningDialog by remember(game.id) { mutableStateOf(false) }
+            var pendingPlayAction by remember(game.id) { mutableStateOf<(() -> Unit)?>(null) }
+
+            val handlePlay: (GameInfo) -> Unit = { targetGame ->
+                if (playabilityStatus != GamePlayabilityStatus.NORMAL) {
+                    pendingPlayAction = {
+                        onDismiss()
+                        onPlay(targetGame)
+                    }
+                    showWarningDialog = true
+                } else {
+                    onDismiss()
+                    onPlay(targetGame)
+                }
+            }
+            val handleChooseStore: (GameInfo) -> Unit = { targetGame ->
+                if (playabilityStatus != GamePlayabilityStatus.NORMAL) {
+                    pendingPlayAction = {
+                        onDismiss()
+                        onChooseStore(targetGame)
+                    }
+                    showWarningDialog = true
+                } else {
+                    onDismiss()
+                    onChooseStore(targetGame)
+                }
+            }
+            val handlePlayOnTv: (GameInfo) -> Unit = { targetGame ->
+                if (playabilityStatus != GamePlayabilityStatus.NORMAL) {
+                    pendingPlayAction = {
+                        onDismiss()
+                        onPlayOnTv(targetGame)
+                    }
+                    showWarningDialog = true
+                } else {
+                    onDismiss()
+                    onPlayOnTv(targetGame)
+                }
+            }
+
             BoxWithConstraints(
                 Modifier
                     .fillMaxSize()
@@ -5777,13 +5820,13 @@ private fun GameDetailsSheet(
                         favorite = favorite,
                         defaultVariantId = defaultVariantId,
                         hasPerGameSettings = perGameSettings.containsKey(game.id),
-                        onPlay = onPlay,
-                        onChooseStore = onChooseStore,
+                        onPlay = handlePlay,
+                        onChooseStore = handleChooseStore,
                         onFavorite = onFavorite,
                         onSavePerGameSettings = { onSavePerGameSettings(game) },
                         onResetPerGameSettings = { onResetPerGameSettings(game) },
                         connectedTvName = connectedTvName,
-                        onPlayOnTv = onPlayOnTv,
+                        onPlayOnTv = handlePlayOnTv,
                         onDismiss = onDismiss,
                         gameFocusRequester = gameFocusRequester,
                         playFocusRequester = playFocusRequester,
@@ -5796,18 +5839,62 @@ private fun GameDetailsSheet(
                         favorite = favorite,
                         defaultVariantId = defaultVariantId,
                         hasPerGameSettings = perGameSettings.containsKey(game.id),
-                        onPlay = onPlay,
-                        onChooseStore = onChooseStore,
+                        onPlay = handlePlay,
+                        onChooseStore = handleChooseStore,
                         onFavorite = onFavorite,
                         onSavePerGameSettings = { onSavePerGameSettings(game) },
                         onResetPerGameSettings = { onResetPerGameSettings(game) },
                         connectedTvName = connectedTvName,
-                        onPlayOnTv = onPlayOnTv,
+                        onPlayOnTv = handlePlayOnTv,
                         onDismiss = onDismiss,
                         gameFocusRequester = gameFocusRequester,
                         playFocusRequester = playFocusRequester,
                     )
                 }
+            }
+            if (showWarningDialog && pendingPlayAction != null) {
+                val isPatching = playabilityStatus == GamePlayabilityStatus.PATCHING
+                val title = stringResource(
+                    if (isPatching) R.string.game_status_patching_title else R.string.game_status_maintenance_title,
+                )
+                val message = stringResource(
+                    if (isPatching) R.string.game_status_patching_message else R.string.game_status_maintenance_message,
+                ) + "\n\n" + stringResource(R.string.game_status_launch_warning_message)
+
+                AlertDialog(
+                    onDismissRequest = {
+                        showWarningDialog = false
+                        pendingPlayAction = null
+                    },
+                    title = {
+                        Text(title, fontWeight = FontWeight.Bold)
+                    },
+                    text = {
+                        Text(message)
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                val action = pendingPlayAction
+                                showWarningDialog = false
+                                pendingPlayAction = null
+                                action?.invoke()
+                            },
+                        ) {
+                            Text(stringResource(R.string.action_continue_anyway))
+                        }
+                    },
+                    dismissButton = {
+                        OutlinedButton(
+                            onClick = {
+                                showWarningDialog = false
+                                pendingPlayAction = null
+                            },
+                        ) {
+                            Text(stringResource(R.string.action_cancel))
+                        }
+                    },
+                )
             }
             }
         }
@@ -5866,7 +5953,6 @@ private fun GameDetailsLandscapeContent(
                 )
                 .clip(RoundedCornerShape(20.dp))
                 .clickable {
-                    onDismiss()
                     onPlay(game)
                 },
         ) {
@@ -5896,7 +5982,6 @@ private fun GameDetailsLandscapeContent(
                     connectedTvName?.let { tvName ->
                         OutlinedButton(
                             onClick = {
-                                onDismiss()
                                 onPlayOnTv(game)
                             },
                             modifier = Modifier.fillMaxWidth(),
@@ -5906,11 +5991,9 @@ private fun GameDetailsLandscapeContent(
                     }
                     LongPressPlayButton(
                         onClick = {
-                            onDismiss()
                             onPlay(game)
                         },
                         onLongClick = {
-                            onDismiss()
                             onChooseStore(game)
                         },
                         modifier = Modifier
@@ -5984,11 +6067,9 @@ private fun GameDetailsLandscapeContent(
                     }
                     LongPressPlayButton(
                         onClick = {
-                            onDismiss()
                             onPlay(game)
                         },
                         onLongClick = {
-                            onDismiss()
                             onChooseStore(game)
                         },
                         modifier = Modifier
@@ -5998,7 +6079,6 @@ private fun GameDetailsLandscapeContent(
                     connectedTvName?.let {
                         OutlinedButton(
                             onClick = {
-                                onDismiss()
                                 onPlayOnTv(game)
                             },
                             modifier = Modifier.weight(1f).height(48.dp),
@@ -6021,6 +6101,7 @@ private fun GameDetailsCompactInfoContent(
     onSavePerGameSettings: () -> Unit,
     onResetPerGameSettings: () -> Unit,
 ) {
+    GameMaintenanceBanner(game = game, compact = true)
     OwnershipStatusRow(game = game, compact = true)
     GameGenreChips(game = game, compact = true)
     GameScreenshotGallery(game = game, compact = true)
@@ -6082,7 +6163,6 @@ private fun GameDetailsScrollableContent(
                         )
                         .clip(RoundedCornerShape(OpenNowRadius.lg))
                         .clickable {
-                            onDismiss()
                             onPlay(game)
                         },
                 ) {
@@ -6112,6 +6192,7 @@ private fun GameDetailsScrollableContent(
             item {
                 Column(Modifier.padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     val description = gameDescriptionForDetails(game)
+                    GameMaintenanceBanner(game = game, compact = false)
                     OwnershipStatusRow(game = game, compact = false)
                     GameGenreChips(game = game, compact = false)
                     GameScreenshotGallery(game = game, compact = false)
@@ -6164,11 +6245,9 @@ private fun GameDetailsScrollableContent(
                 )
                 LongPressPlayButton(
                     onClick = {
-                        onDismiss()
                         onPlay(game)
                     },
                     onLongClick = {
-                        onDismiss()
                         onChooseStore(game)
                     },
                     modifier = Modifier
@@ -6178,7 +6257,6 @@ private fun GameDetailsScrollableContent(
                 connectedTvName?.let { tvName ->
                     IconButton(
                         onClick = {
-                            onDismiss()
                             onPlayOnTv(game)
                         },
                         modifier = Modifier.size(48.dp),
@@ -6581,6 +6659,69 @@ private fun GameTitleBlock(game: GameInfo, compact: Boolean) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+@Composable
+private fun GameMaintenanceBanner(game: GameInfo, compact: Boolean) {
+    val status = game.effectivePlayabilityStatus()
+    if (status == GamePlayabilityStatus.NORMAL) return
+
+    val isPatching = status == GamePlayabilityStatus.PATCHING
+    val backgroundColor = if (isPatching) Color(0xFF132840) else Color(0xFF4A1810)
+    val borderColor = if (isPatching) Color(0xFF388BFD) else Color(0xFFE5534B)
+    val iconColor = if (isPatching) Color(0xFF79C0FF) else Color(0xFFFFA198)
+    val titleText = stringResource(
+        if (isPatching) R.string.game_status_patching_title else R.string.game_status_maintenance_title
+    )
+    val messageText = stringResource(
+        if (isPatching) R.string.game_status_patching_message else R.string.game_status_maintenance_message
+    )
+    val icon = if (isPatching) Icons.Rounded.Sync else Icons.Rounded.Warning
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(if (compact) 12.dp else 14.dp),
+        color = backgroundColor,
+        border = BorderStroke(1.dp, borderColor.copy(alpha = 0.85f)),
+        tonalElevation = 2.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = if (compact) 12.dp else 14.dp, vertical = if (compact) 10.dp else 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(if (compact) 32.dp else 36.dp)
+                    .clip(CircleShape)
+                    .background(borderColor.copy(alpha = 0.22f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = titleText,
+                    tint = iconColor,
+                    modifier = Modifier.size(if (compact) 18.dp else 22.dp),
+                )
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = titleText,
+                    color = TextPrimary,
+                    style = if (compact) MaterialTheme.typography.labelLarge else MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = messageText,
+                    color = TextPrimary.copy(alpha = 0.92f),
+                    style = if (compact) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
     }
 }
 

@@ -137,17 +137,57 @@ class LaunchOwnershipTest {
         assertEquals(listOf("Xbox"), libraryStoreDisplayNames(game))
     }
 
+    @Test
+    fun gamePlayabilityStatusCategorization() {
+        assertEquals(GamePlayabilityStatus.PATCHING, gamePlayabilityStatus("PATCHING"))
+        assertEquals(GamePlayabilityStatus.PATCHING, gamePlayabilityStatus("game_patching"))
+        assertEquals(GamePlayabilityStatus.PATCHING, gamePlayabilityStatus("APP_PATCHING_STATUS"))
+        assertEquals(GamePlayabilityStatus.PATCHING, gamePlayabilityStatus("ON_SEAT_PATCHING"))
+
+        assertEquals(GamePlayabilityStatus.MAINTENANCE, gamePlayabilityStatus("MAINTENANCE"))
+        assertEquals(GamePlayabilityStatus.MAINTENANCE, gamePlayabilityStatus("game_offline"))
+        assertEquals(GamePlayabilityStatus.MAINTENANCE, gamePlayabilityStatus("UNDER_MAINTENANCE"))
+        assertEquals(GamePlayabilityStatus.MAINTENANCE, gamePlayabilityStatus("SERVER_MAINTENANCE"))
+        assertEquals(GamePlayabilityStatus.MAINTENANCE, gamePlayabilityStatus("OFFLINE"))
+
+        assertEquals(GamePlayabilityStatus.NORMAL, gamePlayabilityStatus(null))
+        assertEquals(GamePlayabilityStatus.NORMAL, gamePlayabilityStatus(""))
+        assertEquals(GamePlayabilityStatus.NORMAL, gamePlayabilityStatus("PLAYABLE"))
+        assertEquals(GamePlayabilityStatus.NORMAL, gamePlayabilityStatus("AVAILABLE"))
+        assertEquals(GamePlayabilityStatus.NORMAL, gamePlayabilityStatus("UNKNOWN"))
+    }
+
+    @Test
+    fun effectivePlayabilityStatusEvaluatesGameAndVariants() {
+        val normalGame = game(listOf(variant(gfnStatus = "AVAILABLE")), playabilityState = "PLAYABLE")
+        assertEquals(GamePlayabilityStatus.NORMAL, normalGame.effectivePlayabilityStatus())
+
+        val maintenanceGame = game(listOf(variant(gfnStatus = "AVAILABLE")), playabilityState = "MAINTENANCE")
+        assertEquals(GamePlayabilityStatus.MAINTENANCE, maintenanceGame.effectivePlayabilityStatus())
+
+        val patchingGame = game(listOf(variant(gfnStatus = "AVAILABLE")), playabilityState = "PATCHING")
+        assertEquals(GamePlayabilityStatus.PATCHING, patchingGame.effectivePlayabilityStatus())
+
+        val variantMaintenanceGame = game(listOf(variant(gfnStatus = "SERVER_MAINTENANCE")), playabilityState = null)
+        assertEquals(GamePlayabilityStatus.MAINTENANCE, variantMaintenanceGame.effectivePlayabilityStatus())
+
+        val variantPatchingGame = game(listOf(variant(gfnStatus = "ON_SEAT_PATCHING")), playabilityState = "PLAYABLE")
+        assertEquals(GamePlayabilityStatus.PATCHING, variantPatchingGame.effectivePlayabilityStatus())
+    }
+
     private fun variant(
         id: String = "variant",
         store: String = "Steam",
         libraryStatus: String? = null,
         librarySelected: Boolean? = null,
+        gfnStatus: String? = null,
     ): GameVariant =
         GameVariant(
             id = id,
             store = store,
             librarySelected = librarySelected,
             libraryStatus = libraryStatus,
+            gfnStatus = gfnStatus,
         )
 
     private fun game(
@@ -158,6 +198,7 @@ class LaunchOwnershipTest {
         playType: String? = null,
         isInLibrary: Boolean = false,
         selectedVariantIndex: Int = 0,
+        playabilityState: String? = null,
     ): GameInfo =
         GameInfo(
             id = id,
@@ -167,5 +208,6 @@ class LaunchOwnershipTest {
             isInLibrary = isInLibrary,
             variants = variants,
             selectedVariantIndex = selectedVariantIndex,
+            playabilityState = playabilityState,
         )
 }

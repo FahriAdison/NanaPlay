@@ -746,4 +746,11 @@
     <string name="network_adjustment_none">No adjustment</string>
     <string name="network_adjustment_optimal_quality">Optimal quality</string>
     <string name="network_adjustment_optimal_latency">Optimal latency</string>
+    <!-- Game maintenance & patching status -->
+    <string name="game_status_patching_title">Patching</string>
+    <string name="game_status_maintenance_title">Maintenance</string>
+    <string name="game_status_patching_message">This game is currently being patched. Try again in a few hours.</string>
+    <string name="game_status_maintenance_message">This game is currently offline for maintenance. Check back later.</string>
+    <string name="game_status_launch_warning_message">This game may not launch correctly. Continue anyway?</string>
+    <string name="action_continue_anyway">Continue anyway</string>
 </resources>

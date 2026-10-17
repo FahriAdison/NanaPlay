@@ -93,6 +93,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -1986,63 +1987,67 @@ private fun MainShell(
                 ScaffoldDefaults.contentWindowInsets
             },
             bottomBar = {
-                // 1.0.49: hide bottom bar in console mode (has its own ribbon)
-                if (!inStream && !showNavigationRail && !consoleModeActive) {
+                // 1.0.49: hide NavigationBar in console mode (has its own ribbon)
+                // 1.0.74: preserve MinimizedQueueDock in console mode portrait
+                if (!inStream && !showNavigationRail) {
                     Column {
                         if (showMinimizedQueueDock) {
                             MinimizedQueueDock(
                                 state = state,
                                 onRestore = viewModel::restoreStreamLaunch,
                                 onCancel = viewModel::stopStream,
+                                modifier = if (consoleModeActive) Modifier.navigationBarsPadding() else Modifier,
                             )
                         }
-                        NavigationBar(
-                            containerColor = if (state.page == AppPage.Settings) SettingsBackground else MaterialTheme.colorScheme.background,
-                            tonalElevation = 0.dp,
-                        ) {
-                            BottomNavItem(
-                                selected = state.page == AppPage.Home,
-                                onClick = {
-                                    visibleSearchTarget = null
-                                    viewModel.setPage(AppPage.Home)
-                                },
-                                iconRes = R.drawable.ic_tab_store,
-                                label = stringResource(R.string.nav_store),
-                            )
-                            BottomNavItem(
-                                // Search is a mode, not a destination: it never claims selection.
-                                selected = false,
-                                onClick = { revealSearch() },
-                                iconRes = R.drawable.ic_search,
-                                label = stringResource(R.string.nav_search),
-                            )
-                            BottomNavItem(
-                                selected = state.page == AppPage.Library,
-                                onClick = {
-                                    visibleSearchTarget = null
-                                    viewModel.setPage(AppPage.Library)
-                                },
-                                iconRes = R.drawable.ic_tab_library,
-                                label = stringResource(R.string.nav_library),
-                            )
-                            // NanaPlay 1.0.25: local music player tab.
-                            BottomNavVectorItem(
-                                selected = state.page == AppPage.Music,
-                                onClick = {
-                                    visibleSearchTarget = null
-                                    viewModel.setPage(AppPage.Music)
-                                },
-                                imageVector = Icons.Filled.MusicNote,
-                                label = "Music",
-                            )
-                            BottomNavItem(
-                                selected = state.page == AppPage.Settings,
-                                onClick = {
-                                    navigateFromAppChrome(AppPage.Settings)
-                                },
-                                iconRes = R.drawable.ic_tab_settings,
-                                label = stringResource(R.string.nav_settings),
-                            )
+                        if (!consoleModeActive) {
+                            NavigationBar(
+                                containerColor = if (state.page == AppPage.Settings) SettingsBackground else MaterialTheme.colorScheme.background,
+                                tonalElevation = 0.dp,
+                            ) {
+                                BottomNavItem(
+                                    selected = state.page == AppPage.Home,
+                                    onClick = {
+                                        visibleSearchTarget = null
+                                        viewModel.setPage(AppPage.Home)
+                                    },
+                                    iconRes = R.drawable.ic_tab_store,
+                                    label = stringResource(R.string.nav_store),
+                                )
+                                BottomNavItem(
+                                    // Search is a mode, not a destination: it never claims selection.
+                                    selected = false,
+                                    onClick = { revealSearch() },
+                                    iconRes = R.drawable.ic_search,
+                                    label = stringResource(R.string.nav_search),
+                                )
+                                BottomNavItem(
+                                    selected = state.page == AppPage.Library,
+                                    onClick = {
+                                        visibleSearchTarget = null
+                                        viewModel.setPage(AppPage.Library)
+                                    },
+                                    iconRes = R.drawable.ic_tab_library,
+                                    label = stringResource(R.string.nav_library),
+                                )
+                                // NanaPlay 1.0.25: local music player tab.
+                                BottomNavVectorItem(
+                                    selected = state.page == AppPage.Music,
+                                    onClick = {
+                                        visibleSearchTarget = null
+                                        viewModel.setPage(AppPage.Music)
+                                    },
+                                    imageVector = Icons.Filled.MusicNote,
+                                    label = "Music",
+                                )
+                                BottomNavItem(
+                                    selected = state.page == AppPage.Settings,
+                                    onClick = {
+                                        navigateFromAppChrome(AppPage.Settings)
+                                    },
+                                    iconRes = R.drawable.ic_tab_settings,
+                                    label = stringResource(R.string.nav_settings),
+                                )
+                            }
                         }
                     }
                 }

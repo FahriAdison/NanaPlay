@@ -46,6 +46,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -97,7 +99,7 @@ fun NanaBrowserPanel(
         val maxHeightPx = with(density) { maxHeight.toPx() }
 
         // Size presets: small / medium / large.
-        var sizeIndex by remember { mutableIntStateOf(1) }
+        var sizeIndex by rememberSaveable { mutableIntStateOf(1) }
         val panelWidth: Dp
         val panelHeight: Dp
         when (sizeIndex) {
@@ -108,15 +110,33 @@ fun NanaBrowserPanel(
         val panelWidthPx = with(density) { panelWidth.toPx() }.coerceAtMost(maxWidthPx)
         val panelHeightPx = with(density) { panelHeight.toPx() }.coerceAtMost(maxHeightPx)
 
-        var offsetPx by remember(maxWidthPx, maxHeightPx) {
-            mutableStateOf(
-                Offset(
-                    x = ((maxWidthPx - panelWidthPx) / 2f).coerceAtLeast(0f),
-                    y = ((maxHeightPx - panelHeightPx) / 2f).coerceAtLeast(0f),
-                ),
-            )
+        // 1.0.74: rememberSaveable preserves the user-dragged coordinates across
+        // recompositions and Activity pause/restart (minimize to PiP/home).
+        // Using Float.NaN as uninitialized sentinel so default center position is used initially.
+        var userOffsetX by rememberSaveable { mutableStateOf(Float.NaN) }
+        var userOffsetY by rememberSaveable { mutableStateOf(Float.NaN) }
+        var minimized by rememberSaveable { mutableStateOf(false) }
+
+        val effectivePanelHeightPx = with(density) { if (minimized) 52.dp.toPx() else panelHeightPx }
+        val defaultX = ((maxWidthPx - panelWidthPx) / 2f).coerceAtLeast(0f)
+        val defaultY = ((maxHeightPx - panelHeightPx) / 2f).coerceAtLeast(0f)
+        val maxX = (maxWidthPx - panelWidthPx).coerceAtLeast(0f)
+        val maxY = (maxHeightPx - effectivePanelHeightPx).coerceAtLeast(0f)
+
+        val currentX = if (userOffsetX.isNaN()) defaultX else userOffsetX.coerceIn(0f, maxX)
+        val currentY = if (userOffsetY.isNaN()) defaultY else userOffsetY.coerceIn(0f, maxY)
+
+        // rememberUpdatedState ensures detectDragGestures in pointerInput(Unit) always
+        // references the latest layout constraints and mutates the live state instead of
+        // capturing an orphaned State object after resize/minimize.
+        val onDragUpdate by rememberUpdatedState { dragAmount: Offset ->
+            // Read live state (not composition-cached currentX/currentY) so rapid
+            // successive drag events don't drop deltas before recomposition runs.
+            val baseX = if (userOffsetX.isNaN()) defaultX else userOffsetX.coerceIn(0f, maxX)
+            val baseY = if (userOffsetY.isNaN()) defaultY else userOffsetY.coerceIn(0f, maxY)
+            userOffsetX = (baseX + dragAmount.x).coerceIn(0f, maxX)
+            userOffsetY = (baseY + dragAmount.y).coerceIn(0f, maxY)
         }
-        var minimized by remember { mutableStateOf(false) }
         var addressText by remember { mutableStateOf(BROWSER_HOME_URL) }
         // 1.0.35: track whether the user is actively editing the address bar.
         // WebViewClient.onPageStarted fires on redirects/iframe loads and would
@@ -136,7 +156,7 @@ fun NanaBrowserPanel(
 
         Surface(
             modifier = Modifier
-                .offset { IntOffset(offsetPx.x.roundToInt(), offsetPx.y.roundToInt()) }
+                .offset { IntOffset(currentX.roundToInt(), currentY.roundToInt()) }
                 // Register bounds so touches on the panel are NOT forwarded to the game.
                 .streamTouchPassthrough(PASSTHROUGH_ID_BROWSER),
             shape = RoundedCornerShape(16.dp),
@@ -162,12 +182,7 @@ fun NanaBrowserPanel(
                             detectDragGestures(
                                 onDrag = { change, dragAmount ->
                                     change.consume()
-                                    offsetPx = Offset(
-                                        x = (offsetPx.x + dragAmount.x)
-                                            .coerceIn(0f, (maxWidthPx - panelWidthPx).coerceAtLeast(0f)),
-                                        y = (offsetPx.y + dragAmount.y)
-                                            .coerceIn(0f, (maxHeightPx - panelHeightPx).coerceAtLeast(0f)),
-                                    )
+                                    onDragUpdate(dragAmount)
                                 },
                             )
                         }
@@ -386,10 +401,12 @@ fun NanaBrowserPanel(
 
         // Keep the panel inside the screen when its size preset changes.
         DisposableEffect(panelWidthPx, panelHeightPx) {
-            offsetPx = Offset(
-                x = offsetPx.x.coerceIn(0f, (maxWidthPx - panelWidthPx).coerceAtLeast(0f)),
-                y = offsetPx.y.coerceIn(0f, (maxHeightPx - panelHeightPx).coerceAtLeast(0f)),
-            )
+            if (!userOffsetX.isNaN()) {
+                userOffsetX = userOffsetX.coerceIn(0f, (maxWidthPx - panelWidthPx).coerceAtLeast(0f))
+            }
+            if (!userOffsetY.isNaN()) {
+                userOffsetY = userOffsetY.coerceIn(0f, (maxHeightPx - panelHeightPx).coerceAtLeast(0f))
+            }
             onDispose { }
         }
     }

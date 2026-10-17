@@ -36,6 +36,24 @@ internal fun authenticationRefreshClientIds(
         deviceClientId,
     ).distinct()
 
+/** Reload WorkManager's saved tokens; only invoke refresh inside the existing expiry window. */
+internal suspend fun authSessionForLaunch(
+    expected: AuthSession,
+    load: () -> AuthSession?,
+    refresh: suspend () -> AuthSession?,
+    nowMs: Long = System.currentTimeMillis(),
+): AuthSession {
+    fun checked(session: AuthSession?): AuthSession {
+        checkNotNull(session) { "Please log in again before starting a game." }
+        check(session.user.userId == expected.user.userId && session.provider.idpId == expected.provider.idpId) {
+            "The signed-in account changed. Start the game again."
+        }
+        return session
+    }
+    val saved = checked(load())
+    return if (saved.tokens.expiresAt - nowMs < TOKEN_REFRESH_WINDOW_MS) checked(refresh()) else saved
+}
+
 internal object AndroidAuthRefreshScheduler {
     fun schedule(context: Context) {
         val constraints = Constraints.Builder()

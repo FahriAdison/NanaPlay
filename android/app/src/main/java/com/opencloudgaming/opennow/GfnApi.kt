@@ -160,6 +160,41 @@ internal class SessionClaimNotReadyException(
     val latestSession: SessionInfo?,
 ) : IllegalStateException("Session did not become ready after claiming.")
 
+internal class CloudMatchRequestStatusException(
+    val statusCode: Int?,
+    val statusDescription: String?,
+    val unifiedErrorCode: String?,
+) : IllegalStateException(
+    buildString {
+        append("CloudMatch returned status ")
+        append(statusCode?.toString() ?: "unknown")
+        statusDescription?.trim()?.takeIf { it.isNotEmpty() }?.let {
+            append(": ")
+            append(it)
+        }
+        unifiedErrorCode?.trim()?.takeIf { it.isNotEmpty() }?.let {
+            append(" (unified error ")
+            append(it)
+            append(')')
+        }
+    },
+)
+
+/** An unsuccessful lookup cannot establish that it is safe to create another session. */
+internal fun checkActiveSessionsResponse(httpStatus: Int, payload: JsonObject?) {
+    val requestStatus = payload?.obj("requestStatus")
+    val statusCode = requestStatus?.int("statusCode")
+    if (statusCode != null && statusCode != 1) {
+        throw CloudMatchRequestStatusException(
+            statusCode = statusCode,
+            statusDescription = requestStatus.string("statusDescription"),
+            unifiedErrorCode = requestStatus.string("unifiedErrorCode"),
+        )
+    }
+    check(httpStatus in 200..299) { "Active session lookup failed (HTTP $httpStatus)." }
+    check(statusCode == 1) { "Active session lookup returned an invalid response." }
+}
+
 val OpenNowJson: Json = Json {
     ignoreUnknownKeys = true
     explicitNulls = false
@@ -2458,9 +2493,9 @@ class GfnSessionRepository(
             .build()
         val (code, text) = requestHttp.awaitText(request)
         recordDiagnosticResponse("session.active", request, code, text)
-        if (code !in 200..299) return emptyList()
-        val payload = runCatching { OpenNowJson.parseToJsonElement(text).jsonObject }.getOrNull() ?: return emptyList()
-        if (payload.obj("requestStatus")?.int("statusCode") != 1) return emptyList()
+        val payload = runCatching { OpenNowJson.parseToJsonElement(text).jsonObject }.getOrNull()
+        checkActiveSessionsResponse(code, payload)
+        checkNotNull(payload)
         return payload.arr("sessions")?.mapNotNull { raw ->
             val s = raw.asObject() ?: return@mapNotNull null
             val status = s.int("status") ?: return@mapNotNull null

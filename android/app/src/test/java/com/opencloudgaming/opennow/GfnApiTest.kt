@@ -20,6 +20,34 @@ import org.junit.Test
 
 class GfnApiTest {
     @Test
+    fun activeSessionLookupPreservesAuthFailureInsteadOfAllowingCreate() {
+        val response = OpenNowJson.parseToJsonElement(
+            """{"requestStatus":{"statusCode":14,"statusDescription":"AUTH_FAILURE_STATUS 8A8C0025","unifiedErrorCode":-1970536411}}""",
+        ).jsonObject
+
+        val failure = runCatching { checkActiveSessionsResponse(401, response) }.exceptionOrNull()
+
+        assertTrue(failure is CloudMatchRequestStatusException)
+        failure as CloudMatchRequestStatusException
+        assertEquals(14, failure.statusCode)
+        assertEquals("AUTH_FAILURE_STATUS 8A8C0025", failure.statusDescription)
+        assertEquals("-1970536411", failure.unifiedErrorCode)
+    }
+
+    @Test
+    fun activeSessionLookupRejectsHttpAndMalformedProviderResponses() {
+        val success = OpenNowJson.parseToJsonElement("""{"requestStatus":{"statusCode":1},"sessions":[]}""").jsonObject
+        val providerFailure = OpenNowJson.parseToJsonElement("""{"requestStatus":{"statusCode":14}}""").jsonObject
+
+        assertTrue(runCatching { checkActiveSessionsResponse(503, success) }.isFailure)
+        assertTrue(runCatching { checkActiveSessionsResponse(401, null) }.isFailure)
+        assertTrue(runCatching { checkActiveSessionsResponse(200, null) }.isFailure)
+        assertTrue(runCatching { checkActiveSessionsResponse(200, buildJsonObject {}) }.isFailure)
+        assertTrue(runCatching { checkActiveSessionsResponse(200, providerFailure) }.isFailure)
+        checkActiveSessionsResponse(200, success)
+    }
+
+    @Test
     fun catalogArtworkUsesGameBoxArtForMobileAndTvCards() {
         val artwork = catalogCardArtwork(
             keyArt = "key-art",

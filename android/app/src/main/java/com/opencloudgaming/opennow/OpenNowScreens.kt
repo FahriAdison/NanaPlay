@@ -14330,6 +14330,7 @@ private fun VirtualStick(
     val currentOnChange by rememberUpdatedState(onChange)
     var knobOffset by remember { mutableStateOf(Offset.Zero) }
     var baseOffset by remember { mutableStateOf(Offset.Zero) }
+    var lastStickEventMs by remember { mutableStateOf(0L) }
     val style = LocalTouchControllerStyle.current
 
     DisposableEffect(client) {
@@ -14338,32 +14339,33 @@ private fun VirtualStick(
         }
     }
 
+    // 1.0.79: recenter watchdog. Runs alongside the gesture loop and forces
+    // the stick back to center if it is deflected but no touch events arrive
+    // within the watchdog window. This covers the stuck-sideways case where
+    // the release event never reached the gesture loop (lost UP at the
+    // platform level). A LaunchedEffect is used because the pointerInput
+    // block below runs on AwaitPointerEventScope, which is not a
+    // CoroutineScope, so a bare launch call does not compile there.
+    // Same keys as pointerInput: restarts together with the gesture loop.
+    LaunchedEffect(client, mode, deadZone) {
+        while (true) {
+            delay(VIRTUAL_STICK_WATCHDOG_MS)
+            val now = SystemClock.uptimeMillis()
+            if ((knobOffset != Offset.Zero || baseOffset != Offset.Zero) &&
+                now - lastStickEventMs >= VIRTUAL_STICK_WATCHDOG_MS
+            ) {
+                currentOnChange(0f, 0f)
+                knobOffset = Offset.Zero
+                baseOffset = Offset.Zero
+                lastStickEventMs = now
+            }
+        }
+    }
+
     Box(
         Modifier
             .size(diameter)
             .pointerInput(client, mode, deadZone) {
-                // 1.0.79: recenter watchdog. Runs alongside the gesture loop and
-                // forces the stick back to center if it is deflected but no
-                // touch events arrive within the watchdog window. This covers
-                // the stuck-sideways case where the release event never
-                // reached the gesture loop below (lost UP at the platform
-                // level). Cancelled together with the gesture loop when the
-                // pointerInput keys change.
-                var lastStickEventMs = 0L
-                launch {
-                    while (true) {
-                        delay(VIRTUAL_STICK_WATCHDOG_MS)
-                        val now = SystemClock.uptimeMillis()
-                        if ((knobOffset != Offset.Zero || baseOffset != Offset.Zero) &&
-                            now - lastStickEventMs >= VIRTUAL_STICK_WATCHDOG_MS
-                        ) {
-                            currentOnChange(0f, 0f)
-                            knobOffset = Offset.Zero
-                            baseOffset = Offset.Zero
-                            lastStickEventMs = now
-                        }
-                    }
-                }
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                     val fixedCenter = Offset(size.width / 2f, size.height / 2f)

@@ -822,6 +822,301 @@ internal fun signalingWebSocketHttpClient(base: OkHttpClient): OkHttpClient =
         .connectionSpecs(listOf(SIGNALING_TLS_1_2))
         .build()
 
+internal const val OVERLAY_SHORTCUT_HOLD_MS = 800L
+internal const val OVERLAY_SHORTCUT_COMBO_WINDOW_MS = 300L
+
+private object OverlayShortcutHandlerHolder {
+    val handler by lazy { Handler(Looper.getMainLooper()) }
+}
+
+internal class OverlayShortcutTracker(
+    private val postDelayed: (Long, Runnable) -> Unit = { delayMs, action ->
+        OverlayShortcutHandlerHolder.handler.postDelayed(action, delayMs)
+    },
+    private val cancelScheduled: (Runnable) -> Unit = { action ->
+        OverlayShortcutHandlerHolder.handler.removeCallbacks(action)
+    },
+    private val holdMs: Long = OVERLAY_SHORTCUT_HOLD_MS,
+    private val comboWindowMs: Long = OVERLAY_SHORTCUT_COMBO_WINDOW_MS,
+) {
+    var configuredButton: OverlayShortcutButton = OverlayShortcutButton.Start
+        private set
+
+    // Single button tracking
+    private var pendingSingleDown: KeyEvent? = null
+    private var singleHoldScheduled: Runnable? = null
+    private var singleHoldTriggered = false
+
+    // Combo button tracking
+    private var activeFirstKeyCode: Int = 0
+    private var pendingFirstDown: KeyEvent? = null
+    private var pendingSecondDown: KeyEvent? = null
+    private var firstPhysicallyDown = false
+    private var secondPhysicallyDown = false
+    private var firstDownForwarded = false
+    private var secondDownForwarded = false
+    private var comboWindowScheduled: Runnable? = null
+    private var comboHoldScheduled: Runnable? = null
+    private var comboHoldTriggered = false
+
+    fun setShortcutButton(button: OverlayShortcutButton) {
+        if (configuredButton != button) {
+            reset()
+            configuredButton = button
+        }
+    }
+
+    fun reset() {
+        singleHoldScheduled?.let(cancelScheduled)
+        singleHoldScheduled = null
+        pendingSingleDown = null
+        singleHoldTriggered = false
+
+        comboWindowScheduled?.let(cancelScheduled)
+        comboWindowScheduled = null
+        comboHoldScheduled?.let(cancelScheduled)
+        comboHoldScheduled = null
+        pendingFirstDown = null
+        pendingSecondDown = null
+        firstPhysicallyDown = false
+        secondPhysicallyDown = false
+        firstDownForwarded = false
+        secondDownForwarded = false
+        activeFirstKeyCode = 0
+        comboHoldTriggered = false
+    }
+
+    fun handleKeyEvent(
+        event: KeyEvent,
+        client: NativeStreamClient?,
+        streamUiActive: Boolean,
+        systemMenuHandler: (() -> Unit)?,
+    ): Boolean {
+        if (streamUiActive) {
+            reset()
+            return false
+        }
+        return when (configuredButton) {
+            OverlayShortcutButton.Start -> handleSingleKey(event, KeyEvent.KEYCODE_BUTTON_START, client, systemMenuHandler)
+            OverlayShortcutButton.Select -> handleSingleKey(event, KeyEvent.KEYCODE_BUTTON_SELECT, client, systemMenuHandler)
+            OverlayShortcutButton.Guide -> handleSingleKey(event, KeyEvent.KEYCODE_BUTTON_MODE, client, systemMenuHandler)
+            OverlayShortcutButton.L1R1 -> handleComboKeys(event, KeyEvent.KEYCODE_BUTTON_L1, KeyEvent.KEYCODE_BUTTON_R1, client, systemMenuHandler)
+            OverlayShortcutButton.L3R3 -> handleComboKeys(event, KeyEvent.KEYCODE_BUTTON_THUMBL, KeyEvent.KEYCODE_BUTTON_THUMBR, client, systemMenuHandler)
+        }
+    }
+
+    private fun handleSingleKey(
+        event: KeyEvent,
+        targetKeyCode: Int,
+        client: NativeStreamClient?,
+        systemMenuHandler: (() -> Unit)?,
+    ): Boolean {
+        if (event.keyCode != targetKeyCode) return false
+
+        when (event.action) {
+            KeyEvent.ACTION_DOWN -> {
+                if (event.repeatCount == 0) {
+                    singleHoldScheduled?.let(cancelScheduled)
+                    singleHoldTriggered = false
+                    val downCopy = KeyEvent(event)
+                    pendingSingleDown = downCopy
+                    val runnable = Runnable {
+                        singleHoldTriggered = true
+                        singleHoldScheduled = null
+                        pendingSingleDown = null
+                        systemMenuHandler?.invoke()
+                    }
+                    singleHoldScheduled = runnable
+                    postDelayed(holdMs, runnable)
+                    return true
+                } else {
+                    return true
+                }
+            }
+            KeyEvent.ACTION_UP -> {
+                singleHoldScheduled?.let(cancelScheduled)
+                singleHoldScheduled = null
+                if (singleHoldTriggered) {
+                    singleHoldTriggered = false
+                    pendingSingleDown = null
+                    return true
+                }
+                val savedDown = pendingSingleDown
+                pendingSingleDown = null
+                if (savedDown != null) {
+                    client?.dispatchKey(savedDown)
+                }
+                client?.dispatchKey(event)
+                return true
+            }
+            else -> return false
+        }
+    }
+
+    private fun handleComboKeys(
+        event: KeyEvent,
+        keyA: Int,
+        keyB: Int,
+        client: NativeStreamClient?,
+        systemMenuHandler: (() -> Unit)?,
+    ): Boolean {
+        val code = event.keyCode
+        if (code != keyA && code != keyB) return false
+
+        when (event.action) {
+            KeyEvent.ACTION_DOWN -> {
+                if (event.repeatCount == 0) {
+                    if (activeFirstKeyCode == 0) {
+                        activeFirstKeyCode = code
+                        firstPhysicallyDown = true
+                        firstDownForwarded = false
+                        val downCopy = KeyEvent(event)
+                        pendingFirstDown = downCopy
+                        val windowRunnable = Runnable {
+                            comboWindowScheduled = null
+                            firstDownForwarded = true
+                            val saved = pendingFirstDown
+                            pendingFirstDown = null
+                            if (saved != null) {
+                                client?.dispatchKey(saved)
+                            }
+                        }
+                        comboWindowScheduled = windowRunnable
+                        postDelayed(comboWindowMs, windowRunnable)
+                        return true
+                    } else if (code == activeFirstKeyCode) {
+                        firstPhysicallyDown = true
+                        if (firstDownForwarded) {
+                            client?.dispatchKey(event)
+                        }
+                        return true
+                    } else {
+                        secondPhysicallyDown = true
+                        if (firstDownForwarded) {
+                            secondDownForwarded = true
+                            client?.dispatchKey(event)
+                            return true
+                        }
+                        if (comboHoldTriggered) {
+                            return true
+                        }
+                        if (pendingFirstDown != null && comboWindowScheduled != null) {
+                            comboWindowScheduled?.let(cancelScheduled)
+                            comboWindowScheduled = null
+                            val down2Copy = KeyEvent(event)
+                            pendingSecondDown = down2Copy
+                            val holdRunnable = Runnable {
+                                comboHoldTriggered = true
+                                comboHoldScheduled = null
+                                pendingFirstDown = null
+                                pendingSecondDown = null
+                                systemMenuHandler?.invoke()
+                            }
+                            comboHoldScheduled = holdRunnable
+                            postDelayed(holdMs, holdRunnable)
+                            return true
+                        }
+                        return true
+                    }
+                } else {
+                    if (code == activeFirstKeyCode) {
+                        if (firstDownForwarded) {
+                            client?.dispatchKey(event)
+                        }
+                    } else {
+                        if (secondDownForwarded) {
+                            client?.dispatchKey(event)
+                        }
+                    }
+                    return true
+                }
+            }
+            KeyEvent.ACTION_UP -> {
+                val isFirst = (code == activeFirstKeyCode)
+                if (isFirst) {
+                    firstPhysicallyDown = false
+                } else {
+                    secondPhysicallyDown = false
+                }
+
+                if (comboHoldTriggered) {
+                    if (!firstPhysicallyDown && !secondPhysicallyDown) {
+                        comboHoldTriggered = false
+                        activeFirstKeyCode = 0
+                    }
+                    return true
+                }
+
+                if (comboWindowScheduled != null) {
+                    comboWindowScheduled?.let(cancelScheduled)
+                    comboWindowScheduled = null
+                    val saved = pendingFirstDown
+                    pendingFirstDown = null
+                    if (saved != null) {
+                        client?.dispatchKey(saved)
+                    }
+                    client?.dispatchKey(event)
+                    if (!firstPhysicallyDown && !secondPhysicallyDown) {
+                        activeFirstKeyCode = 0
+                    }
+                    return true
+                }
+
+                if (comboHoldScheduled != null) {
+                    comboHoldScheduled?.let(cancelScheduled)
+                    comboHoldScheduled = null
+                    val saved1 = pendingFirstDown
+                    val saved2 = pendingSecondDown
+                    pendingFirstDown = null
+                    pendingSecondDown = null
+                    if (saved1 != null) {
+                        client?.dispatchKey(saved1)
+                        if (firstPhysicallyDown) {
+                            firstDownForwarded = true
+                        }
+                    }
+                    if (saved2 != null) {
+                        client?.dispatchKey(saved2)
+                        if (secondPhysicallyDown) {
+                            secondDownForwarded = true
+                        }
+                    }
+                    client?.dispatchKey(event)
+                    if (!firstPhysicallyDown && !secondPhysicallyDown) {
+                        activeFirstKeyCode = 0
+                    }
+                    return true
+                }
+
+                if (isFirst && firstDownForwarded) {
+                    firstDownForwarded = false
+                    client?.dispatchKey(event)
+                    if (!firstPhysicallyDown && !secondPhysicallyDown) {
+                        activeFirstKeyCode = 0
+                    }
+                    return true
+                }
+
+                if (!isFirst && secondDownForwarded) {
+                    secondDownForwarded = false
+                    client?.dispatchKey(event)
+                    if (!firstPhysicallyDown && !secondPhysicallyDown) {
+                        activeFirstKeyCode = 0
+                    }
+                    return true
+                }
+
+                client?.dispatchKey(event)
+                if (!firstPhysicallyDown && !secondPhysicallyDown) {
+                    activeFirstKeyCode = 0
+                }
+                return true
+            }
+            else -> return false
+        }
+    }
+}
+
 object NativeStreamInputRouter {
     @Volatile
     private var client: NativeStreamClient? = null
@@ -830,6 +1125,18 @@ object NativeStreamInputRouter {
     fun setAndroidTvProfile(enabled: Boolean) {
         androidTvProfile = enabled
     }
+    private var overlayShortcutButton: OverlayShortcutButton = OverlayShortcutButton.Start
+    private val overlayShortcutTracker = OverlayShortcutTracker()
+
+    fun setOverlayShortcutButton(button: OverlayShortcutButton) {
+        overlayShortcutButton = button
+        overlayShortcutTracker.setShortcutButton(button)
+    }
+
+    fun resetOverlayShortcut() {
+        overlayShortcutTracker.reset()
+    }
+
     @Volatile
     private var touchMouseEnabled = false
     @Volatile
@@ -914,6 +1221,7 @@ object NativeStreamInputRouter {
             // 1.0.37 (port from upstream): release touch/mouse state properly on
             // detach so input cannot stick across sessions.
             releaseTouchMouseForLifecycle()
+            overlayShortcutTracker.reset()
             client = null
             touchMouseState.forgetCursorPosition()
             decodedStreamWidth = 0
@@ -1010,6 +1318,9 @@ object NativeStreamInputRouter {
 
     fun setStreamUiActive(active: Boolean) {
         streamUiActive = active
+        if (active) {
+            overlayShortcutTracker.reset()
+        }
     }
 
     fun normalizedStreamUiKeyCode(event: KeyEvent): Int? {
@@ -1344,6 +1655,9 @@ object NativeStreamInputRouter {
     }
 
     fun dispatchKey(event: KeyEvent): Boolean {
+        if (overlayShortcutTracker.handleKeyEvent(event, client, streamUiActive, systemMenuHandler)) {
+            return true
+        }
         if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0 && event.isStreamSystemMenuKey()) {
             systemMenuHandler?.invoke()
             return systemMenuHandler != null

@@ -188,7 +188,17 @@ data class StreamSettings(
     val mouseScrollSensitivity: Int = 30,
     val persistentReconnect: Boolean = false,
     val dynamicNetworkAdjustment: DynamicNetworkAdjustment = DynamicNetworkAdjustment.NoAdjustment,
+    val overlayShortcutButton: OverlayShortcutButton = OverlayShortcutButton.Start,
 )
+
+@Serializable
+enum class OverlayShortcutButton {
+    Start,
+    Select,
+    Guide,
+    L1R1,
+    L3R3,
+}
 
 @Serializable
 enum class DynamicNetworkAdjustment {

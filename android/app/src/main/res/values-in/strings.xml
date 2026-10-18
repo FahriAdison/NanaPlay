@@ -315,7 +315,7 @@
     <string name="settings_stretch_stream_to_fit">Regangkan stream mengikuti layar</string>
     <string name="settings_session_counter">Timer sesi pintar</string>
     <string name="settings_thanks_body">Terima kasih untuk semua yang membantu membuat NanaPlay lebih baik untuk semua orang.</string>
-    <string name="settings_thanks_darkevilpt">DarkevilPT</string>
+    <string name="settings_thanks_darkevilpt">Papah Chan Community</string>
     <string name="settings_thanks_darkevilpt_note">Dukungan komunitas</string>
     <string name="settings_donate">Donasi</string>
     <string name="settings_donate_link_copied">Link donasi tersalin</string>
@@ -752,4 +752,12 @@
     <string name="game_status_maintenance_message">Game ini sedang offline untuk maintenance. Cek lagi nanti.</string>
     <string name="game_status_launch_warning_message">Game ini mungkin tidak bisa di-launch dengan benar. Tetap lanjutkan?</string>
     <string name="action_continue_anyway">Tetap lanjutkan</string>
+    <!-- Overlay shortcut button -->
+    <string name="settings_overlay_shortcut_button">Tombol shortcut overlay</string>
+    <string name="settings_overlay_shortcut_button_desc">Pilih tombol gamepad untuk membuka overlay dalam game (tahan untuk membuka)</string>
+    <string name="overlay_shortcut_start">START (tahan)</string>
+    <string name="overlay_shortcut_select">SELECT (tahan)</string>
+    <string name="overlay_shortcut_guide">Guide/Home (tahan)</string>
+    <string name="overlay_shortcut_l1r1">L1 + R1 (tahan)</string>
+    <string name="overlay_shortcut_l3r3">L3 + R3 (tahan)</string>
 </resources>

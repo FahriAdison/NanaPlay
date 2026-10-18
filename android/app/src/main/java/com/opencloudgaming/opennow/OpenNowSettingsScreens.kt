@@ -93,7 +93,7 @@ internal val SettingsPanel = OpenNowPalette.Panel
 internal val SettingsPanelAlt = OpenNowPalette.PanelAlt
 internal val SettingsText = OpenNowPalette.TextPrimary
 internal val SettingsTextMuted = OpenNowPalette.TextMuted
-internal const val DONATE_URL = "https://printedwaste.com/donate"
+internal const val DONATE_URL = "https://sociabuzz.com/papahchan/tribe"
 internal val PHONE_NAV_RAIL_MAX_SMALLEST_WIDTH = 600.dp
 internal val APP_NAV_RAIL_WIDTH = 80.dp
 internal const val PHONE_ULTRAWIDE_MIN_STREAM_ASPECT = 2.2f
@@ -756,7 +756,7 @@ private fun SettingsContent(
                     viewModel.updateSettings(settings.copy(nativeLowLatencyDecoder = enabled))
                 }
             }
-    CategorySettingsSection(selectedCategory, SettingsCategory.Input, searchQuery, "Input", "input", "microphone", "mic", "voice", "audio", "mouse", "sensitivity", "acceleration", "keyboard", "layout", "language", "clipboard", "paste", "rumble", "touch", "finger", "opacity", "edge", "padding", "offset", "controls", "stick", "joystick", "analog", "dynamic", "dead zone", "button") {
+    CategorySettingsSection(selectedCategory, SettingsCategory.Input, searchQuery, "Input", "input", "microphone", "mic", "voice", "audio", "mouse", "sensitivity", "acceleration", "keyboard", "layout", "language", "clipboard", "paste", "rumble", "touch", "finger", "opacity", "edge", "padding", "offset", "controls", "stick", "joystick", "analog", "dynamic", "dead zone", "button", "overlay", "shortcut") {
                 SettingSwitch(
                     label = stringResource(R.string.settings_low_latency_game_audio),
                     checked = settings.lowLatencyGameAudio,
@@ -803,6 +803,26 @@ private fun SettingsContent(
                 }
                 SettingSwitch(stringResource(R.string.settings_clipboard_paste), settings.clipboardPaste) { enabled -> viewModel.updateSettings(settings.copy(clipboardPaste = enabled)) }
                 SettingSwitch(stringResource(R.string.settings_phone_rumble_fallback), settings.phoneRumbleFallback) { enabled -> viewModel.updateSettings(settings.copy(phoneRumbleFallback = enabled)) }
+                ChoiceMenuRow(
+                    label = stringResource(R.string.settings_overlay_shortcut_button),
+                    description = stringResource(R.string.settings_overlay_shortcut_button_desc),
+                    options = listOf(
+                        ChoiceMenuOption(OverlayShortcutButton.Start.name, stringResource(R.string.overlay_shortcut_start)),
+                        ChoiceMenuOption(OverlayShortcutButton.Select.name, stringResource(R.string.overlay_shortcut_select)),
+                        ChoiceMenuOption(OverlayShortcutButton.Guide.name, stringResource(R.string.overlay_shortcut_guide)),
+                        ChoiceMenuOption(OverlayShortcutButton.L1R1.name, stringResource(R.string.overlay_shortcut_l1r1)),
+                        ChoiceMenuOption(OverlayShortcutButton.L3R3.name, stringResource(R.string.overlay_shortcut_l3r3)),
+                    ),
+                    selectedLabel = when (settings.stream.overlayShortcutButton) {
+                        OverlayShortcutButton.Start -> stringResource(R.string.overlay_shortcut_start)
+                        OverlayShortcutButton.Select -> stringResource(R.string.overlay_shortcut_select)
+                        OverlayShortcutButton.Guide -> stringResource(R.string.overlay_shortcut_guide)
+                        OverlayShortcutButton.L1R1 -> stringResource(R.string.overlay_shortcut_l1r1)
+                        OverlayShortcutButton.L3R3 -> stringResource(R.string.overlay_shortcut_l3r3)
+                    },
+                ) { value ->
+                    viewModel.updateStreamSettings { s -> s.copy(overlayShortcutButton = OverlayShortcutButton.valueOf(value)) }
+                }
                 SettingSwitch(
                     label = stringResource(R.string.stream_panel_mouse_mode),
                     checked = settings.controllerMouseEmulation,
@@ -1097,7 +1117,7 @@ private fun SettingsContent(
                 OpenNowGitHubPanel()
                 DeveloperPanel()
             }
-    CategorySettingsSection(selectedCategory, SettingsCategory.About, searchQuery, stringResource(R.string.settings_section_thanks), "thanks", "credits", "contributors", "darkevilpt", "donate", "paypal", "printedwaste") {
+    CategorySettingsSection(selectedCategory, SettingsCategory.About, searchQuery, stringResource(R.string.settings_section_thanks), "thanks", "credits", "contributors", "papahchancommunity", "donate", "paypal", "printedwaste") {
                 ThanksPanel()
             }
     }

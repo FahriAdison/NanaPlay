@@ -176,13 +176,21 @@ internal fun ChoiceMenuRow(
     label: String,
     options: List<ChoiceMenuOption>,
     selectedLabel: String,
+    description: String? = null,
     onSelect: (String) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
     val autoLabel = stringResource(R.string.option_auto)
     // Outer chrome comes from the shared row; the dropdown body below is specific to this control.
     ControlRow(onClick = { expanded = true }) {
-        Text(label, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        if (description != null) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(label, color = MaterialTheme.colorScheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(description, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            }
+        } else {
+            Text(label, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
         Box {
             OutlinedButton(onClick = { expanded = true }) { Text(selectedLabel.ifBlank { autoLabel }, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {

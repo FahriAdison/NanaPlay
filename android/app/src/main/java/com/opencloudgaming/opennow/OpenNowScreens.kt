@@ -7668,6 +7668,7 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
         val decor = activity?.window?.decorView
         NativeStreamInputRouter.attach(client)
         NativeStreamInputRouter.setAndroidTvProfile(tvProfile)
+        NativeStreamInputRouter.setOverlayShortcutButton(state.settings.stream.overlayShortcutButton)
         onDispose {
             if (Build.VERSION.SDK_INT >= 26) {
                 decor?.releasePointerCapture()
@@ -7676,6 +7677,7 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
             NativeStreamInputRouter.clearStreamPanelTouchPassthroughBounds()
             NativeStreamInputRouter.setSystemMenuHandler(null)
             NativeStreamInputRouter.setSystemBackHandler(null)
+            NativeStreamInputRouter.resetOverlayShortcut()
             NativeStreamInputRouter.setAndroidTvProfile(false)
             NativeStreamInputRouter.setStreamUiActive(false)
             NativeStreamInputRouter.detach(client)
@@ -7690,6 +7692,10 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
         onDispose {
             audioController.release()
         }
+    }
+
+    LaunchedEffect(state.settings.stream.overlayShortcutButton) {
+        NativeStreamInputRouter.setOverlayShortcutButton(state.settings.stream.overlayShortcutButton)
     }
 
     LaunchedEffect(streamReady, streamOverlayOpen, streamGuideOpen, streamGuideStep, touchLayoutEditing) {

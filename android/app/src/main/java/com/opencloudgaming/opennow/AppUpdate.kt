@@ -6,6 +6,7 @@ import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.Signature
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -33,7 +34,10 @@ import okhttp3.Request
 import okhttp3.Response
 import java.io.File
 import java.security.MessageDigest
+import java.security.cert.CertificateFactory
+import java.security.cert.X509Certificate
 import java.util.Locale
+import java.util.jar.JarFile
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -545,6 +549,39 @@ class AndroidAppUpdater(
         }
     }
 
+    /**
+     * Reads the v1 (JAR signing) certificates straight from the APK file instead of
+     * going through PackageManager. Needed because on API 28 (Android 9)
+     * getPackageArchiveInfo(...).signingInfo is null, which used to produce a false
+     * "signing certificate does not match" error for correctly-signed updates.
+     * Returns a sorted list of Signature.toCharsString() values, or emptyList() when
+     * no certificate could be read (the caller treats that as a verification failure).
+     */
+    private fun getApkV1SignerStrings(apk: File): List<String> {
+        return try {
+            JarFile(apk).use { jar ->
+                val certFactory = CertificateFactory.getInstance("X509")
+                val signers = mutableListOf<String>()
+                val entries = jar.entries()
+                while (entries.hasMoreElements()) {
+                    val entry = entries.nextElement()
+                    val name = entry.name.uppercase(Locale.US)
+                    if (name.startsWith("META-INF/") &&
+                        (name.endsWith(".RSA") || name.endsWith(".DSA") || name.endsWith(".EC"))
+                    ) {
+                        jar.getInputStream(entry).use { input ->
+                            val cert = certFactory.generateCertificate(input) as X509Certificate
+                            signers.add(Signature(cert.encoded).toCharsString())
+                        }
+                    }
+                }
+                signers.sorted()
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
     /** S-04: rejects update APKs not signed by the installed app's certificate. */
     private fun verifyApkSignature(apk: File) {
         val pm = appContext.packageManager
@@ -552,19 +589,10 @@ class AndroidAppUpdater(
         // ignored and signatures comes back null. Use the right flag per API.
         val sigFlags = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES
         else @Suppress("DEPRECATION") PackageManager.GET_SIGNATURES
-        val archiveInfo = pm.getPackageArchiveInfo(
-            apk.absolutePath,
-            sigFlags,
-        ) ?: run {
-            apk.delete()
-            error("Could not read update APK signatures.")
-        }
-        val newSigners = if (Build.VERSION.SDK_INT >= 28) {
-            archiveInfo.signingInfo?.apkContentsSigners?.map { it.toCharsString() }.orEmpty()
-        } else {
-            @Suppress("DEPRECATION")
-            archiveInfo.signatures?.map { it.toCharsString() }.orEmpty()
-        }
+        // The downloaded APK's signers are read straight from the file (v1/JAR certs)
+        // instead of getPackageArchiveInfo(): on API 28 (Android 9) the archive's
+        // signingInfo is null, which caused false signature-mismatch errors.
+        val newSigners = getApkV1SignerStrings(apk)
         val installedInfo = pm.getPackageInfo(
             appContext.packageName,
             sigFlags,

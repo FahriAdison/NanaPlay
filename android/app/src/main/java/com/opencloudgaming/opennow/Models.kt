@@ -279,6 +279,9 @@ data class AndroidTouchSettings(
     // Users can still drag buttons in layout-editing mode to customize.
     val offsets: Map<String, TouchOffset> = emptyMap(),
     val touchControllerStyle: TouchControllerStyle = TouchControllerStyle.V1,
+    // 1.0.79: layout lock. When true, the stream panel cannot enter touch-layout
+    // edit mode, protecting a customized layout from accidental drags/resets.
+    val layoutLocked: Boolean = false,
 ) {
     fun getOffset(key: String): TouchOffset = offsets[key] ?: TouchOffset()
 

@@ -13,6 +13,7 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
+import android.os.SystemClock
 import android.provider.Settings
 import androidx.annotation.StringRes
 import android.speech.RecognizerIntent
@@ -8222,7 +8223,10 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                         viewModel.updateSettings(state.settings.copy(phoneRumbleFallback = !state.settings.phoneRumbleFallback))
                     },
                     onTouchLayoutEditingToggle = {
-                        touchLayoutEditing = !touchLayoutEditing
+                        // 1.0.79: a locked layout cannot enter edit mode.
+                        if (!state.settings.androidTouch.layoutLocked) {
+                            touchLayoutEditing = !touchLayoutEditing
+                        }
                     },
                     onKeyboardOpen = {
                         controlsOpen = false
@@ -8391,6 +8395,15 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                                 androidTouch = state.settings.androidTouch.withResetOffsets()
                             )
                         )
+                    },
+                    onTouchLayoutLockChange = { locked ->
+                        viewModel.updateSettings(
+                            state.settings.copy(
+                                androidTouch = state.settings.androidTouch.copy(layoutLocked = locked)
+                            )
+                        )
+                        // Leaving edit mode the moment the layout is locked.
+                        if (locked) touchLayoutEditing = false
                     },
                     onBugReportSubmit = viewModel::submitBugReport,
                     onBugReportReset = viewModel::resetBugReportSubmission,
@@ -9759,6 +9772,7 @@ private fun StreamControlsPanel(
     onTouchLeftOffsetChange: (Float) -> Unit,
     onTouchRightOffsetChange: (Float) -> Unit,
     onTouchLayoutReset: () -> Unit,
+    onTouchLayoutLockChange: (Boolean) -> Unit,
     onBugReportSubmit: (String, String) -> Unit,
     onBugReportReset: () -> Unit,
     onButtonTone: () -> Unit,
@@ -9768,6 +9782,8 @@ private fun StreamControlsPanel(
     val doneFocusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     var page by remember { mutableStateOf(StreamControlsPage.Main) }
+    // 1.0.79: confirmation gate before resetting the touch layout.
+    var showLayoutResetConfirm by remember { mutableStateOf(false) }
     val reduceMotion = LocalReduceMotion.current
     BackHandler(enabled = page != StreamControlsPage.Main) {
         page = StreamControlsPage.Main
@@ -10121,6 +10137,18 @@ private fun StreamControlsPanel(
             }
             if (!tvProfile) item {
                 ControlSection(stringResource(R.string.stream_panel_section_touch_layout)) {
+                    // 1.0.79: layout lock. When locked, edit mode cannot be entered,
+                    // protecting a customized layout from accidental drags/resets.
+                    val layoutLocked = settings.androidTouch.layoutLocked
+                    ControlSwitchRow(
+                        label = stringResource(R.string.stream_panel_lock_layout),
+                        checked = layoutLocked,
+                        onCheckedChange = {
+                            onButtonTone()
+                            onTouchLayoutLockChange(it)
+                        },
+                        value = onOffLabel(layoutLocked),
+                    )
                     ControlSwitchRow(
                         label = stringResource(R.string.stream_panel_drag_edit),
                         checked = touchLayoutEditing,
@@ -10129,13 +10157,15 @@ private fun StreamControlsPanel(
                             onTouchLayoutEditingToggle()
                         },
                         value = onOffLabel(touchLayoutEditing),
+                        enabled = !layoutLocked,
                     )
                     ControlActionRow(
                         label = stringResource(R.string.stream_panel_reset_layout),
                         actionLabel = stringResource(R.string.action_reset),
                         onClick = {
                             onButtonTone()
-                            onTouchLayoutReset()
+                            // 1.0.79: confirm before discarding a customized layout.
+                            showLayoutResetConfirm = true
                         },
                         value = stringResource(R.string.stream_panel_reset_layout_summary),
                     )
@@ -10166,6 +10196,30 @@ private fun StreamControlsPanel(
         } // Column
         } // CompositionLocalProvider
     } // Surface
+    // 1.0.79: confirm before discarding a customized touch layout.
+    if (showLayoutResetConfirm) {
+        AlertDialog(
+            onDismissRequest = { showLayoutResetConfirm = false },
+            title = { Text(stringResource(R.string.stream_panel_reset_layout_confirm_title)) },
+            text = { Text(stringResource(R.string.stream_panel_reset_layout_confirm_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showLayoutResetConfirm = false
+                        onButtonTone()
+                        onTouchLayoutReset()
+                    }
+                ) {
+                    Text(stringResource(R.string.action_reset))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLayoutResetConfirm = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
+    }
     DisposableEffect(Unit) {
         onDispose {
             NativeStreamInputRouter.clearStreamPanelTouchPassthroughBounds()
@@ -14256,6 +14310,13 @@ private fun StickWithThumbButton(
     }
 }
 
+// 1.0.79: virtual-stick recenter watchdog. If the stick is deflected but no
+// touch events arrive within this window (e.g. a lost UP left it stuck
+// sideways), the stick is forced back to center. A legitimately held stick
+// streams micro-move events from the touchscreen, so the watchdog does not
+// fire during normal held input.
+private const val VIRTUAL_STICK_WATCHDOG_MS = 500L
+
 @Composable
 private fun VirtualStick(
     label: String,
@@ -14281,6 +14342,28 @@ private fun VirtualStick(
         Modifier
             .size(diameter)
             .pointerInput(client, mode, deadZone) {
+                // 1.0.79: recenter watchdog. Runs alongside the gesture loop and
+                // forces the stick back to center if it is deflected but no
+                // touch events arrive within the watchdog window. This covers
+                // the stuck-sideways case where the release event never
+                // reached the gesture loop below (lost UP at the platform
+                // level). Cancelled together with the gesture loop when the
+                // pointerInput keys change.
+                var lastStickEventMs = 0L
+                launch {
+                    while (true) {
+                        delay(VIRTUAL_STICK_WATCHDOG_MS)
+                        val now = SystemClock.uptimeMillis()
+                        if ((knobOffset != Offset.Zero || baseOffset != Offset.Zero) &&
+                            now - lastStickEventMs >= VIRTUAL_STICK_WATCHDOG_MS
+                        ) {
+                            currentOnChange(0f, 0f)
+                            knobOffset = Offset.Zero
+                            baseOffset = Offset.Zero
+                            lastStickEventMs = now
+                        }
+                    }
+                }
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                     val fixedCenter = Offset(size.width / 2f, size.height / 2f)
@@ -14289,6 +14372,7 @@ private fun VirtualStick(
                     baseOffset = gestureCenter - fixedCenter
 
                     fun updateStick(position: Offset) {
+                        lastStickEventMs = SystemClock.uptimeMillis()
                         val clamped = clampStickOffset(position - gestureCenter, maxRadius)
                         val rawX = (clamped.x / maxRadius).coerceIn(-1f, 1f)
                         val rawY = (clamped.y / maxRadius).coerceIn(-1f, 1f)
@@ -14299,6 +14383,13 @@ private fun VirtualStick(
                         knobOffset = clamped
                     }
 
+                    // Every release path below funnels through the finally
+                    // block, which recenters the stick: normal UP
+                    // (!change.pressed), pointer vanishing from the event,
+                    // and coroutine cancellation (pointerInput restart,
+                    // composition disposal). A finger sliding out of the
+                    // stick bounds keeps delivering events to the ongoing
+                    // gesture, so it is covered too.
                     try {
                         updateStick(down.position)
                         down.consume()

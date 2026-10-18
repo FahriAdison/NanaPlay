@@ -129,8 +129,12 @@
     <string name="stream_mouse_mode_title">Mouse mode</string>
     <string name="stream_mouse_mode_subtitle">Configure mouse emulation</string>
     <string name="stream_panel_drag_edit">Drag edit mode</string>
+    <string name="stream_panel_lock_layout">Lock layout</string>
+    <string name="stream_panel_lock_layout_summary">Prevent accidental edits to the touch layout</string>
     <string name="stream_panel_reset_layout">Reset touch layout</string>
     <string name="stream_panel_reset_layout_summary">Reset positions to default</string>
+    <string name="stream_panel_reset_layout_confirm_title">Reset touch layout?</string>
+    <string name="stream_panel_reset_layout_confirm_message">Your customized button positions will be discarded and restored to defaults. This cannot be undone.</string>
     <string name="stream_panel_layout_scale">Layout scale</string>
     <string name="stream_panel_button_size">Button size</string>
     <string name="stream_panel_opacity">Opacity</string>

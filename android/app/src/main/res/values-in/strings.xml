@@ -126,8 +126,12 @@
     <string name="stream_mouse_mode_title">Mode mouse</string>
     <string name="stream_mouse_mode_subtitle">Atur emulasi mouse</string>
     <string name="stream_panel_drag_edit">Mode edit geser</string>
+    <string name="stream_panel_lock_layout">Kunci layout</string>
+    <string name="stream_panel_lock_layout_summary">Cegah perubahan tak disengaja pada layout sentuh</string>
     <string name="stream_panel_reset_layout">Reset tata letak sentuh</string>
     <string name="stream_panel_reset_layout_summary">Kembalikan posisi ke bawaan</string>
+    <string name="stream_panel_reset_layout_confirm_title">Reset tata letak sentuh?</string>
+    <string name="stream_panel_reset_layout_confirm_message">Posisi tombol yang sudah disesuaikan akan dihapus dan dikembalikan ke bawaan. Tidak dapat dibatalkan.</string>
     <string name="stream_panel_layout_scale">Skala tata letak</string>
     <string name="stream_panel_button_size">Ukuran tombol</string>
     <string name="stream_panel_opacity">Opasitas</string>

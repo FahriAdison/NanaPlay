@@ -13645,9 +13645,29 @@ private fun TouchOverlay(
     val buttonScale = touch.buttonScale
     val stickScale = touch.stickScale
 
-    val localOffsets = remember(touch.offsets) {
-        androidx.compose.runtime.mutableStateMapOf<String, TouchOffset>().apply {
-            putAll(touch.offsets)
+    // 1.0.80: local drag state. Previously this was remember(touch.offsets),
+    // so ANY settings write during edit mode (dragging the quick-bar FAB,
+    // the keyboard bar, or the control panel all call updateSettings, and
+    // settingsStore.replace() mints brand-new object instances via
+    // normalizedForAndroid()) re-initialized the map and silently discarded
+    // unsaved drag edits, snapping buttons back to their original spots.
+    val localOffsets = remember {
+        androidx.compose.runtime.mutableStateMapOf<String, TouchOffset>()
+    }
+    val latestSavedOffsets by rememberUpdatedState(touch.offsets)
+    if (layoutEditing) {
+        // Snapshot once when entering edit mode. Drags mutate only this
+        // snapshot, so unrelated settings writes can no longer wipe them.
+        LaunchedEffect(Unit) {
+            localOffsets.clear()
+            localOffsets.putAll(latestSavedOffsets)
+        }
+    } else {
+        // Outside edit mode, mirror the saved offsets so external changes
+        // (e.g. the reset-layout button) are reflected live.
+        LaunchedEffect(latestSavedOffsets) {
+            localOffsets.clear()
+            localOffsets.putAll(latestSavedOffsets)
         }
     }
 

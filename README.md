@@ -10,6 +10,14 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/FahriAdison/NanaPlay/releases/latest">Downloads</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#building">Build from source</a> ·
+  <a href="#changelog-recent">Changelog</a> ·
+  <a href="#community">Community</a>
+</p>
+
+<p align="center">
   <a href="https://github.com/FahriAdison/NanaPlay/releases/latest">
     <img src="https://img.shields.io/github/v/release/FahriAdison/NanaPlay?style=for-the-badge&label=Download&color=3DDC84" alt="Download latest release">
   </a>
@@ -31,6 +39,8 @@ NanaPlay is a community fork of [OpenNOW](https://github.com/OpenCloudGaming/Ope
 It keeps OpenNOW's GeForce NOW streaming core and builds a console-style experience on top: a PS5-inspired interface, touch controls you can rearrange freely, smarter queue handling, and tuning for players on slower or unstable networks.
 
 > **Beta status.** NanaPlay is tested on real devices and works, but it's still beta — expect some rough edges. Bug reports are welcome in [Issues](https://github.com/FahriAdison/NanaPlay/issues) or on Discord.
+
+> **You need your own GeForce NOW account.** Your subscription tier and region determine which games and stream settings are available to you.
 
 ---
 

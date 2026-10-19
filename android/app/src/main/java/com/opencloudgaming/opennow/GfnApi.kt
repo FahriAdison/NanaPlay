@@ -2510,6 +2510,7 @@ class GfnSessionRepository(
                 status = status,
                 queuePosition = extractQueuePosition(s),
                 seatSetupStep = s.obj("seatSetupInfo")?.int("seatSetupStep"),
+                seatSetupEta = s.obj("seatSetupInfo")?.long("seatSetupEta"),
                 streamingBaseUrl = base,
                 serverIp = connIp ?: controlIp,
                 signalingUrl = s.arr("connectionInfo")
@@ -2608,6 +2609,7 @@ class GfnSessionRepository(
                 status = active.status,
                 queuePosition = active.queuePosition,
                 seatSetupStep = active.seatSetupStep,
+                seatSetupEta = active.seatSetupEta,
                 streamingBaseUrl = active.streamingBaseUrl,
                 serverIp = active.serverIp.orEmpty(),
                 signalingServer = active.serverIp.orEmpty(),
@@ -2756,6 +2758,7 @@ class GfnSessionRepository(
             status = sessionStatus,
             queuePosition = extractQueuePosition(session),
             seatSetupStep = session.obj("seatSetupInfo")?.int("seatSetupStep"),
+            seatSetupEta = session.obj("seatSetupInfo")?.long("seatSetupEta"),
             adState = extractAdState(session),
             zone = payload.obj("requestStatus")?.string("serverId")?.takeIf { it.isNotBlank() } ?: zone,
             streamingBaseUrl = base,

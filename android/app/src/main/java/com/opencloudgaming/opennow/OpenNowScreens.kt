@@ -12929,7 +12929,7 @@ private fun rememberStableQueuePosition(queuePosition: Int?): Int? {
 }
 
 private fun queueLaunchStatusText(state: OpenNowUiState, queuePosition: Int?): String =
-    queuePosition?.let { "Queue position $it" } ?: queueLaunchStatusText(state)
+    queuePosition?.let { queuePositionText(state, it) } ?: queueLaunchStatusText(state)
 
 private fun queueIdleStatusColor(queueCopy: String): Color =
     if (queueCopy.equals("Starting session", ignoreCase = true)) Green else TextMuted

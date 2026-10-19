@@ -2,16 +2,16 @@
   <img src="nanaplay-icon.png" width="120" alt="NanaPlay icon">
 </p>
 
-<h1 align="center">🎮 NanaPlay</h1>
+<h1 align="center">NanaPlay</h1>
 
 <p align="center">
   <strong>GeForce NOW on Android, with a console feel.</strong><br>
-  <em>An open-source Android client for GeForce NOW — reimagined.</em>
+  An open-source Android client for GeForce NOW, rebuilt around how people actually play on phones.
 </p>
 
 <p align="center">
   <a href="https://github.com/FahriAdison/NanaPlay/releases/latest">
-    <img src="https://img.shields.io/github/v/release/FahriAdison/NanaPlay?style=for-the-badge&label=DOWNLOAD&color=3DDC84" alt="Download">
+    <img src="https://img.shields.io/github/v/release/FahriAdison/NanaPlay?style=for-the-badge&label=Download&color=3DDC84" alt="Download latest release">
   </a>
 </p>
 
@@ -19,73 +19,61 @@
   <img src="https://img.shields.io/badge/Status-Beta-orange?style=flat-square" alt="Beta">
   <img src="https://img.shields.io/badge/Platform-Android-3DDC84?style=flat-square&logo=android&logoColor=white" alt="Android">
   <img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" alt="MIT License">
-  <img src="https://img.shields.io/github/stars/FahriAdison/NanaPlay?style=flat-square" alt="stars">
   <a href="https://discord.gg/TyBrNKnavR">
-    <img src="https://img.shields.io/badge/Discord-Join%20us-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Join our Discord">
+    <img src="https://img.shields.io/badge/Discord-Community-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Discord community">
   </a>
 </p>
 
-> **NanaPlay is in BETA.** Tested on real devices and working — but it's still beta, so expect some rough edges. Bug reports are always welcome!
+---
 
-NanaPlay is a community fork of [OpenNOW](https://github.com/OpenCloudGaming/OpenNOW) by [Zortos](https://github.com/OpenCloudGaming), rebuilt for Android by **Papah Chan** ([FahriAdison](https://github.com/FahriAdison)).
+NanaPlay is a community fork of [OpenNOW](https://github.com/OpenCloudGaming/OpenNOW) by [Zortos](https://github.com/OpenCloudGaming), recoded for Android by **Papah Chan** ([FahriAdison](https://github.com/FahriAdison)).
 
-It keeps OpenNOW's solid GeForce NOW streaming, and adds a console-style experience, smarter queue handling, and features for players on slower networks.
+It keeps OpenNOW's GeForce NOW streaming core and builds a console-style experience on top: a PS5-inspired interface, touch controls you can rearrange freely, smarter queue handling, and tuning for players on slower or unstable networks.
+
+> **Beta status.** NanaPlay is tested on real devices and works, but it's still beta — expect some rough edges. Bug reports are welcome in [Issues](https://github.com/FahriAdison/NanaPlay/issues) or on Discord.
 
 ---
 
-## 📸 Screenshots
+## Download
+
+Grab the latest APK from the [Releases page](https://github.com/FahriAdison/NanaPlay/releases/latest). The in-app updater will notify you when a new version is out.
+
+- **Package:** `com.papahchan.nanaplay` — different from upstream OpenNOW, so both can be installed side-by-side.
+- If you previously installed a NanaPlay build under the old package (`com.opencloudgaming.opennow`), uninstall it first. Your GeForce NOW login is server-side, so just sign in again.
+
+---
+
+## Screenshots
 
 <p align="center">
   <img src="screenshot-console.png" width="720" alt="NanaPlay Console Mode">
 </p>
-<p align="center"><em>Console Mode — PS5-style interface, immersive landscape</em></p>
+<p align="center"><em>Console Mode — PS5-style interface in landscape</em></p>
 
 ---
 
-## ✨ Features
+## Features
 
-| | Feature | Details |
-|---|---|---|
-| 🎮 | **Console Mode** | PS5-style UI: game artwork backdrops, horizontal card strips, D-pad navigation, immersive fullscreen landscape |
-| 📋 | **Queue Redesign** | Route picker with ping bars & ETAs, fullscreen queue position screen with live countdown, matching minimized bar |
-| 🔁 | **Persistent Reconnect** | Optional unlimited auto-reconnect with backoff for poor networks, plus automatic fallback to a low-bandwidth profile (great for < 4 Mbps) |
-| 🎵 | **Music Player** | Local files + online streaming (JioSaavn), playable outside and inside the stream |
-| 🌐 | **Floating Browser** | Lightweight WebView over the stream — for maps & guides |
-| ⏺️ | **Stream Recording** | Record to MP4 via Storage Access Framework |
-| 📸 | **Screenshot** | Capture the stream with PixelCopy, saved as PNG |
-| 🔊 | **Low-Latency Audio** | Toggle for reduced audio delay |
-| 📢 | **Announcements** | In-app popups for important updates |
+**Play your way**
+- **Console Mode** — PS5-style interface: game artwork backdrops, horizontal card strips, D-pad navigation, immersive fullscreen landscape and portrait layouts.
+- **Custom touch layout** — drag buttons and sticks anywhere in edit mode, lock the layout to prevent accidents, reset with confirmation.
+- **Quick Bar** — floating in-stream menu for screenshots, recording, the floating browser, music, keyboard, and touch-control toggles.
+- **Custom overlay shortcut** — remap the overlay trigger (START/SELECT, Guide, L1+R1, L3+R3…) with adjustable hold timing.
 
----
+**Built for real networks**
+- **Queue redesign** — route picker with ping bars, fullscreen queue position screen with live countdown.
+- **Persistent reconnect** — optional unlimited auto-reconnect with backoff, plus automatic fallback to a low-bandwidth profile for connections under ~4 Mbps.
+- **Adaptive network adjustment** — automatic quality/latency tuning based on measured conditions.
 
-## 📦 Package Info
-
-- **Package:** `com.papahchan.nanaplay` — different from upstream OpenNOW, so it can be installed **side-by-side**
-- **Label:** NanaPlay
-- ⚠️ If you previously installed a NanaPlay build with the old package (`com.opencloudgaming.opennow`), uninstall it first — your login is server-side, just sign in again.
+**Extras**
+- **Music player** — local files plus online streaming, with notification and lock-screen controls; works outside and inside the stream.
+- **Floating browser** — lightweight WebView over the stream for maps and guides.
+- **Stream recording & screenshots** — record to MP4, capture PNGs.
+- **Low-latency audio toggle**, **maintenance/patching banners** with pre-play confirmation, in-app announcements.
 
 ---
 
-## 🗂️ Repository Layout
-
-```
-.
-├── android/                        # Android app (Kotlin + Jetpack Compose)
-│   └── app/src/main/
-│       ├── java/com/opencloudgaming/opennow/
-│       │   ├── Nana*.kt            # NanaPlay features (music, browser, announcements…)
-│       │   └── OpenNow*.kt         # Upstream base (streaming, queue, auth…)
-│       └── res/                    # Resources
-├── announcements.json              # In-app announcement feed
-├── nanaplay-icon.png               # App icon
-├── screenshot-console.png          # Console Mode screenshot
-├── README.md
-└── LICENSE
-```
-
----
-
-## 🔨 Building
+## Building
 
 Requirements: **JDK 17**, Android SDK (compileSdk 37), Gradle 9.x.
 
@@ -94,45 +82,51 @@ cd android
 ./gradlew assembleRelease
 ```
 
-The APK lands in `android/app/build/outputs/apk/release/`. Release builds use R8 minification + resource shrinking (~46 MB).
+The APK lands in `android/app/build/outputs/apk/release/`. Release builds use R8 minification and resource shrinking.
 
 > **Signing:** release builds expect a keystore configured as the `nanaplay` signing config. Never commit keystores — see `.gitignore`.
 
----
+Repository layout:
 
-## 🗒️ Changelog
-
-| Version | Code | Highlights |
-|---------|------|------------|
-| 1.0.37 | 92 | Touch session recovery (ported from upstream); recovery fail-fast |
-| 1.0.36 | 91 | Music player rework: instant switching, auto-retry, persistent playlist |
-| 1.0.35 | 90 | Gamepad overlap fix; browser URL fix; music replay fix |
-| 1.0.34 | 89 | In-app announcement popup via GitHub JSON |
-| 1.0.33 | 88 | Search state persistence; 50 music results; gamepad restyle; floating drawer |
-| 1.0.32 | 87 | JioSaavn parser fix |
-| 1.0.31 | 86 | Online music backend switched to **JioSaavn** |
-| 1.0.26 | 81 | First online music (YouTube InnerTube) |
-| 1.0.25 | 80 | Local music player; NanaPlay home identity; instant search |
-| 1.0.24 | 79 | Queue stuck warning + retry; session auto-retry; Low Latency preset |
-| 1.0.23 | 78 | Compact recommended card; slim status bar |
-| 1.0.22 | 77 | Update checker reads own GitHub releases |
-| 1.0.21 | 76 | Critical launch-crash fix |
-| 1.0.20 | 75 | **New package** `com.papahchan.nanaplay`; first GitHub release |
-| 1.0.19 | 74 | **Persistent reconnect** for poor networks |
-| 1.0.17 | 72 | First optimized release build (~46 MB) |
-| 1.0.10 | 65 | First **Console Mode** |
+```
+.
+├── android/                  # Android app (Kotlin + Jetpack Compose)
+│   └── app/src/main/
+│       ├── java/com/opencloudgaming/opennow/
+│       │   ├── Nana*.kt      # NanaPlay features (music, browser, announcements…)
+│       │   └── OpenNow*.kt   # Upstream base (streaming, queue, auth…)
+│       └── res/              # Resources
+├── announcements.json        # In-app announcement feed
+├── nanaplay-icon.png         # App icon
+├── screenshot-console.png    # Console Mode screenshot
+├── README.md
+└── LICENSE
+```
 
 ---
 
-## ⭐ Star History
+## Changelog (recent)
 
-[![Star History Chart](https://api.star-history.com/svg?repos=FahriAdison/NanaPlay&type=Date)](https://star-history.com/#FahriAdison/NanaPlay&Date)
+| Version | Highlights |
+|---------|------------|
+| 1.0.80 | Fixed touch-layout edits being wiped when dragging the quick bar, keyboard bar, or control panel |
+| 1.0.79 | Layout lock toggle + reset confirmation; analog stick auto-recenter |
+| 1.0.78 | Fixed false APK signature-mismatch error on Android 9 |
+| 1.0.77 | Customizable overlay shortcut; updated About page |
+| 1.0.76 | Maintenance/patching warning banner with pre-play confirmation |
+| 1.0.75 | Session management (ported from upstream) |
+| 1.0.74 | Browser panel drag fix; queue dock in portrait console mode |
+| 1.0.72 | Adaptive network adjustment; mouse-to-touch-drag for NTE |
+| 1.0.71 | Music player hardening: repeat/shuffle, notification controls, call auto-pause |
+| 1.0.20 | New package `com.papahchan.nanaplay`; first GitHub release |
+| 1.0.19 | Persistent reconnect for poor networks |
+| 1.0.10 | First Console Mode |
 
 ---
 
-## 💬 Community
+## Community
 
-Join the **NanaPlay Community** on Discord — chat with other players, share feedback, and get help:
+Chat with other players, share feedback, and get help on the **NanaPlay Community** Discord:
 
 <p align="center">
   <a href="https://discord.gg/TyBrNKnavR">
@@ -142,12 +136,16 @@ Join the **NanaPlay Community** on Discord — chat with other players, share fe
 
 ---
 
-## 🙏 Credits
+## Credits
 
 - **Upstream:** [OpenNOW](https://github.com/OpenCloudGaming/OpenNOW) by [Zortos](https://github.com/OpenCloudGaming) — the foundation of everything here. Android contributions by [Kief5555](https://github.com/Kief5555).
 - **Recode & redesign:** [Papah Chan](https://github.com/FahriAdison)
 - **Online music:** [JioSaavn](https://www.jiosaavn.com) catalog via the ShnwazDev public API wrapper (based on [sumitkolhe/jiosaavn-api](https://github.com/sumitkolhe/jiosaavn-api), MIT).
 
-## 📄 License
+## Disclaimer
+
+NanaPlay is an independent community project. It is not affiliated with, endorsed by, or sponsored by NVIDIA. GeForce NOW is a trademark of NVIDIA Corporation.
+
+## License
 
 MIT License — see [LICENSE](LICENSE). Original copyright (c) 2025 Zortos, retained as required by the license.

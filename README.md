@@ -146,6 +146,18 @@ Chat with other players, share feedback, and get help on the **NanaPlay Communit
 
 ---
 
+## Support
+
+NanaPlay is free and open-source, built in spare time with the community. If it makes your cloud gaming better, consider supporting development:
+
+<p align="center">
+  <a href="https://sociabuzz.com/papahchan/tribe">
+    <img src="https://img.shields.io/badge/Support_via-Sociabuzz-FF6B6B?style=for-the-badge&logo=heart&logoColor=white" alt="Support via Sociabuzz">
+  </a>
+</p>
+
+---
+
 ## Credits
 
 - **Upstream:** [OpenNOW](https://github.com/OpenCloudGaming/OpenNOW) by [Zortos](https://github.com/OpenCloudGaming) — the foundation of everything here. Android contributions by [Kief5555](https://github.com/Kief5555).

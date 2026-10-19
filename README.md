@@ -154,6 +154,9 @@ NanaPlay is free and open-source, built in spare time with the community. If it 
   <a href="https://sociabuzz.com/papahchan/tribe">
     <img src="https://img.shields.io/badge/Support_via-Sociabuzz-FF6B6B?style=for-the-badge&logo=heart&logoColor=white" alt="Support via Sociabuzz">
   </a>
+  <a href="https://www.buymeacoffee.com/papahchan">
+    <img src="https://img.shields.io/badge/Buy_me_a-Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy me a coffee">
+  </a>
 </p>
 
 ---

@@ -14364,7 +14364,12 @@ private fun StickWithThumbButton(
 // sideways), the stick is forced back to center. A legitimately held stick
 // streams micro-move events from the touchscreen, so the watchdog does not
 // fire during normal held input.
+// 1.0.83: adaptive timeout - when the finger was last seen OUTSIDE the stick
+// circle, a shorter window is used because a missed UP is more likely there
+// (the platform may stop routing events for a pointer held still outside the
+// original bounds). Inside the circle the full window still applies.
 private const val VIRTUAL_STICK_WATCHDOG_MS = 500L
+private const val VIRTUAL_STICK_WATCHDOG_OUTSIDE_MS = 200L
 
 @Composable
 private fun VirtualStick(
@@ -14380,6 +14385,9 @@ private fun VirtualStick(
     var knobOffset by remember { mutableStateOf(Offset.Zero) }
     var baseOffset by remember { mutableStateOf(Offset.Zero) }
     var lastStickEventMs by remember { mutableStateOf(0L) }
+    // 1.0.83: tracks whether the finger was last seen outside the stick
+    // circle, so the watchdog can use the shorter outside timeout.
+    var lastWasOutside by remember { mutableStateOf(false) }
     val style = LocalTouchControllerStyle.current
 
     DisposableEffect(client) {
@@ -14396,17 +14404,23 @@ private fun VirtualStick(
     // block below runs on AwaitPointerEventScope, which is not a
     // CoroutineScope, so a bare launch call does not compile there.
     // Same keys as pointerInput: restarts together with the gesture loop.
+    // 1.0.83: adaptive timeout - the shorter outside window applies when the
+    // finger was last seen outside the stick circle (missed UP is likelier).
     LaunchedEffect(client, mode, deadZone) {
         while (true) {
-            delay(VIRTUAL_STICK_WATCHDOG_MS)
+            // 1.0.83: poll at the shorter outside cadence so the adaptive
+            // timeout below can actually fire sooner than 500ms.
+            delay(VIRTUAL_STICK_WATCHDOG_OUTSIDE_MS)
             val now = SystemClock.uptimeMillis()
+            val timeout = if (lastWasOutside) VIRTUAL_STICK_WATCHDOG_OUTSIDE_MS else VIRTUAL_STICK_WATCHDOG_MS
             if ((knobOffset != Offset.Zero || baseOffset != Offset.Zero) &&
-                now - lastStickEventMs >= VIRTUAL_STICK_WATCHDOG_MS
+                now - lastStickEventMs >= timeout
             ) {
                 currentOnChange(0f, 0f)
                 knobOffset = Offset.Zero
                 baseOffset = Offset.Zero
                 lastStickEventMs = now
+                lastWasOutside = false
             }
         }
     }
@@ -14424,6 +14438,11 @@ private fun VirtualStick(
 
                     fun updateStick(position: Offset) {
                         lastStickEventMs = SystemClock.uptimeMillis()
+                        // 1.0.83: record whether the finger is outside the
+                        // stick circle (before clamping) for the adaptive
+                        // watchdog timeout.
+                        val rawOffset = position - gestureCenter
+                        lastWasOutside = rawOffset.getDistance() > maxRadius
                         val clamped = clampStickOffset(position - gestureCenter, maxRadius)
                         val rawX = (clamped.x / maxRadius).coerceIn(-1f, 1f)
                         val rawY = (clamped.y / maxRadius).coerceIn(-1f, 1f)

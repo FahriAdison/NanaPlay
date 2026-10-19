@@ -182,6 +182,11 @@ object NanaMusicPlayer {
     // avoids torn reads on 32-bit CPUs.
     @Volatile
     private var pendingSeekMs: Long = 0L
+    // 1.0.83 (DSH P1#1): track index that pendingSeekMs belongs to. The seek
+    // is only applied when starting the SAME index — otherwise a pause
+    // position would leak into the next track.
+    @Volatile
+    private var pendingSeekIndex: Int = -1
 
     /** 1.0.36: saavnId we already auto-retried after an error (prevents retry loops). */
     private var lastRetrySaavnId: String? = null
@@ -415,6 +420,7 @@ object NanaMusicPlayer {
                 }.coerceIn(0, rebuilt.size - 1)
                 _currentIndex.value = idx
                 pendingSeekMs = positionMs
+                pendingSeekIndex = idx
             }
         } catch (t: Throwable) {
             logCrashToFile(context, "restoreState", t)
@@ -439,6 +445,7 @@ object NanaMusicPlayer {
             if (_tracks.value.isEmpty()) {
                 _currentIndex.value = -1
                 pendingSeekMs = 0L
+                pendingSeekIndex = -1
             }
         }
     }
@@ -518,7 +525,10 @@ object NanaMusicPlayer {
                         // Persist position on every pause — cheap and exact.
                         // F-17: capture on main thread; saveState() runs on IO
                         // where ExoPlayer.currentPosition would throw.
+                        // 1.0.83 (DSH P1#1): also capture the track index so
+                        // the position is only restored for the same track.
                         pendingSeekMs = runCatching { exo.currentPosition }.getOrDefault(0L).coerceAtLeast(0L)
+                        pendingSeekIndex = _currentIndex.value
                         persistScope.launch { saveState(appContext) }
                     }
                 }
@@ -627,6 +637,7 @@ object NanaMusicPlayer {
                 _tracks.value = emptyList()
                 _currentIndex.value = -1
                 pendingSeekMs = 0L
+                pendingSeekIndex = -1
                 _isPlaying.value = false
             }
             resetToEmptyState(context)
@@ -956,7 +967,13 @@ object NanaMusicPlayer {
             // direct player calls must run on the Main thread.
             val seekTo = synchronized(this) {
                 _currentIndex.value = index
-                pendingSeekMs.also { pendingSeekMs = 0L }
+                // 1.0.83 (DSH P1#1): only restore the saved position when it
+                // belongs to this same track index. A pause position from a
+                // previous track must never leak into the next one.
+                val restoreMs = if (pendingSeekIndex == index) pendingSeekMs else 0L
+                pendingSeekMs = 0L
+                pendingSeekIndex = -1
+                restoreMs
             }
             val shouldPlay = playRequested
             withContext(Dispatchers.Main) {
@@ -1299,7 +1316,7 @@ object NanaMusicPlayer {
             runCatching { exo?.clearMediaItems() }
         }
         _currentIndex.value = -1
-        synchronized(this) { pendingSeekMs = 0L }
+        synchronized(this) { pendingSeekMs = 0L; pendingSeekIndex = -1 }
     }
 
     // 1.0.67 (F-05): synchronize with playInternal's Guard 3 — a concurrent
@@ -1322,7 +1339,7 @@ object NanaMusicPlayer {
         }
         _isPlaying.value = false
         _currentIndex.value = -1
-        synchronized(this) { pendingSeekMs = 0L }
+        synchronized(this) { pendingSeekMs = 0L; pendingSeekIndex = -1 }
     }
 
     private fun resolveTitle(context: Context, uri: Uri): String {

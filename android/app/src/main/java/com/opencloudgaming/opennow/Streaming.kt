@@ -3594,6 +3594,12 @@ class NativeStreamClient(
     private val lowLatencyGameAudio: Boolean = SettingsStore(appContext).settings.value.lowLatencyGameAudio
     private val eglBase: EglBase = EglBase.create()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    // 1.0.83 (DSH P1#2): dedicated scope for recording finalization, independent
+    // of the client lifecycle scope. scope.cancel() in finishRelease() must not
+    // kill an in-flight stopAndAwaitFinished() — that would leave the MP4
+    // without its moov box (corrupt file).
+    private val recordingFinalizeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var recordingFinalizeJob: Job? = null
     private val inputExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "opennow-input-sender").apply {
             priority = Thread.MAX_PRIORITY
@@ -4116,7 +4122,11 @@ class NativeStreamClient(
         recordingPhase.value = StreamRecorderPhase.Finalizing
         // Await finalization on a background thread (never main): stopAndAwaitFinished
         // blocks up to 30s for the muxer/codecs to release cleanly.
-        scope.launch(Dispatchers.IO) { recorder.stopAndAwaitFinished() }
+        // 1.0.83 (DSH P1#2): run on the independent finalize scope so a later
+        // scope.cancel() (finishRelease) cannot interrupt the mux.
+        recordingFinalizeJob = recordingFinalizeScope.launch {
+            recorder.stopAndAwaitFinished()
+        }
     }
 
     internal fun canCaptureScreenshot(): Boolean {
@@ -4274,6 +4284,13 @@ class NativeStreamClient(
         factory?.dispose()
         factory = null
         audioDeviceModule.release()
+        // 1.0.83 (DSH P1#2): recording finalization runs on
+        // recordingFinalizeScope, independent of `scope` below — it is
+        // intentionally NOT cancelled here so an in-flight
+        // stopAndAwaitFinished() can complete the MP4 mux (moov box).
+        // The recorder owns its own EGL child context, so eglBase.release()
+        // does not interfere with the background mux. No blocking join here:
+        // finishRelease() runs on the main thread (via onDispose).
         eglBase.release()
         scope.cancel()
     }

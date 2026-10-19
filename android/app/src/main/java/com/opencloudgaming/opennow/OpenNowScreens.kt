@@ -3101,11 +3101,24 @@ private fun HomeScreen(
     // NanaPlay 1.0.25: Classic search filters the already-loaded catalog locally
     // (gameMatchesSearch) — instant results like Console mode, no network
     // round-trip per keystroke.
-    val allGames = state.games.ifEmpty { state.catalogResult.games }
+    // 1.0.82: search the UNION of the MAIN panel and the full catalog
+    // (deduped by id). Previously only the MAIN panel (~300 curated games)
+    // was searched, so games GFN lists outside it were unfindable.
+    val allGames = remember(state.games, state.catalogResult.games) {
+        (state.games + state.catalogResult.games).distinctBy { it.id }
+    }
     val visibleGames = remember(allGames, state.catalogSearch) {
         val query = state.catalogSearch
         if (query.isBlank()) allGames
         else allGames.filter { game -> gameMatchesSearch(game, query) }
+    }
+    // 1.0.82: server-side search fallback — if nothing matches locally, ask
+    // GFN once. No loop: this only re-fires when (isEmpty, query) changes,
+    // and the ViewModel never calls setCatalogSearch on its own.
+    LaunchedEffect(visibleGames.isEmpty(), state.catalogSearch) {
+        if (state.catalogSearch.isNotBlank() && visibleGames.isEmpty()) {
+            viewModel.searchCatalogOnServer(state.catalogSearch)
+        }
     }
     val searchingCatalog = state.loadingGames && state.catalogSearch.isNotBlank()
     val gridState = rememberLazyGridState()
@@ -3238,6 +3251,22 @@ private fun HomeScreen(
                             showToolbar = !controlsInTopBar,
                             modifier = Modifier.fillMaxSize(),
                         )
+                    }
+                    // 1.0.82: subtle "updating" pill while the grid shows a
+                    // stale cache that is being refreshed from the network.
+                    if (state.loadingGames && visibleGames.isNotEmpty()) {
+                        Surface(
+                            modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            color = OpenNowPalette.PanelOverVideo.copy(alpha = 0.92f),
+                        ) {
+                            Text(
+                                text = if (state.settings.appLanguage == "in") "Memperbarui katalog…" else "Updating catalog…",
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextMuted,
+                            )
+                        }
                     }
                     if (showScrollActions) {
                         Box(Modifier.align(Alignment.BottomEnd).padding(2.dp)) {

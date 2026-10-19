@@ -282,6 +282,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
     val state: StateFlow<OpenNowUiState> = _state.asStateFlow()
 
     private var gamesJob: Job? = null
+    private var catalogServerSearchJob: Job? = null
     private var launchJob: Job? = null
     private var activeSubscriptionJob: Job? = null
     private var pendingActiveSessionLaunch: PendingActiveSessionLaunch? = null
@@ -1236,6 +1237,51 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         // No network refresh per keystroke: on slow/bad networks the debounced
         // re-fetch made results lag or never appear. Network refresh stays for
         // manual refresh, sort/filter changes and catalog updates.
+        // 1.0.82: server-side fallback lives in searchCatalogOnServer(),
+        // triggered by HomeScreen only when the local union matches nothing.
+    }
+
+    /**
+     * 1.0.82: one-shot server-side catalog search, used as a fallback when the
+     * local union (MAIN panel + cached catalog) matches nothing. Results are
+     * MERGED into catalogResult (never replacing it), so clearing the query
+     * needs no restore, no per-game settings are pruned, and no refresh loop
+     * can form. Stale responses are dropped if the query changed mid-flight.
+     */
+    fun searchCatalogOnServer(query: String) {
+        val trimmed = query.trim()
+        if (trimmed.isBlank()) return
+        catalogServerSearchJob?.cancel()
+        catalogServerSearchJob = viewModelScope.launch {
+            val auth = state.value.authSession ?: return@launch
+            val baseUrl = effectiveStreamingBaseUrl(auth)
+            _state.update { it.copy(loadingGames = true) }
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    catalogRepository.browseCatalog(
+                        token = auth.tokens.idToken ?: auth.tokens.accessToken,
+                        providerStreamingBaseUrl = baseUrl,
+                        searchQuery = trimmed,
+                        maxPages = 1,
+                    )
+                }
+            }.onSuccess { result ->
+                if (state.value.catalogSearch.trim() != trimmed) {
+                    _state.update { it.copy(loadingGames = false) }
+                    return@onSuccess
+                }
+                _state.update {
+                    val merged = (it.catalogResult.games + result.games).distinctBy { g -> g.id }
+                    it.copy(
+                        catalogResult = it.catalogResult.copy(games = merged),
+                        loadingGames = false,
+                    )
+                }
+            }.onFailure { error ->
+                if (error is CancellationException) return@onFailure
+                _state.update { it.copy(loadingGames = false) }
+            }
+        }
     }
 
     fun setLibrarySearch(query: String) {

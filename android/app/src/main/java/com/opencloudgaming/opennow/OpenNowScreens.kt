@@ -14368,6 +14368,10 @@ private fun StickWithThumbButton(
 // circle, a shorter window is used because a missed UP is more likely there
 // (the platform may stop routing events for a pointer held still outside the
 // original bounds). Inside the circle the full window still applies.
+// 1.0.84: the watchdog only fires when no pointer is active (isPointerDown
+// is false). A finger held perfectly still on the stick sends no touch
+// events at all, so the watchdog must not treat stale events as a missed
+// UP while the finger is still down.
 private const val VIRTUAL_STICK_WATCHDOG_MS = 500L
 private const val VIRTUAL_STICK_WATCHDOG_OUTSIDE_MS = 200L
 
@@ -14388,6 +14392,11 @@ private fun VirtualStick(
     // 1.0.83: tracks whether the finger was last seen outside the stick
     // circle, so the watchdog can use the shorter outside timeout.
     var lastWasOutside by remember { mutableStateOf(false) }
+    // 1.0.84: tracks whether a pointer is actively down on this stick.
+    // The watchdog must only fire when no finger is down - a finger held
+    // perfectly still sends no touch events, so event staleness alone
+    // cannot tell "held still" apart from "missed UP".
+    var isPointerDown by remember { mutableStateOf(false) }
     val style = LocalTouchControllerStyle.current
 
     DisposableEffect(client) {
@@ -14413,7 +14422,8 @@ private fun VirtualStick(
             delay(VIRTUAL_STICK_WATCHDOG_OUTSIDE_MS)
             val now = SystemClock.uptimeMillis()
             val timeout = if (lastWasOutside) VIRTUAL_STICK_WATCHDOG_OUTSIDE_MS else VIRTUAL_STICK_WATCHDOG_MS
-            if ((knobOffset != Offset.Zero || baseOffset != Offset.Zero) &&
+            if (!isPointerDown &&
+                (knobOffset != Offset.Zero || baseOffset != Offset.Zero) &&
                 now - lastStickEventMs >= timeout
             ) {
                 currentOnChange(0f, 0f)
@@ -14461,6 +14471,7 @@ private fun VirtualStick(
                     // stick bounds keeps delivering events to the ongoing
                     // gesture, so it is covered too.
                     try {
+                        isPointerDown = true
                         updateStick(down.position)
                         down.consume()
                         while (true) {
@@ -14474,6 +14485,7 @@ private fun VirtualStick(
                             change.consume()
                         }
                     } finally {
+                        isPointerDown = false
                         currentOnChange(0f, 0f)
                         knobOffset = Offset.Zero
                         baseOffset = Offset.Zero

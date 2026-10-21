@@ -14372,8 +14372,15 @@ private fun StickWithThumbButton(
 // is false). A finger held perfectly still on the stick sends no touch
 // events at all, so the watchdog must not treat stale events as a missed
 // UP while the finger is still down.
+// 1.0.85: long-timeout watchdog. Distinguishes "finger held still" from
+// "lost UP": both show no events with isPointerDown=true, but a held finger
+// self-heals on its next micro-move (updateStick re-deflects from the
+// still-alive gesture loop), while a lost UP never sends another event.
+// So bound the damage: recenter after 2.5s of event silence even while
+// isPointerDown is true.
 private const val VIRTUAL_STICK_WATCHDOG_MS = 500L
 private const val VIRTUAL_STICK_WATCHDOG_OUTSIDE_MS = 200L
+private const val VIRTUAL_STICK_WATCHDOG_LONG_MS = 2500L
 
 @Composable
 private fun VirtualStick(
@@ -14422,9 +14429,15 @@ private fun VirtualStick(
             delay(VIRTUAL_STICK_WATCHDOG_OUTSIDE_MS)
             val now = SystemClock.uptimeMillis()
             val timeout = if (lastWasOutside) VIRTUAL_STICK_WATCHDOG_OUTSIDE_MS else VIRTUAL_STICK_WATCHDOG_MS
-            if (!isPointerDown &&
-                (knobOffset != Offset.Zero || baseOffset != Offset.Zero) &&
-                now - lastStickEventMs >= timeout
+            // 1.0.85: the long timeout applies while a pointer is (or appears to be) down -
+            // this is the lost-UP case where isPointerDown is stuck true because the
+            // gesture loop is parked in awaitPointerEvent waiting for an event that
+            // will never arrive. A genuinely held finger self-heals on its next
+            // micro-move (updateStick re-deflects), so only a true lost UP stays
+            // recentered.
+            val effectiveTimeout = if (isPointerDown) VIRTUAL_STICK_WATCHDOG_LONG_MS else timeout
+            if ((knobOffset != Offset.Zero || baseOffset != Offset.Zero) &&
+                now - lastStickEventMs >= effectiveTimeout
             ) {
                 currentOnChange(0f, 0f)
                 knobOffset = Offset.Zero

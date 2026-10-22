@@ -13,21 +13,34 @@ internal fun queueLaunchStatusText(state: OpenNowUiState): String {
     }
 }
 
+/** Server request status for a queue that the provider abandoned. */
+internal const val QUEUE_STATUS_ABANDONED = 69
+/** Server request status for a session id the provider no longer recognises. */
+internal const val QUEUE_STATUS_INVALID_SESSION = 22
+/** A single 22 can be a race; this many in a row means the session is truly gone. */
+internal const val QUEUE_INVALID_SESSION_MAX_CONSECUTIVE_POLLS = 3
+/** Warn (never block) when the selected server pings worse than this. */
+internal const val QUEUE_HIGH_PING_WARNING_MS = 150L
+
+internal fun isQueueAbandonedStatus(statusCode: Int?): Boolean =
+    statusCode == QUEUE_STATUS_ABANDONED
+
+internal fun isQueueInvalidSessionStatus(statusCode: Int?): Boolean =
+    statusCode == QUEUE_STATUS_INVALID_SESSION
+
+internal fun shouldWarnHighPing(pingMs: Long?): Boolean =
+    pingMs != null && pingMs > QUEUE_HIGH_PING_WARNING_MS
+
 /**
- * Formats "Queue position N" with the GFN seatSetupEta estimate when present,
- * bilingual EN/ID based on the app language setting. Eta is in milliseconds;
- * seconds are rounded up (30000 ms -> "est. 30s").
+ * Formats the live queue position, bilingual EN/ID.
+ *
+ * GFN's `seatSetupEta` is a fixed placeholder (30000 ms) that never counts
+ * down, so it is intentionally not rendered. Only the position is shown.
  */
 internal fun queuePositionText(state: OpenNowUiState, queuePosition: Int): String {
     val indonesian = state.settings.appLanguage == "in"
-    val etaSecs = state.streamSession?.seatSetupEta?.takeIf { it > 0 }?.let { (it + 999) / 1000 }
-    val etaSuffix = when {
-        etaSecs == null -> ""
-        indonesian -> " · est. $etaSecs dtk"
-        else -> " · est. ${etaSecs}s"
-    }
-    return if (indonesian) "Posisi antrian $queuePosition$etaSuffix"
-    else "Queue position $queuePosition$etaSuffix"
+    return if (indonesian) "Antrian #$queuePosition"
+    else "Queue #$queuePosition"
 }
 
 internal fun queueDisplayPosition(state: OpenNowUiState): Int? {

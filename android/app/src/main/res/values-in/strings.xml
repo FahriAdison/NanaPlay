@@ -682,6 +682,10 @@
     <string name="queue_free_tier_routing">Routing antrean tier gratis</string>
     <string name="queue_checking_queues">Memeriksa antrean dan latensi PrintedWaste</string>
     <string name="queue_stuck_warning">Antrean kayaknya macet — posisimu nggak bergerak cukup lama.</string>
+    <string name="queue_abandoned_title">Antrean dibatalkan server</string>
+    <string name="queue_abandoned_message">Sesi antrean ini sudah tidak aktif di server. Mulai antrean baru untuk mencoba lagi.</string>
+    <string name="queue_high_ping_warning">Ping tinggi (%1$d ms) — server kejauhan, coba server yang lebih dekat (Mumbai/Tokyo).</string>
+    <string name="action_requeue">Antri ulang</string>
     <string name="queue_title">Antrean</string>
     <string name="queue_live_position">Posisi live</string>
     <string name="queue_other_regions">Region lain</string>

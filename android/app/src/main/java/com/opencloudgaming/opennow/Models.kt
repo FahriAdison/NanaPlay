@@ -1627,6 +1627,8 @@ data class RuntimeCodecReport(
     val androidTvProfile: Boolean,
     val lowPowerGpuProfile: Boolean,
     val constrainedRuntimeProfile: Boolean = false,
+    /** Budget phone SoC (Helio G3x, Unisoc T6xx, Snapdragon 4xx, ...). */
+    val entryLevelChipsetProfile: Boolean = false,
 )
 
 data class StreamRuntimeStats(
@@ -1734,6 +1736,7 @@ internal fun StreamSettings.adjustedForDevice(report: RuntimeCodecReport?): Stre
     }
 
     val profileBitrateCap = when {
+        report?.entryLevelChipsetProfile == true -> ENTRY_LEVEL_MAX_BITRATE_MBPS
         !codecSupported -> 35
         report?.constrainedRuntimeProfile == true -> 75
         report?.lowPowerGpuProfile == true -> 25

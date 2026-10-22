@@ -12,11 +12,12 @@ internal data class AndroidDeviceRecommendation(
     val totalMemoryMiB: Long?,
     val androidTvProfile: Boolean,
     val lowPowerProfile: Boolean,
+    val entryLevelChipset: Boolean,
 ) {
     fun debugSummary(): String =
         "display=${displayWidth}x$displayHeight processors=$processorCount memoryMiB=${totalMemoryMiB ?: "unknown"} " +
-            "tv=$androidTvProfile lowPower=$lowPowerProfile recommended=${stream.resolution}@${stream.fps} " +
-            "codec=${stream.codec} bitrate=${stream.maxBitrateMbps}"
+            "tv=$androidTvProfile lowPower=$lowPowerProfile entryLevel=$entryLevelChipset " +
+            "recommended=${stream.resolution}@${stream.fps} codec=${stream.codec} bitrate=${stream.maxBitrateMbps}"
 }
 
 internal fun recommendedAndroidStreamProfile(
@@ -33,12 +34,15 @@ internal fun recommendedAndroidStreamProfile(
         info.totalMem.takeIf { it > 0L }?.div(1024L * 1024L)
     }.getOrNull()
     val tvProfile = report?.androidTvProfile ?: isAndroidTvProfile(context)
-    val lowPower = report?.lowPowerGpuProfile == true ||
+    val entryLevelChipset = report?.entryLevelChipsetProfile == true
+    val lowPower = entryLevelChipset ||
+        report?.lowPowerGpuProfile == true ||
         totalMemoryMiB?.let { it < 3_000L } == true ||
         processorCount <= 4
 
+    val maxWidth = if (entryLevelChipset) ENTRY_LEVEL_MAX_WIDTH else displayWidth
     val maxHeight = when {
-        lowPower -> 720
+        lowPower -> ENTRY_LEVEL_MAX_HEIGHT
         tvProfile -> 1080
         totalMemoryMiB?.let { it >= 6_000L } == true && processorCount >= 8 -> 1440
         else -> 1080
@@ -53,10 +57,10 @@ internal fun recommendedAndroidStreamProfile(
     } ?: "16:9"
     val choices = streamResolutionChoicesForAspect(aspectRatio)
     val selected = choices
-        .filter { it.width <= displayWidth && it.height <= displayHeight && it.height <= maxHeight }
+        .filter { it.width <= maxWidth && it.height <= displayHeight && it.height <= maxHeight }
         .maxByOrNull { it.width * it.height }
         ?: choices
-            .filter { it.height <= maxHeight }
+            .filter { it.width <= maxWidth && it.height <= maxHeight }
             .maxByOrNull { it.width * it.height }
         ?: streamResolutionChoicesForAspect("16:9").first()
 
@@ -66,6 +70,7 @@ internal fun recommendedAndroidStreamProfile(
     val preferH265 = !lowPower && !tvProfile && maxHeight >= 1440 && h265Ready
     val fps = if (report?.constrainedRuntimeProfile == true || (lowPower && processorCount <= 4)) 30 else 60
     val bitrate = when {
+        entryLevelChipset -> ENTRY_LEVEL_MAX_BITRATE_MBPS
         lowPower -> if (fps <= 30) 12 else 18
         selected.height >= 1440 -> 45
         tvProfile -> 30
@@ -88,5 +93,6 @@ internal fun recommendedAndroidStreamProfile(
         totalMemoryMiB = totalMemoryMiB,
         androidTvProfile = tvProfile,
         lowPowerProfile = lowPower,
+        entryLevelChipset = entryLevelChipset,
     )
 }

@@ -1998,6 +1998,7 @@ private fun MainShell(
                             MinimizedQueueDock(
                                 state = state,
                                 onRestore = viewModel::restoreStreamLaunch,
+                                onRequeue = viewModel::retryQueue,
                                 onCancel = viewModel::stopStream,
                                 modifier = if (consoleModeActive) Modifier.navigationBarsPadding() else Modifier,
                             )
@@ -2280,6 +2281,7 @@ private fun MainShell(
                             MinimizedQueueDock(
                                 state = state,
                                 onRestore = viewModel::restoreStreamLaunch,
+                                onRequeue = viewModel::retryQueue,
                                 onCancel = viewModel::stopStream,
                             )
                         }
@@ -12433,7 +12435,16 @@ private fun QueueLoadingScreen(state: OpenNowUiState, viewModel: OpenNowViewMode
                 .padding(18.dp),
             contentAlignment = Alignment.Center,
         ) {
-            if (ad != null && mediaUrl != null) {
+            if (state.queueAbandoned) {
+                QueueAbandonedPanel(
+                    game = game,
+                    onRequeue = viewModel::retryQueue,
+                    onCancel = viewModel::stopStream,
+                    modifier = Modifier
+                        .widthIn(max = 620.dp)
+                        .fillMaxWidth(),
+                )
+            } else if (ad != null && mediaUrl != null) {
                 QueueAdPanel(
                     ad = ad,
                     mediaUrl = mediaUrl,
@@ -12462,15 +12473,23 @@ private fun QueueLoadingScreen(state: OpenNowUiState, viewModel: OpenNowViewMode
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
-            // Stuck-queue warning: position hasn't improved for a while. Offer a fresh re-queue.
-            if (state.queueStuckWarning) {
-                QueueStuckWarningCard(
-                    onRetry = viewModel::retryQueue,
-                    modifier = Modifier
+            // Warnings never block the queue: high ping suggests a closer server,
+            // stuck warning offers a fresh re-queue.
+            if (shouldWarnHighPing(state.streamServerPingMs) || state.queueStuckWarning) {
+                Column(
+                    Modifier
                         .align(Alignment.TopCenter)
-                        .fillMaxWidth()
-                        .widthIn(max = 620.dp),
-                )
+                        .widthIn(max = 620.dp)
+                        .fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    state.streamServerPingMs
+                        ?.takeIf(::shouldWarnHighPing)
+                        ?.let { QueueHighPingWarningCard(pingMs = it) }
+                    if (state.queueStuckWarning) {
+                        QueueStuckWarningCard(onRetry = viewModel::retryQueue)
+                    }
+                }
             }
         }
     }
@@ -13000,6 +13019,97 @@ private fun QueueStuckWarningCard(
 }
 
 @Composable
+private fun QueueHighPingWarningCard(
+    pingMs: Long,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(OpenNowRadius.lg),
+        color = OpenNowPalette.PanelOverVideo,
+        border = BorderStroke(1.dp, Color(0xffffb84d)),
+        tonalElevation = 8.dp,
+    ) {
+        Row(
+            Modifier.padding(OpenNowSpacing.md),
+            horizontalArrangement = Arrangement.spacedBy(OpenNowSpacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                stringResource(R.string.queue_high_ping_warning, pingMs),
+                color = TextPrimary,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun QueueAbandonedPanel(
+    game: GameInfo?,
+    onRequeue: () -> Unit,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val requeueFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        delay(80)
+        runCatching { requeueFocusRequester.requestFocus() }
+    }
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(OpenNowRadius.lg),
+        color = OpenNowPalette.PanelOverVideo,
+        border = BorderStroke(1.dp, Color(0xffffb84d)),
+        tonalElevation = 10.dp,
+    ) {
+        Column(
+            Modifier.padding(OpenNowSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(OpenNowSpacing.md),
+        ) {
+            Text(
+                stringResource(R.string.queue_abandoned_title),
+                color = TextPrimary,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+            )
+            game?.title?.takeIf { it.isNotBlank() }?.let { title ->
+                Text(
+                    title,
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(
+                stringResource(R.string.queue_abandoned_message),
+                color = TextMuted,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) {
+                    Text(stringResource(R.string.action_cancel), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Button(
+                    onClick = onRequeue,
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusRequester(requeueFocusRequester),
+                ) {
+                    Text(stringResource(R.string.action_requeue), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun QueueStatusPanel(
     game: GameInfo?,
     queueCopy: String,
@@ -13389,9 +13499,11 @@ private fun QueueStatusAndActions(
 private fun MinimizedQueueDock(
     state: OpenNowUiState,
     onRestore: () -> Unit,
+    onRequeue: () -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val abandoned = state.queueAbandoned
     val queuePosition = activeQueuePosition(state)
     val visibleQueuePosition = rememberStableQueuePosition(queuePosition)
     val queueCopy = queueLaunchStatusText(state, visibleQueuePosition)
@@ -13455,15 +13567,35 @@ private fun MinimizedQueueDock(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        // Same animated status component as the queue screen:
-                        // bigger live number with urgency color + glow.
-                        AnimatedQueueStatusText(
-                            queueCopy = queueCopy,
-                            queuePosition = visibleQueuePosition,
-                            compact = true,
-                        )
+                        if (abandoned) {
+                            Text(
+                                stringResource(R.string.queue_abandoned_title),
+                                color = Color(0xffffc95a),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        } else {
+                            // Same animated status component as the queue screen:
+                            // bigger live number with urgency color + glow.
+                            AnimatedQueueStatusText(
+                                queueCopy = queueCopy,
+                                queuePosition = visibleQueuePosition,
+                                compact = true,
+                            )
+                        }
                     }
-                    TextButton(onClick = onRestore) { Text(stringResource(R.string.action_view)) }
+                    TextButton(
+                        onClick = onRestore,
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                    ) { Text(stringResource(R.string.action_view), maxLines = 1) }
+                    if (abandoned) {
+                        Button(
+                            onClick = onRequeue,
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                        ) { Text(stringResource(R.string.action_requeue), maxLines = 1) }
+                    }
                     OutlinedButton(onClick = onCancel, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)) {
                         Text(stringResource(R.string.action_cancel))
                     }
@@ -14376,11 +14508,12 @@ private fun StickWithThumbButton(
 // "lost UP": both show no events with isPointerDown=true, but a held finger
 // self-heals on its next micro-move (updateStick re-deflects from the
 // still-alive gesture loop), while a lost UP never sends another event.
-// So bound the damage: recenter after 2.5s of event silence even while
-// isPointerDown is true.
+// 1.0.86: bound the damage tighter - recenter after 1.2s of event silence
+// even while isPointerDown is true. The old 2.5s felt like the analog was
+// stuck for seconds; 1.2s is still above any real touch-event gap.
 private const val VIRTUAL_STICK_WATCHDOG_MS = 500L
 private const val VIRTUAL_STICK_WATCHDOG_OUTSIDE_MS = 200L
-private const val VIRTUAL_STICK_WATCHDOG_LONG_MS = 2500L
+private const val VIRTUAL_STICK_WATCHDOG_LONG_MS = 1200L
 
 @Composable
 private fun VirtualStick(
@@ -14434,11 +14567,20 @@ private fun VirtualStick(
             // gesture loop is parked in awaitPointerEvent waiting for an event that
             // will never arrive. A genuinely held finger self-heals on its next
             // micro-move (updateStick re-deflects), so only a true lost UP stays
-            // recentered.
+            // recentered. 1.0.86 lowered the window from 2.5s to 1.2s.
             val effectiveTimeout = if (isPointerDown) VIRTUAL_STICK_WATCHDOG_LONG_MS else timeout
             if ((knobOffset != Offset.Zero || baseOffset != Offset.Zero) &&
                 now - lastStickEventMs >= effectiveTimeout
             ) {
+                val timeoutLabel = when {
+                    isPointerDown -> "long"
+                    lastWasOutside -> "outside"
+                    else -> "standard"
+                }
+                NativeInputDiagnostics.add(
+                    "stick.watchdog label=$label timeout=$timeoutLabel timeoutMs=$effectiveTimeout " +
+                        "isPointerDown=$isPointerDown gapSinceLastEventMs=${(now - lastStickEventMs).coerceAtLeast(0L)} at=$now",
+                )
                 currentOnChange(0f, 0f)
                 knobOffset = Offset.Zero
                 baseOffset = Offset.Zero
@@ -14491,6 +14633,11 @@ private fun VirtualStick(
                             val event = awaitPointerEvent(PointerEventPass.Initial)
                             val change = event.changes.firstOrNull { it.id == down.id } ?: break
                             if (!change.pressed) {
+                                val now = SystemClock.uptimeMillis()
+                                NativeInputDiagnostics.add(
+                                    "stick.release label=$label source=UP isPointerDown=$isPointerDown " +
+                                        "gapSinceLastEventMs=${(now - lastStickEventMs).coerceAtLeast(0L)} at=$now",
+                                )
                                 change.consume()
                                 break
                             }
@@ -15271,8 +15418,8 @@ private fun PrintedWasteSelector(
                             onRetry = viewModel::refreshPrintedWasteQueues,
                             onDismiss = viewModel::dismissPrintedWasteSelector,
                             onDefault = { viewModel.launchWithPrintedWaste(null) },
-                            onLaunch = { viewModel.launchWithPrintedWaste(selectedZone?.routingUrl) },
-                            onLaunchRecommended = { viewModel.launchWithPrintedWaste(autoZone?.routingUrl) },
+                            onLaunch = { viewModel.launchWithPrintedWaste(selectedZone?.routingUrl, selectedZone?.pingMs) },
+                            onLaunchRecommended = { viewModel.launchWithPrintedWaste(autoZone?.routingUrl, autoZone?.pingMs) },
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxHeight(),
@@ -15306,8 +15453,8 @@ private fun PrintedWasteSelector(
                             onRetry = viewModel::refreshPrintedWasteQueues,
                             onDismiss = viewModel::dismissPrintedWasteSelector,
                             onDefault = { viewModel.launchWithPrintedWaste(null) },
-                            onLaunch = { viewModel.launchWithPrintedWaste(selectedZone?.routingUrl) },
-                            onLaunchRecommended = { viewModel.launchWithPrintedWaste(autoZone?.routingUrl) },
+                            onLaunch = { viewModel.launchWithPrintedWaste(selectedZone?.routingUrl, selectedZone?.pingMs) },
+                            onLaunchRecommended = { viewModel.launchWithPrintedWaste(autoZone?.routingUrl, autoZone?.pingMs) },
                             modifier = Modifier.weight(1f),
                         )
                     }
@@ -15566,6 +15713,15 @@ private fun RecommendedRouteHeroCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+                serverLocationLabel(zoneOption.zoneId)?.let { location ->
+                    Text(
+                        location,
+                        color = TextMuted,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -15578,7 +15734,7 @@ private fun RecommendedRouteHeroCard(
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
-                        "· " + recommendedWaitLine(zoneOption.zone.eta, zoneOption.zone.QueuePosition),
+                        "· ${zoneOption.zone.QueuePosition} in queue",
                         color = TextMuted,
                         style = MaterialTheme.typography.bodySmall,
                         maxLines = 1,
@@ -15631,21 +15787,6 @@ private fun PingSignalBars(pingMs: Long?, modifier: Modifier = Modifier) {
     }
 }
 
-private fun formatQueueWaitHuman(etaMs: Long?, queuePosition: Int): String {
-    if (etaMs != null) {
-        val minutes = ((etaMs + 59_999L) / 60_000L).coerceAtLeast(1L)
-        return if (minutes < 60L) "~$minutes min wait"
-        else "~${minutes / 60L} hr ${minutes % 60L} min wait"
-    }
-    return if (queuePosition > 0) "$queuePosition in queue" else "No queue"
-}
-
-// Hero card line: wait estimate plus the ahead count, e.g. "~12 min wait · 97 in queue".
-private fun recommendedWaitLine(etaMs: Long?, queuePosition: Int): String {
-    val wait = formatQueueWaitHuman(etaMs, queuePosition)
-    return if (etaMs != null && queuePosition > 0) "$wait · $queuePosition in queue" else wait
-}
-
 @Composable
 private fun PrintedWasteZoneRow(
     zoneOption: PrintedWasteZoneOption,
@@ -15681,7 +15822,13 @@ private fun PrintedWasteZoneRow(
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(zoneOption.zoneId, fontWeight = FontWeight.Bold, color = if (selected) MaterialTheme.colorScheme.primary else TextPrimary)
-                            Text(regionLabel(zone.Region), color = TextMuted, style = MaterialTheme.typography.bodySmall)
+                            Text(
+                                serverLocationLabel(zoneOption.zoneId) ?: regionLabel(zone.Region),
+                                color = TextMuted,
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         }
                         if (selected) {
                             Text(stringResource(R.string.osd_selected), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
@@ -15690,7 +15837,6 @@ private fun PrintedWasteZoneRow(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         QueueMetricPill("Ping", zoneOption.pingMs?.let { "$it ms" } ?: "--", zoneOption.pingMs?.let(::pingColor) ?: TextMuted)
                         QueueMetricPill("Ahead", zone.QueuePosition.toString(), queueColor(zone.QueuePosition))
-                        zone.eta?.let { QueueMetricPill("Wait", formatPrintedWasteWait(it)) }
                     }
                 }
             } else {
@@ -15701,11 +15847,16 @@ private fun PrintedWasteZoneRow(
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text(zoneOption.zoneId, fontWeight = FontWeight.Bold, color = if (selected) MaterialTheme.colorScheme.primary else TextPrimary)
-                        Text(regionLabel(zone.Region), color = TextMuted, style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            serverLocationLabel(zoneOption.zoneId) ?: regionLabel(zone.Region),
+                            color = TextMuted,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
                     QueueMetricPill("Ping", zoneOption.pingMs?.let { "$it ms" } ?: "--", zoneOption.pingMs?.let(::pingColor) ?: TextMuted)
                     QueueMetricPill("Ahead", zone.QueuePosition.toString(), queueColor(zone.QueuePosition))
-                    zone.eta?.let { QueueMetricPill("Wait", formatPrintedWasteWait(it)) }
                 }
             }
         }
@@ -15763,11 +15914,6 @@ private fun printedWasteScore(zone: PrintedWasteZoneOption, maxPing: Long, maxQu
 
 private fun printedWasteZoneUrl(zoneId: String): String =
     "https://${zoneId.lowercase()}.cloudmatchbeta.nvidiagrid.net/"
-
-private fun formatPrintedWasteWait(etaMs: Long): String {
-    val minutes = ((etaMs + 59_999L) / 60_000L).coerceAtLeast(1L)
-    return if (minutes < 60L) "${minutes}m" else "${minutes / 60L}h ${minutes % 60L}m"
-}
 
 private fun queueColor(queue: Int): Color = when {
     queue <= 5 -> Green

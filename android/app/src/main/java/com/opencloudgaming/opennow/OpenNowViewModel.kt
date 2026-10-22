@@ -98,6 +98,12 @@ private data class TimedStreamRuntimeStats(
     val stats: StreamRuntimeStats,
 )
 
+/** Thrown when the provider has permanently invalidated the session being queued. */
+private class QueueAbandonedException(
+    val latestSession: SessionInfo,
+    val statusCode: Int?,
+) : Exception("Queue abandoned by server status=${statusCode ?: "unknown"}")
+
 data class ActiveSessionDecision(
     val activeSession: ActiveSessionInfo,
     val requestedGameTitle: String,
@@ -174,6 +180,12 @@ data class OpenNowUiState(
     val queuePosition: Int? = null,
     val queueAdActiveId: String? = null,
     val queueStuckWarning: Boolean = false,
+    /** Provider abandoned this queue (status 69 or repeated 22); show requeue instead of polling a corpse. */
+    val queueAbandoned: Boolean = false,
+    /** TCP ping measured for the server the user picked, used for the non-blocking high-ping warning. */
+    val streamServerPingMs: Long? = null,
+    /** Base URL used for the current launch so "Antri ulang" can create the new session on the same server. */
+    val streamLaunchBaseUrl: String? = null,
     val streamStatus: String = "idle",
     val error: String? = null,
     val deviceLoginPrompt: DeviceLoginPrompt? = null,
@@ -1716,7 +1728,13 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         play(game.withSelectedVariant(variant.id), skipStoreChoice = true)
     }
 
-    fun play(game: GameInfo, streamingBaseUrlOverride: String? = null, skipPrintedWaste: Boolean = false, skipStoreChoice: Boolean = false) {
+    fun play(
+        game: GameInfo,
+        streamingBaseUrlOverride: String? = null,
+        skipPrintedWaste: Boolean = false,
+        skipStoreChoice: Boolean = false,
+        serverPingMs: Long? = null,
+    ) {
         if (launchJob?.isActive == true) {
             recordDebugEvent("launch", "Ignored play request while another launch is active game=${game.title}")
             return
@@ -1735,7 +1753,13 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     ),
                     Toast.LENGTH_SHORT,
                 ).show()
-                play(game.withSelectedVariant(defaultVariant.id), streamingBaseUrlOverride, skipPrintedWaste, skipStoreChoice = true)
+                play(
+                    game.withSelectedVariant(defaultVariant.id),
+                    streamingBaseUrlOverride,
+                    skipPrintedWaste,
+                    skipStoreChoice = true,
+                    serverPingMs = serverPingMs,
+                )
                 return
             }
             if (launchVariants.size > 1) {
@@ -1801,6 +1825,10 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     error = null,
                     queuePosition = null,
                     queueAdActiveId = null,
+                    queueAbandoned = false,
+                    queueStuckWarning = false,
+                    streamServerPingMs = serverPingMs,
+                    streamLaunchBaseUrl = baseUrl,
                     pendingStoreChoiceGame = null,
                     pendingPrintedWasteGame = null,
                     activeSessionDecision = null,
@@ -1868,6 +1896,14 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 markSessionReadyForNativeStream(readySession, settings)
             }.onFailure { error ->
                 if (error is CancellationException) return@onFailure
+                if (error is QueueAbandonedException) {
+                    recordDebugEvent(
+                        "queue",
+                        "Queue abandoned instead of retrying game=${game.title} status=${error.statusCode ?: "unknown"}",
+                    )
+                    showQueueAbandoned(error, settings)
+                    return@onFailure
+                }
                 recordDebugEvent("launch", "Launch failed game=${game.title} error=${error.debugMessage()}")
                 val returnPage = state.value.streamReturnPage ?: AppPage.Home
                 _state.update {
@@ -1887,6 +1923,26 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     )
                 }
             }
+        }
+    }
+
+    private fun showQueueAbandoned(error: QueueAbandonedException, settings: StreamSettings) {
+        _state.update {
+            it.copy(
+                streamStatus = "queue",
+                launchPhase = "Queue abandoned",
+                streamSession = error.latestSession,
+                activeStreamSettings = settings,
+                queuePosition = null,
+                queueAdActiveId = null,
+                queueStuckWarning = false,
+                queueAbandoned = true,
+                error = null,
+                page = AppPage.Stream,
+                activeSessionDecision = null,
+                pendingStoreChoiceGame = null,
+                pendingPrintedWasteGame = null,
+            )
         }
     }
 
@@ -1915,6 +1971,8 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 streamLaunchMinimized = false,
                 queuePosition = null,
                 queueAdActiveId = null,
+                queueAbandoned = false,
+                queueStuckWarning = false,
                 activeSessionDecision = null,
                 page = AppPage.Stream,
             )
@@ -2046,6 +2104,10 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     launchPhase = "",
                     queuePosition = null,
                     queueAdActiveId = null,
+                    queueAbandoned = false,
+                    queueStuckWarning = false,
+                    streamServerPingMs = null,
+                    streamLaunchBaseUrl = null,
                     pendingStoreChoiceGame = null,
                     activeSessionDecision = null,
                     page = returnPage,
@@ -2136,6 +2198,9 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     error = null,
                     queuePosition = null,
                     queueAdActiveId = null,
+                    queueAbandoned = false,
+                    queueStuckWarning = false,
+                    streamLaunchBaseUrl = pending.baseUrl,
                     sessionReport = null,
                 )
             }
@@ -2164,6 +2229,14 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 markSessionReadyForNativeStream(readySession, pending.settings)
             }.onFailure { error ->
                 if (error is CancellationException) return@onFailure
+                if (error is QueueAbandonedException) {
+                    recordDebugEvent(
+                        "queue",
+                        "Replacement queue abandoned instead of retrying game=${pending.game.title} status=${error.statusCode ?: "unknown"}",
+                    )
+                    showQueueAbandoned(error, pending.settings)
+                    return@onFailure
+                }
                 recordDebugEvent("launch", "Replace active session launch failed game=${pending.game.title} error=${error.debugMessage()}")
                 val returnPage = state.value.streamReturnPage ?: pending.returnPage
                 _state.update {
@@ -2220,6 +2293,10 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     error = null,
                     queuePosition = null,
                     queueAdActiveId = null,
+                    queueAbandoned = false,
+                    queueStuckWarning = false,
+                    streamServerPingMs = null,
+                    streamLaunchBaseUrl = baseUrl,
                     sessionReport = null,
                 )
             }
@@ -2252,6 +2329,11 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 markSessionReadyForNativeStream(readySession, state.value.activeStreamSettings ?: settings)
             }.onFailure { error ->
                 if (error is CancellationException) return@onFailure
+                if (error is QueueAbandonedException) {
+                    recordDebugEvent("queue", "Resume queue abandoned status=${error.statusCode ?: "unknown"}")
+                    showQueueAbandoned(error, state.value.activeStreamSettings ?: settings)
+                    return@onFailure
+                }
                 recordDebugEvent("queue", "Resume failed error=${error.debugMessage()}")
                 val returnPage = state.value.streamReturnPage ?: AppPage.Home
                 _state.update {
@@ -2306,6 +2388,10 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     error = null,
                     queuePosition = queueDisplayPosition(pendingSession),
                     queueAdActiveId = null,
+                    queueAbandoned = false,
+                    queueStuckWarning = false,
+                    streamServerPingMs = null,
+                    streamLaunchBaseUrl = pending.baseUrl,
                     sessionReport = null,
                 )
             }
@@ -2317,6 +2403,11 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 markSessionReadyForNativeStream(readySession, resumeSettings)
             }.onFailure { error ->
                 if (error is CancellationException) return@onFailure
+                if (error is QueueAbandonedException) {
+                    recordDebugEvent("queue", "Pending resume queue abandoned status=${error.statusCode ?: "unknown"}")
+                    showQueueAbandoned(error, resumeSettings)
+                    return@onFailure
+                }
                 recordDebugEvent("queue", "Pending resume failed error=${error.debugMessage()}")
                 _state.update {
                     it.copy(
@@ -2339,9 +2430,12 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun launchWithPrintedWaste(zoneUrl: String?) {
+    fun launchWithPrintedWaste(zoneUrl: String?, pingMs: Long? = null) {
         val game = state.value.pendingPrintedWasteGame ?: return
-        recordDebugEvent("queue", "PrintedWaste selection game=${game.title} zone=${hostForDebug(zoneUrl)} auto=${zoneUrl == null}")
+        recordDebugEvent(
+            "queue",
+            "PrintedWaste selection game=${game.title} zone=${hostForDebug(zoneUrl)} auto=${zoneUrl == null} pingMs=${pingMs ?: -1}",
+        )
         launchJob?.cancel()
         launchJob = null
         _state.update {
@@ -2351,7 +2445,13 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 printedWasteLoading = false,
             )
         }
-        play(game, streamingBaseUrlOverride = zoneUrl, skipPrintedWaste = true, skipStoreChoice = true)
+        play(
+            game,
+            streamingBaseUrlOverride = zoneUrl,
+            skipPrintedWaste = true,
+            skipStoreChoice = true,
+            serverPingMs = pingMs,
+        )
     }
 
     private fun effectiveStreamSettings(): StreamSettings {
@@ -3515,6 +3615,21 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
+    private fun queueAbandonedException(
+        latest: SessionInfo,
+        statusCode: Int?,
+        source: String,
+    ): QueueAbandonedException {
+        // Drop the last queue number immediately: on the abandoned screen it is
+        // stale and would otherwise keep the user waiting on a dead session.
+        val abandoned = latest.copy(queuePosition = null)
+        recordDebugEvent(
+            "queue",
+            "Stopping queue polling: provider abandoned session source=$source status=${statusCode ?: "unknown"} ${abandoned.debugSummary()}",
+        )
+        return QueueAbandonedException(abandoned, statusCode)
+    }
+
     private suspend fun pollUntilReady(token: String, created: SessionInfo, settings: StreamSettings): SessionInfo {
         var latest = created
         var pollCount = 0
@@ -3526,6 +3641,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         var stuckWarningShown = false
         val pollStartMs = android.os.SystemClock.elapsedRealtime()
         var consecutivePollFailures = 0
+        var consecutiveInvalidSessionPolls = 0
         recordDebugEvent("queue", "Begin polling ${latest.debugSummary()}")
         _state.update {
             it.copy(
@@ -3534,6 +3650,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 queuePosition = queueDisplayPosition(latest),
                 queueAdActiveId = chooseQueueAdActiveId(it.queueAdActiveId, latest),
                 queueStuckWarning = false,
+                queueAbandoned = false,
             )
         }
         while (!latest.isReadyForStream()) {
@@ -3591,15 +3708,56 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 )
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
-                consecutivePollFailures += 1
-                val backoffMs = minOf(POLL_RETRY_MAX_BACKOFF_MS, 2_000L shl consecutivePollFailures.coerceAtMost(4))
-                recordDebugEvent("queue", "Poll #$pollCount failed due to network error: ${e.message}. Retrying in ${backoffMs}ms...")
-                kotlinx.coroutines.delay(backoffMs)
-                continue
+                val providerStatus = (e as? CloudMatchRequestStatusException)?.statusCode
+                when {
+                    isQueueAbandonedStatus(providerStatus) -> {
+                        throw queueAbandonedException(latest, providerStatus, "poll request")
+                    }
+                    isQueueInvalidSessionStatus(providerStatus) -> {
+                        consecutiveInvalidSessionPolls += 1
+                        recordDebugEvent(
+                            "queue",
+                            "Poll #$pollCount invalid session status=22 attempt=$consecutiveInvalidSessionPolls/${QUEUE_INVALID_SESSION_MAX_CONSECUTIVE_POLLS} session=${latest.shortDebugId()}",
+                        )
+                        if (consecutiveInvalidSessionPolls >= QUEUE_INVALID_SESSION_MAX_CONSECUTIVE_POLLS) {
+                            throw queueAbandonedException(latest, providerStatus, "repeated invalid session")
+                        }
+                        continue
+                    }
+                    else -> {
+                        // A different failure breaks the "consecutive 22" streak.
+                        consecutiveInvalidSessionPolls = 0
+                        consecutivePollFailures += 1
+                        val backoffMs = minOf(POLL_RETRY_MAX_BACKOFF_MS, 2_000L shl consecutivePollFailures.coerceAtMost(4))
+                        recordDebugEvent(
+                            "queue",
+                            "Poll #$pollCount failed (status=${providerStatus ?: "none"}): ${e.message}. Retrying in ${backoffMs}ms...",
+                        )
+                        kotlinx.coroutines.delay(backoffMs)
+                        continue
+                    }
+                }
             }
             consecutivePollFailures = 0
             latest = mergeQueueSessionState(latest, polled)
             recordDebugEvent("queue", "Poll #$pollCount result ${latest.debugSummary()}")
+            // Some provider responses put the terminal code on the session itself
+            // instead of requestStatus; treat it the same way.
+            if (isQueueAbandonedStatus(latest.status)) {
+                throw queueAbandonedException(latest, latest.status, "poll session state")
+            }
+            if (isQueueInvalidSessionStatus(latest.status)) {
+                consecutiveInvalidSessionPolls += 1
+                recordDebugEvent(
+                    "queue",
+                    "Poll #$pollCount session state=22 attempt=$consecutiveInvalidSessionPolls/${QUEUE_INVALID_SESSION_MAX_CONSECUTIVE_POLLS} session=${latest.shortDebugId()}",
+                )
+                if (consecutiveInvalidSessionPolls >= QUEUE_INVALID_SESSION_MAX_CONSECUTIVE_POLLS) {
+                    throw queueAbandonedException(latest, latest.status, "repeated invalid session state")
+                }
+            } else {
+                consecutiveInvalidSessionPolls = 0
+            }
             val currentPosition = queueDisplayPosition(latest)
             val nowMs = android.os.SystemClock.elapsedRealtime()
             if (currentPosition != null && (bestQueuePosition == null || currentPosition < bestQueuePosition)) {
@@ -3698,15 +3856,36 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
      * cancels the wedged launch and starts a fresh session creation.
      */
     fun retryQueue() {
-        val game = state.value.streamGame ?: return
-        recordDebugEvent("queue", "Queue retry requested by user game=${game.title}")
+        val snapshot = state.value
+        val game = snapshot.streamGame ?: return
+        recordDebugEvent(
+            "queue",
+            "Queue retry requested by user game=${game.title} abandoned=${snapshot.queueAbandoned} base=${hostForDebug(snapshot.streamLaunchBaseUrl)}",
+        )
         launchJob?.cancel()
         // Null it immediately: play() refuses while launchJob.isActive (a cancelled
         // job stays "active" until its coroutine finishes), so without this the
         // retry button silently does nothing. Same pattern as launchWithPrintedWaste.
         launchJob = null
-        _state.update { it.copy(queueStuckWarning = false) }
-        play(game, skipPrintedWaste = true, skipStoreChoice = true)
+        _state.update {
+            it.copy(
+                queueStuckWarning = false,
+                queueAbandoned = false,
+                queuePosition = null,
+                queueAdActiveId = null,
+                streamSession = null,
+                error = null,
+            )
+        }
+        // Re-create the session from scratch on the same server, keeping the
+        // measured ping so the high-ping warning survives the retry.
+        play(
+            game,
+            streamingBaseUrlOverride = snapshot.streamLaunchBaseUrl,
+            skipPrintedWaste = true,
+            skipStoreChoice = true,
+            serverPingMs = snapshot.streamServerPingMs,
+        )
     }
 
     private fun effectiveStreamingBaseUrl(sessionOverride: AuthSession? = null): String {

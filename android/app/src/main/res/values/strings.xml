@@ -683,6 +683,10 @@
     <string name="queue_free_tier_routing">Free tier queue routing</string>
     <string name="queue_checking_queues">Checking PrintedWaste queues and latency</string>
     <string name="queue_stuck_warning">Queue seems stuck — your position hasn\'t moved for a while.</string>
+    <string name="queue_abandoned_title">Queue cancelled by server</string>
+    <string name="queue_abandoned_message">This queue session is no longer active on the server. Start a new queue to try again.</string>
+    <string name="queue_high_ping_warning">High ping (%1$d ms) — this server is far away, try a closer server (Mumbai/Tokyo).</string>
+    <string name="action_requeue">Rejoin queue</string>
     <string name="queue_title">Queue</string>
     <string name="queue_live_position">Live position</string>
     <string name="queue_other_regions">Other regions</string>

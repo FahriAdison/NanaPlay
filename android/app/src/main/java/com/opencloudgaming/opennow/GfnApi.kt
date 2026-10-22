@@ -2743,8 +2743,17 @@ class GfnSessionRepository(
         buildMinimalClaimRequestBody(appId, deviceId, settings, physicalDisplayResolution, appLaunchMode)
 
     private suspend fun toSessionInfo(zone: String, base: String, payload: JsonObject, clientId: String, deviceId: String): SessionInfo {
-        val status = payload.obj("requestStatus")?.int("statusCode")
-        check(status == 1) { "CloudMatch returned status $status: ${payload.obj("requestStatus")?.string("statusDescription")}" }
+        val requestStatus = payload.obj("requestStatus")
+        val status = requestStatus?.int("statusCode")
+        if (status != 1) {
+            // Keep the provider status code typed so queue polling can tell a dead
+            // session (69/22) apart from a transient network failure.
+            throw CloudMatchRequestStatusException(
+                statusCode = status,
+                statusDescription = requestStatus?.string("statusDescription"),
+                unifiedErrorCode = requestStatus?.string("unifiedErrorCode"),
+            )
+        }
         val session = payload.obj("session") ?: error("CloudMatch response missing session")
         val sessionStatus = session.int("status") ?: 0
         val signaling = runCatching { resolveSignaling(payload) }.getOrElse { error ->

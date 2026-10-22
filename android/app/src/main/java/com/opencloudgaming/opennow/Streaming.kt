@@ -152,7 +152,18 @@ object CodecProbe {
             is64BitRuntime = is64BitRuntime,
             totalMemoryBytes = totalMemoryBytes,
         )
-        val lowPower = isLowPowerStreamingProfile(
+        val socModel = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) Build.SOC_MODEL else null
+        val socManufacturer = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) Build.SOC_MANUFACTURER else null
+        val entryLevelChipset = isEntryLevelChipset(
+            socModel,
+            socManufacturer,
+            Build.HARDWARE,
+            Build.BOARD,
+            Build.DEVICE,
+            Build.MODEL,
+            Build.MANUFACTURER,
+        )
+        val lowPower = entryLevelChipset || isLowPowerStreamingProfile(
             androidTvProfile = isTv,
             renderer = renderer,
             totalMemoryBytes = totalMemoryBytes,
@@ -192,9 +203,12 @@ object CodecProbe {
             androidTvProfile = isTv,
             lowPowerGpuProfile = lowPower,
             constrainedRuntimeProfile = constrainedRuntime,
+            entryLevelChipsetProfile = entryLevelChipset,
         ).also { report ->
             NativeInputDiagnostics.add(
-                "codec probe device=${Build.MANUFACTURER}/${Build.MODEL} hardware=${Build.HARDWARE} tv=$isTv lowPower=$lowPower " +
+                "codec probe device=${Build.MANUFACTURER}/${Build.MODEL} hardware=${Build.HARDWARE} " +
+                    "soc=${socModel ?: "unknown"} socVendor=${socManufacturer ?: "unknown"} " +
+                    "tv=$isTv lowPower=$lowPower entryLevel=$entryLevelChipset " +
                     "constrained=$constrainedRuntime runtimeBits=${if (is64BitRuntime) 64 else 32} " +
                     "memoryMiB=${totalMemoryBytes?.div(BYTES_PER_MEBIBYTE) ?: 0L}",
             )

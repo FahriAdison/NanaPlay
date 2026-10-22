@@ -14500,17 +14500,16 @@ private fun StickWithThumbButton(
 // circle, a shorter window is used because a missed UP is more likely there
 // (the platform may stop routing events for a pointer held still outside the
 // original bounds). Inside the circle the full window still applies.
-// 1.0.84: the watchdog only fires when no pointer is active (isPointerDown
-// is false). A finger held perfectly still on the stick sends no touch
-// events at all, so the watchdog must not treat stale events as a missed
-// UP while the finger is still down.
-// 1.0.85: long-timeout watchdog. Distinguishes "finger held still" from
-// "lost UP": both show no events with isPointerDown=true, but a held finger
-// self-heals on its next micro-move (updateStick re-deflects from the
-// still-alive gesture loop), while a lost UP never sends another event.
-// 1.0.86: bound the damage tighter - recenter after 1.2s of event silence
-// even while isPointerDown is true. The old 2.5s felt like the analog was
-// stuck for seconds; 1.2s is still above any real touch-event gap.
+// 1.0.84: no pointer down means a stale deflection is always a missed UP,
+// so the watchdog can recenter on the first normal window.
+// 1.0.85: when isPointerDown is still true, a finger held perfectly still
+// and a lost UP are indistinguishable from event timing alone: both show
+// no events. A held finger can resume on its next micro-move, while a lost
+// UP never sends another event.
+// 1.0.86: because that ambiguity cannot be resolved by timing, require two
+// consecutive long windows (about 2.4s) before forcing center. Every
+// qualifying detection, including the first window, is logged; a touch event
+// or any non-matching condition resets the count.
 private const val VIRTUAL_STICK_WATCHDOG_MS = 500L
 private const val VIRTUAL_STICK_WATCHDOG_OUTSIDE_MS = 200L
 private const val VIRTUAL_STICK_WATCHDOG_LONG_MS = 1200L
@@ -14533,10 +14532,15 @@ private fun VirtualStick(
     // circle, so the watchdog can use the shorter outside timeout.
     var lastWasOutside by remember { mutableStateOf(false) }
     // 1.0.84: tracks whether a pointer is actively down on this stick.
-    // The watchdog must only fire when no finger is down - a finger held
-    // perfectly still sends no touch events, so event staleness alone
-    // cannot tell "held still" apart from "missed UP".
+    // While true, the watchdog uses the long path because event staleness
+    // alone cannot tell "held still" apart from "missed UP".
     var isPointerDown by remember { mutableStateOf(false) }
+    // 1.0.86: consecutive long-timeout windows observed while the pointer
+    // still appears down. Two windows (about 2.4s) are required before the
+    // watchdog forces center. Reset on every touch event and whenever the
+    // watchdog condition stops matching.
+    var longTimeoutWindows by remember { mutableStateOf(0) }
+    var lastLongTimeoutCountedMs by remember { mutableStateOf(0L) }
     val style = LocalTouchControllerStyle.current
 
     DisposableEffect(client) {
@@ -14562,31 +14566,45 @@ private fun VirtualStick(
             delay(VIRTUAL_STICK_WATCHDOG_OUTSIDE_MS)
             val now = SystemClock.uptimeMillis()
             val timeout = if (lastWasOutside) VIRTUAL_STICK_WATCHDOG_OUTSIDE_MS else VIRTUAL_STICK_WATCHDOG_MS
-            // 1.0.85: the long timeout applies while a pointer is (or appears to be) down -
-            // this is the lost-UP case where isPointerDown is stuck true because the
-            // gesture loop is parked in awaitPointerEvent waiting for an event that
-            // will never arrive. A genuinely held finger self-heals on its next
-            // micro-move (updateStick re-deflects), so only a true lost UP stays
-            // recentered. 1.0.86 lowered the window from 2.5s to 1.2s.
+            // 1.0.85: the long timeout applies while a pointer is (or appears
+            // to be) down. That covers the lost-UP case where isPointerDown is
+            // stuck true because the gesture loop is parked waiting for an
+            // event that will never arrive. It also covers a genuinely
+            // held-still finger, which is why 1.0.86 waits for two windows.
             val effectiveTimeout = if (isPointerDown) VIRTUAL_STICK_WATCHDOG_LONG_MS else timeout
-            if ((knobOffset != Offset.Zero || baseOffset != Offset.Zero) &&
-                now - lastStickEventMs >= effectiveTimeout
-            ) {
-                val timeoutLabel = when {
-                    isPointerDown -> "long"
-                    lastWasOutside -> "outside"
-                    else -> "standard"
-                }
-                NativeInputDiagnostics.add(
-                    "stick.watchdog label=$label timeout=$timeoutLabel timeoutMs=$effectiveTimeout " +
-                        "isPointerDown=$isPointerDown gapSinceLastEventMs=${(now - lastStickEventMs).coerceAtLeast(0L)} at=$now",
-                )
-                currentOnChange(0f, 0f)
-                knobOffset = Offset.Zero
-                baseOffset = Offset.Zero
-                lastStickEventMs = now
-                lastWasOutside = false
+            val deflected = knobOffset != Offset.Zero || baseOffset != Offset.Zero
+            val gapMs = (now - lastStickEventMs).coerceAtLeast(0L)
+            if (!deflected || gapMs < effectiveTimeout) {
+                longTimeoutWindows = 0
+                lastLongTimeoutCountedMs = 0L
+                continue
             }
+            // Advance the window count at most once per full long window; the
+            // loop still ticks every 200ms so the first window and every
+            // subsequent detection are logged promptly.
+            if (isPointerDown && now - lastLongTimeoutCountedMs >= VIRTUAL_STICK_WATCHDOG_LONG_MS) {
+                longTimeoutWindows += 1
+                lastLongTimeoutCountedMs = now
+            }
+            val shouldRecenter = !isPointerDown || longTimeoutWindows >= 2
+            val timeoutLabel = when {
+                isPointerDown -> "long"
+                lastWasOutside -> "outside"
+                else -> "standard"
+            }
+            NativeInputDiagnostics.add(
+                "stick.watchdog label=$label timeout=$timeoutLabel timeoutMs=$effectiveTimeout " +
+                    "isPointerDown=$isPointerDown gapSinceLastEventMs=$gapMs longTimeoutWindows=$longTimeoutWindows " +
+                    "recenter=$shouldRecenter at=$now",
+            )
+            if (!shouldRecenter) continue
+            currentOnChange(0f, 0f)
+            knobOffset = Offset.Zero
+            baseOffset = Offset.Zero
+            lastStickEventMs = now
+            lastWasOutside = false
+            longTimeoutWindows = 0
+            lastLongTimeoutCountedMs = 0L
         }
     }
 
@@ -14603,6 +14621,10 @@ private fun VirtualStick(
 
                     fun updateStick(position: Offset) {
                         lastStickEventMs = SystemClock.uptimeMillis()
+                        // 1.0.86: a live touch event proves the pointer is
+                        // still healthy, so restart the long-window count.
+                        longTimeoutWindows = 0
+                        lastLongTimeoutCountedMs = 0L
                         // 1.0.83: record whether the finger is outside the
                         // stick circle (before clamping) for the adaptive
                         // watchdog timeout.
@@ -14649,6 +14671,8 @@ private fun VirtualStick(
                         currentOnChange(0f, 0f)
                         knobOffset = Offset.Zero
                         baseOffset = Offset.Zero
+                        longTimeoutWindows = 0
+                        lastLongTimeoutCountedMs = 0L
                     }
                 }
             },
@@ -15546,6 +15570,7 @@ private fun PrintedWasteOptionsColumn(
                 autoZone?.let {
                     RecommendedRouteHeroCard(
                         zoneOption = it,
+                        appLanguage = state.settings.appLanguage,
                         backdropUrl = gameBannerUrl,
                         onLaunch = onLaunchRecommended,
                         launchFocusRequester = heroLaunchFocusRequester,
@@ -15628,6 +15653,7 @@ private fun PrintedWasteOptionsColumn(
                     val isCurrent = zoneOption.zoneId == selectedZoneId
                     PrintedWasteZoneRow(
                         zoneOption = zoneOption,
+                        appLanguage = state.settings.appLanguage,
                         selected = isCurrent,
                         focused = isCurrent && listFocused,
                         listFocused = listFocused,
@@ -15665,6 +15691,7 @@ private fun PrintedWasteOptionsColumn(
 @Composable
 private fun RecommendedRouteHeroCard(
     zoneOption: PrintedWasteZoneOption,
+    appLanguage: String,
     backdropUrl: String?,
     onLaunch: () -> Unit,
     launchFocusRequester: FocusRequester,
@@ -15713,7 +15740,7 @@ private fun RecommendedRouteHeroCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                serverLocationLabel(zoneOption.zoneId)?.let { location ->
+                serverLocationLabel(zoneOption.zoneId, appLanguage)?.let { location ->
                     Text(
                         location,
                         color = TextMuted,
@@ -15734,7 +15761,7 @@ private fun RecommendedRouteHeroCard(
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
-                        "· ${zoneOption.zone.QueuePosition} in queue",
+                        stringResource(R.string.queue_hero_queue_count, zoneOption.zone.QueuePosition),
                         color = TextMuted,
                         style = MaterialTheme.typography.bodySmall,
                         maxLines = 1,
@@ -15790,6 +15817,7 @@ private fun PingSignalBars(pingMs: Long?, modifier: Modifier = Modifier) {
 @Composable
 private fun PrintedWasteZoneRow(
     zoneOption: PrintedWasteZoneOption,
+    appLanguage: String,
     selected: Boolean,
     focused: Boolean,
     listFocused: Boolean,
@@ -15823,7 +15851,7 @@ private fun PrintedWasteZoneRow(
                         Column(Modifier.weight(1f)) {
                             Text(zoneOption.zoneId, fontWeight = FontWeight.Bold, color = if (selected) MaterialTheme.colorScheme.primary else TextPrimary)
                             Text(
-                                serverLocationLabel(zoneOption.zoneId) ?: regionLabel(zone.Region),
+                                serverLocationLabel(zoneOption.zoneId, appLanguage) ?: regionLabel(zone.Region),
                                 color = TextMuted,
                                 style = MaterialTheme.typography.bodySmall,
                                 maxLines = 1,
@@ -15848,7 +15876,7 @@ private fun PrintedWasteZoneRow(
                     Column(Modifier.weight(1f)) {
                         Text(zoneOption.zoneId, fontWeight = FontWeight.Bold, color = if (selected) MaterialTheme.colorScheme.primary else TextPrimary)
                         Text(
-                            serverLocationLabel(zoneOption.zoneId) ?: regionLabel(zone.Region),
+                            serverLocationLabel(zoneOption.zoneId, appLanguage) ?: regionLabel(zone.Region),
                             color = TextMuted,
                             style = MaterialTheme.typography.bodySmall,
                             maxLines = 1,

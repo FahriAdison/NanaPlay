@@ -690,6 +690,7 @@
     <string name="queue_live_position">Posisi live</string>
     <string name="queue_other_regions">Region lain</string>
     <string name="queue_recommended">DIREKOMENDASIKAN</string>
+    <string name="queue_hero_queue_count">· %1$d dalam antrean</string>
     <string name="toast_logs_exported">Log terekspor</string>
     <string name="toast_logs_export_failed">Gagal mengekspor log</string>
     <string name="toast_app_id_copied">App ID tersalin</string>

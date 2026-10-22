@@ -1837,6 +1837,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     sessionReport = null,
                 )
             }
+            var launchSession: SessionInfo? = null
             runCatching {
                 val token = launchAuthToken(auth)
                 val selectedVariant = game.variants.getOrNull(game.selectedVariantIndex) ?: game.variants.firstOrNull()
@@ -1890,20 +1891,14 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     appLaunchMode = appLaunchModeFor(game),
                 )
                 recordDebugEvent("queue", "Created session ${created.debugSummary()}")
+                launchSession = created
                 pollUntilReady(token, created, settings)
             }.onSuccess { readySession ->
                 if (readySession == null) return@onSuccess
                 markSessionReadyForNativeStream(readySession, settings)
             }.onFailure { error ->
                 if (error is CancellationException) return@onFailure
-                if (error is QueueAbandonedException) {
-                    recordDebugEvent(
-                        "queue",
-                        "Queue abandoned instead of retrying game=${game.title} status=${error.statusCode ?: "unknown"}",
-                    )
-                    showQueueAbandoned(error, settings)
-                    return@onFailure
-                }
+                if (handleQueueAbandonedFailure(error, launchSession, settings)) return@onFailure
                 recordDebugEvent("launch", "Launch failed game=${game.title} error=${error.debugMessage()}")
                 val returnPage = state.value.streamReturnPage ?: AppPage.Home
                 _state.update {
@@ -1926,7 +1921,40 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    /**
+     * Routes provider-abandoned failures (typed queue exception or a raw
+     * CloudMatch status 69 from claim/launch) to the requeue panel.
+     */
+    private fun handleQueueAbandonedFailure(
+        error: Throwable,
+        latestSession: SessionInfo?,
+        settings: StreamSettings,
+    ): Boolean {
+        val abandoned = if (error is QueueAbandonedException) {
+            error
+        } else {
+            val status = (error as? CloudMatchRequestStatusException)?.statusCode
+            if (!isQueueAbandonedStatus(status)) return false
+            val latest = latestSession ?: return false
+            queueAbandonedException(latest, status, "uncaught launch failure")
+        }
+        showQueueAbandoned(abandoned, settings)
+        return true
+    }
+
     private fun showQueueAbandoned(error: QueueAbandonedException, settings: StreamSettings) {
+        // Stale-launch guard (same idea as stopStream's stoppedSessionId): a
+        // stop or a newer launch may have replaced state while this job was
+        // finishing, so only update when the abandoned session is still live.
+        val abandonedSessionId = error.latestSession.sessionId
+        val currentSessionId = state.value.streamSession?.sessionId
+        if (currentSessionId != abandonedSessionId) {
+            recordDebugEvent(
+                "queue",
+                "Ignoring stale abandoned state current=${shortDebugId(currentSessionId)} abandoned=${shortDebugId(abandonedSessionId)}",
+            )
+            return
+        }
         _state.update {
             it.copy(
                 streamStatus = "queue",
@@ -2200,10 +2228,12 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     queueAdActiveId = null,
                     queueAbandoned = false,
                     queueStuckWarning = false,
+                    streamServerPingMs = null,
                     streamLaunchBaseUrl = pending.baseUrl,
                     sessionReport = null,
                 )
             }
+            var launchSession: SessionInfo? = null
             runCatching {
                 val token = launchAuthToken(auth)
                 runCatching { sessionRepository.stopActiveSession(token, pending.activeSession, pending.settings) }
@@ -2224,19 +2254,13 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     appLaunchMode = appLaunchModeFor(pending.game),
                 )
                 recordDebugEvent("queue", "Created replacement session ${created.debugSummary()}")
+                launchSession = created
                 pollUntilReady(token, created, pending.settings)
             }.onSuccess { readySession ->
                 markSessionReadyForNativeStream(readySession, pending.settings)
             }.onFailure { error ->
                 if (error is CancellationException) return@onFailure
-                if (error is QueueAbandonedException) {
-                    recordDebugEvent(
-                        "queue",
-                        "Replacement queue abandoned instead of retrying game=${pending.game.title} status=${error.statusCode ?: "unknown"}",
-                    )
-                    showQueueAbandoned(error, pending.settings)
-                    return@onFailure
-                }
+                if (handleQueueAbandonedFailure(error, launchSession, pending.settings)) return@onFailure
                 recordDebugEvent("launch", "Replace active session launch failed game=${pending.game.title} error=${error.debugMessage()}")
                 val returnPage = state.value.streamReturnPage ?: pending.returnPage
                 _state.update {
@@ -2300,6 +2324,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     sessionReport = null,
                 )
             }
+            var resumeSession: SessionInfo? = null
             runCatching {
                 val token = launchAuthToken(auth)
                 val active = cachedActive ?: sessionRepository.getActiveSessions(token, baseUrl, settings)
@@ -2314,26 +2339,30 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 )
                 recordDebugEvent("queue", "Resume found active ${active.debugSummary()} base=${hostForDebug(baseUrl)} settings=${resumeSettings.debugSummary()}")
                 val matchingGame = gameForActiveSession(active)
+                val pendingSession = active.toPendingSession(zone = "prod")
                 _state.update {
                     it.copy(
                         activeSession = active,
                         streamGame = matchingGame,
-                        streamSession = active.toPendingSession(zone = "prod"),
+                        streamSession = pendingSession,
                         activeStreamSettings = resumeSettings,
-                        launchPhase = if (active.isReadyForClaim()) "Resuming session" else loadingPhaseFor(active.toPendingSession(zone = "prod")),
+                        launchPhase = if (active.isReadyForClaim()) "Resuming session" else loadingPhaseFor(pendingSession),
                     )
                 }
+                resumeSession = pendingSession
                 resumeKnownActiveSession(token, active, resumeSettings, baseUrl)
             }.onSuccess { readySession ->
                 recordDebugEvent("stream", "Resume ready for native stream ${readySession.debugSummary()}")
                 markSessionReadyForNativeStream(readySession, state.value.activeStreamSettings ?: settings)
             }.onFailure { error ->
                 if (error is CancellationException) return@onFailure
-                if (error is QueueAbandonedException) {
-                    recordDebugEvent("queue", "Resume queue abandoned status=${error.statusCode ?: "unknown"}")
-                    showQueueAbandoned(error, state.value.activeStreamSettings ?: settings)
-                    return@onFailure
-                }
+                if (
+                    handleQueueAbandonedFailure(
+                        error,
+                        resumeSession,
+                        state.value.activeStreamSettings ?: settings,
+                    )
+                ) return@onFailure
                 recordDebugEvent("queue", "Resume failed error=${error.debugMessage()}")
                 val returnPage = state.value.streamReturnPage ?: AppPage.Home
                 _state.update {
@@ -2403,11 +2432,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 markSessionReadyForNativeStream(readySession, resumeSettings)
             }.onFailure { error ->
                 if (error is CancellationException) return@onFailure
-                if (error is QueueAbandonedException) {
-                    recordDebugEvent("queue", "Pending resume queue abandoned status=${error.statusCode ?: "unknown"}")
-                    showQueueAbandoned(error, resumeSettings)
-                    return@onFailure
-                }
+                if (handleQueueAbandonedFailure(error, state.value.streamSession, resumeSettings)) return@onFailure
                 recordDebugEvent("queue", "Pending resume failed error=${error.debugMessage()}")
                 _state.update {
                     it.copy(

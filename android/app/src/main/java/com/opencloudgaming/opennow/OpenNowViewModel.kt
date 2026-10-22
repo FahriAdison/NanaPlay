@@ -180,6 +180,10 @@ data class OpenNowUiState(
     val queuePosition: Int? = null,
     val queueAdActiveId: String? = null,
     val queueStuckWarning: Boolean = false,
+    val bestQueuePosition: Int? = null,
+    val lastPositionChangeMs: Long = 0L,
+    val stuckWarningShown: Boolean = false,
+    val videoOfferTimeout: Boolean = false,
     /** Provider abandoned this queue (status 69 or repeated 22); show requeue instead of polling a corpse. */
     val queueAbandoned: Boolean = false,
     /** TCP ping measured for the server the user picked, used for the non-blocking high-ping warning. */
@@ -296,6 +300,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
     private var gamesJob: Job? = null
     private var catalogServerSearchJob: Job? = null
     private var launchJob: Job? = null
+    private var pollingGeneration = 0
     private var activeSubscriptionJob: Job? = null
     private var pendingActiveSessionLaunch: PendingActiveSessionLaunch? = null
     private var loginJob: Job? = null
@@ -1827,6 +1832,10 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     queueAdActiveId = null,
                     queueAbandoned = false,
                     queueStuckWarning = false,
+                    bestQueuePosition = null,
+                    lastPositionChangeMs = 0L,
+                    stuckWarningShown = false,
+                    videoOfferTimeout = false,
                     streamServerPingMs = serverPingMs,
                     streamLaunchBaseUrl = baseUrl,
                     pendingStoreChoiceGame = null,
@@ -1894,7 +1903,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 launchSession = created
                 pollUntilReady(token, created, settings)
             }.onSuccess { readySession ->
-                if (readySession == null) return@onSuccess
+                if (readySession == null || !readySession.isReadyForStream()) return@onSuccess
                 markSessionReadyForNativeStream(readySession, settings)
             }.onFailure { error ->
                 if (error is CancellationException) return@onFailure
@@ -2134,6 +2143,10 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     queueAdActiveId = null,
                     queueAbandoned = false,
                     queueStuckWarning = false,
+                    bestQueuePosition = null,
+                    lastPositionChangeMs = 0L,
+                    stuckWarningShown = false,
+                    videoOfferTimeout = false,
                     streamServerPingMs = null,
                     streamLaunchBaseUrl = null,
                     pendingStoreChoiceGame = null,
@@ -2228,6 +2241,10 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     queueAdActiveId = null,
                     queueAbandoned = false,
                     queueStuckWarning = false,
+                    bestQueuePosition = null,
+                    lastPositionChangeMs = 0L,
+                    stuckWarningShown = false,
+                    videoOfferTimeout = false,
                     streamServerPingMs = null,
                     streamLaunchBaseUrl = pending.baseUrl,
                     sessionReport = null,
@@ -2257,6 +2274,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 launchSession = created
                 pollUntilReady(token, created, pending.settings)
             }.onSuccess { readySession ->
+                if (readySession == null || !readySession.isReadyForStream()) return@onSuccess
                 markSessionReadyForNativeStream(readySession, pending.settings)
             }.onFailure { error ->
                 if (error is CancellationException) return@onFailure
@@ -2319,6 +2337,10 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     queueAdActiveId = null,
                     queueAbandoned = false,
                     queueStuckWarning = false,
+                    bestQueuePosition = null,
+                    lastPositionChangeMs = 0L,
+                    stuckWarningShown = false,
+                    videoOfferTimeout = false,
                     streamServerPingMs = null,
                     streamLaunchBaseUrl = baseUrl,
                     sessionReport = null,
@@ -2352,6 +2374,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 resumeSession = pendingSession
                 resumeKnownActiveSession(token, active, resumeSettings, baseUrl)
             }.onSuccess { readySession ->
+                if (readySession == null || !readySession.isReadyForStream()) return@onSuccess
                 recordDebugEvent("stream", "Resume ready for native stream ${readySession.debugSummary()}")
                 markSessionReadyForNativeStream(readySession, state.value.activeStreamSettings ?: settings)
             }.onFailure { error ->
@@ -2428,6 +2451,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 val token = launchAuthToken(auth)
                 resumeKnownActiveSession(token, pending.activeSession, resumeSettings, pending.baseUrl)
             }.onSuccess { readySession ->
+                if (readySession == null || !readySession.isReadyForStream()) return@onSuccess
                 recordDebugEvent("stream", "Pending resume ready for native stream ${readySession.debugSummary()}")
                 markSessionReadyForNativeStream(readySession, resumeSettings)
             }.onFailure { error ->
@@ -2815,7 +2839,8 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun recoverStreamSession(reason: String) {
-        if (launchJob?.isActive == true) {
+        val isOfferTimeout = reason.contains("video offer", ignoreCase = true)
+        if (!isOfferTimeout && launchJob?.isActive == true) {
             recordDebugEvent("recovery", "Ignored stream recovery while launch job is active reason=${reason.take(DEBUG_EVENT_MESSAGE_LIMIT)}")
             return
         }
@@ -2831,6 +2856,43 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             return
         }
         val currentSettings = initial.activeStreamSettings ?: effectiveStreamSettings()
+        if (isOfferTimeout) {
+            recordDebugEvent(
+                "recovery",
+                "Video offer timeout limit reached; stopping dead session and showing server not responding dialog: ${initialSession.shortDebugId()}",
+            )
+            launchJob?.cancel()
+            launchJob = null
+            viewModelScope.launch {
+                val token = auth.tokens.idToken ?: auth.tokens.accessToken
+                runCatching {
+                    sessionRepository.stopSession(token, initialSession, currentSettings)
+                }.onSuccess {
+                    sessionTimerAnchorStore.clear(initialSession.sessionId)
+                    recordDebugEvent("recovery", "Stopped dead session after offer timeout: ${initialSession.shortDebugId()}")
+                }.onFailure { error ->
+                    recordDebugEvent("recovery", "Failed to stop dead session after offer timeout: ${error.debugMessage()}")
+                }
+            }
+            _state.update {
+                it.copy(
+                    videoOfferTimeout = true,
+                    streamSession = null,
+                    activeSession = null,
+                    streamStatus = "video_offer_timeout",
+                    launchPhase = "",
+                    streamLaunchMinimized = false,
+                    queuePosition = null,
+                    queueAdActiveId = null,
+                    queueStuckWarning = false,
+                    queueAbandoned = false,
+                    bestQueuePosition = null,
+                    lastPositionChangeMs = 0L,
+                    stuckWarningShown = false,
+                )
+            }
+            return
+        }
         recordDebugEvent("recovery", "Recovery requested reason=${reason.take(DEBUG_EVENT_MESSAGE_LIMIT)} session=${initialSession.debugSummary()} settings=${currentSettings.debugSummary()}")
         launchJob = viewModelScope.launch {
             val token = auth.tokens.idToken ?: auth.tokens.accessToken
@@ -2921,6 +2983,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     claimActiveSessionOrContinuePolling(token, fallbackCandidate, currentSettings)
                 }
             }.onSuccess { readySession ->
+                if (readySession == null || !readySession.isReadyForStream()) return@onSuccess
                 val anchoredSession = readySession.withSessionTimerAnchor()
                 recordDebugEvent("recovery", "Recovery claim ready ${anchoredSession.debugSummary()}")
                 _state.update {
@@ -3531,7 +3594,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         active: ActiveSessionInfo,
         settings: StreamSettings,
         baseUrl: String,
-    ): SessionInfo {
+    ): SessionInfo? {
         if (!active.matchesStreamSettings(settings)) {
             recordDebugEvent(
                 "queue",
@@ -3604,7 +3667,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         token: String,
         active: ActiveSessionInfo,
         settings: StreamSettings,
-    ): SessionInfo {
+    ): SessionInfo? {
         return try {
             // Claiming re-sends the session request body, so repeating the mode the session was
             // created with keeps it from being downgraded mid-flight.
@@ -3655,30 +3718,31 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         return QueueAbandonedException(abandoned, statusCode)
     }
 
-    private suspend fun pollUntilReady(token: String, created: SessionInfo, settings: StreamSettings): SessionInfo {
+    private suspend fun pollUntilReady(token: String, created: SessionInfo, settings: StreamSettings): SessionInfo? {
+        val currentGeneration = pollingGeneration
         var latest = created
         var pollCount = 0
-        // Stuck-queue detection: if the queue position never improves for QUEUE_STUCK_WARNING_MS,
-        // the server side is likely wedged — surface a warning with a retry option instead of
-        // polling silently forever.
-        var bestQueuePosition: Int? = null
-        var lastImprovementMs = android.os.SystemClock.elapsedRealtime()
-        var stuckWarningShown = false
         val pollStartMs = android.os.SystemClock.elapsedRealtime()
         var consecutivePollFailures = 0
         var consecutiveInvalidSessionPolls = 0
-        recordDebugEvent("queue", "Begin polling ${latest.debugSummary()}")
+        recordDebugEvent("queue", "Begin polling gen=$currentGeneration ${latest.debugSummary()}")
+        val initialPosition = queueDisplayPosition(latest)
         _state.update {
             it.copy(
                 streamSession = latest,
                 launchPhase = loadingPhaseFor(latest),
-                queuePosition = queueDisplayPosition(latest),
+                queuePosition = initialPosition,
                 queueAdActiveId = chooseQueueAdActiveId(it.queueAdActiveId, latest),
-                queueStuckWarning = false,
                 queueAbandoned = false,
+                bestQueuePosition = it.bestQueuePosition ?: initialPosition,
+                lastPositionChangeMs = if (it.lastPositionChangeMs > 0L) it.lastPositionChangeMs else pollStartMs,
             )
         }
         while (!latest.isReadyForStream()) {
+            if (currentGeneration != pollingGeneration) {
+                recordDebugEvent("queue", "Polling cancelled by newer generation (current=$currentGeneration, active=$pollingGeneration)")
+                return null
+            }
             // Circuit breaker: a wedged server must not keep the device polling forever.
             if (android.os.SystemClock.elapsedRealtime() - pollStartMs >= POLL_MAX_DURATION_MS) {
                 recordDebugEvent("queue", "Polling timed out after ${POLL_MAX_DURATION_MS / 60_000} minutes ${latest.debugSummary()}")
@@ -3689,6 +3753,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 recordDebugEvent("queue", "No network connectivity; pausing queue polling until the network returns")
                 var offlineWaitMs = 0L
                 while (!hasNetworkConnectivity() && offlineWaitMs < 60_000L) {
+                    if (currentGeneration != pollingGeneration) return null
                     kotlinx.coroutines.delay(5_000L)
                     offlineWaitMs += 5_000L
                 }
@@ -3704,6 +3769,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             if (waitMs > 2_000L) {
                 var elapsedMs = 0L
                 while (elapsedMs < waitMs) {
+                    if (currentGeneration != pollingGeneration) return null
                     kotlinx.coroutines.delay(500L)
                     elapsedMs += 500L
                     state.value.streamSession
@@ -3716,6 +3782,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             } else {
                 kotlinx.coroutines.delay(waitMs)
             }
+            if (currentGeneration != pollingGeneration) return null
             if (latest.isReadyForStream()) {
                 break
             }
@@ -3733,6 +3800,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 )
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
+                if (currentGeneration != pollingGeneration) return null
                 val providerStatus = (e as? CloudMatchRequestStatusException)?.statusCode
                 when {
                     isQueueAbandonedStatus(providerStatus) -> {
@@ -3763,6 +3831,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     }
                 }
             }
+            if (currentGeneration != pollingGeneration) return null
             consecutivePollFailures = 0
             latest = mergeQueueSessionState(latest, polled)
             recordDebugEvent("queue", "Poll #$pollCount result ${latest.debugSummary()}")
@@ -3785,29 +3854,71 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             }
             val currentPosition = queueDisplayPosition(latest)
             val nowMs = android.os.SystemClock.elapsedRealtime()
-            if (currentPosition != null && (bestQueuePosition == null || currentPosition < bestQueuePosition)) {
-                bestQueuePosition = currentPosition
-                lastImprovementMs = nowMs
-                if (stuckWarningShown) {
-                    stuckWarningShown = false
-                    _state.update { it.copy(queueStuckWarning = false) }
-                }
-            } else if (!stuckWarningShown && nowMs - lastImprovementMs >= QUEUE_STUCK_WARNING_MS) {
-                stuckWarningShown = true
-                recordDebugEvent("queue", "Queue appears stuck at position $currentPosition (no improvement for ${QUEUE_STUCK_WARNING_MS / 60_000} min)")
-                _state.update { it.copy(queueStuckWarning = true) }
+            val previousPosition = state.value.queuePosition
+            val currentState = state.value
+
+            val positionChanged = currentPosition != null && previousPosition != null && currentPosition != previousPosition
+            val isFirstPosition = currentPosition != null && currentState.lastPositionChangeMs == 0L
+
+            val nextBestQueuePosition = when {
+                currentPosition == null -> currentState.bestQueuePosition
+                currentState.bestQueuePosition == null -> currentPosition
+                currentPosition < currentState.bestQueuePosition -> currentPosition
+                else -> currentState.bestQueuePosition
+            }
+
+            val nextLastPositionChangeMs = when {
+                positionChanged || isFirstPosition -> nowMs
+                currentState.lastPositionChangeMs > 0L -> currentState.lastPositionChangeMs
+                else -> nowMs
+            }
+
+            val isStuck = !currentState.stuckWarningShown &&
+                currentPosition != null &&
+                nextLastPositionChangeMs > 0L &&
+                (nowMs - nextLastPositionChangeMs >= QUEUE_STUCK_WARNING_MS)
+
+            val nextStuckWarningShown = when {
+                positionChanged -> false
+                isStuck -> true
+                else -> currentState.stuckWarningShown
+            }
+
+            val nextQueueStuckWarning = when {
+                positionChanged -> false
+                isStuck -> true
+                else -> currentState.queueStuckWarning
+            }
+
+            if (isStuck && !currentState.stuckWarningShown) {
+                recordDebugEvent(
+                    "queue",
+                    "Queue appears stuck at position $currentPosition (no position change for ${QUEUE_STUCK_WARNING_MS / 60_000} min)",
+                )
             }
             _state.update {
                 it.copy(
                     streamSession = latest,
                     launchPhase = loadingPhaseFor(latest),
-                    queuePosition = queueDisplayPosition(latest),
+                    queuePosition = currentPosition,
                     queueAdActiveId = chooseQueueAdActiveId(it.queueAdActiveId, latest),
+                    bestQueuePosition = nextBestQueuePosition,
+                    lastPositionChangeMs = nextLastPositionChangeMs,
+                    stuckWarningShown = nextStuckWarningShown,
+                    queueStuckWarning = nextQueueStuckWarning,
                 )
             }
         }
+        if (currentGeneration != pollingGeneration) return null
         recordDebugEvent("queue", "Polling complete after $pollCount polls ${latest.debugSummary()}")
-        _state.update { it.copy(queueStuckWarning = false) }
+        _state.update {
+            it.copy(
+                queueStuckWarning = false,
+                stuckWarningShown = false,
+                bestQueuePosition = null,
+                lastPositionChangeMs = 0L,
+            )
+        }
         return latest
     }
 
@@ -3881,11 +3992,12 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
      * cancels the wedged launch and starts a fresh session creation.
      */
     fun retryQueue() {
+        pollingGeneration++
         val snapshot = state.value
         val game = snapshot.streamGame ?: return
         recordDebugEvent(
             "queue",
-            "Queue retry requested by user game=${game.title} abandoned=${snapshot.queueAbandoned} base=${hostForDebug(snapshot.streamLaunchBaseUrl)}",
+            "Queue retry requested by user gen=$pollingGeneration game=${game.title} abandoned=${snapshot.queueAbandoned} base=${hostForDebug(snapshot.streamLaunchBaseUrl)}",
         )
         launchJob?.cancel()
         // Null it immediately: play() refuses while launchJob.isActive (a cancelled
@@ -3896,6 +4008,10 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             it.copy(
                 queueStuckWarning = false,
                 queueAbandoned = false,
+                videoOfferTimeout = false,
+                bestQueuePosition = null,
+                lastPositionChangeMs = 0L,
+                stuckWarningShown = false,
                 queuePosition = null,
                 queueAdActiveId = null,
                 streamSession = null,
@@ -3911,6 +4027,51 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             skipStoreChoice = true,
             serverPingMs = snapshot.streamServerPingMs,
         )
+    }
+
+    fun retryWithAnotherServer() {
+        val snapshot = state.value
+        val game = snapshot.streamGame
+        val auth = snapshot.authSession
+        val returnPage = snapshot.streamReturnPage ?: AppPage.Home
+        recordDebugEvent("stream", "User chose try another server after video offer timeout game=${game?.title}")
+        launchJob?.cancel()
+        launchJob = null
+        CellularNetworkStatus.stopMonitoring(getApplication())
+        _state.update {
+            it.copy(
+                videoOfferTimeout = false,
+                streamSession = null,
+                activeStreamSettings = null,
+                streamGame = null,
+                streamStatus = "idle",
+                streamLaunchMinimized = false,
+                streamReturnPage = null,
+                launchPhase = "",
+                queuePosition = null,
+                queueAdActiveId = null,
+                queueAbandoned = false,
+                queueStuckWarning = false,
+                bestQueuePosition = null,
+                lastPositionChangeMs = 0L,
+                stuckWarningShown = false,
+                streamServerPingMs = null,
+                streamLaunchBaseUrl = null,
+                pendingStoreChoiceGame = null,
+                activeSessionDecision = null,
+                page = returnPage,
+                selectedGame = game,
+            )
+        }
+        if (game != null && auth != null && shouldUsePrintedWasteQueue(auth)) {
+            viewModelScope.launch {
+                showPrintedWasteSelector(game)
+            }
+        }
+    }
+
+    fun dismissVideoOfferTimeout() {
+        _state.update { it.copy(videoOfferTimeout = false) }
     }
 
     private fun effectiveStreamingBaseUrl(sessionOverride: AuthSession? = null): String {

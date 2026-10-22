@@ -769,4 +769,9 @@
     <string name="overlay_shortcut_guide">Guide/Home (tahan)</string>
     <string name="overlay_shortcut_l1r1">L1 + R1 (tahan)</string>
     <string name="overlay_shortcut_l3r3">L3 + R3 (tahan)</string>
+    <!-- Video offer timeout / Server tidak merespons -->
+    <string name="server_not_responding_title">Server tidak merespons</string>
+    <string name="server_not_responding_message">Server tidak mengirim video setelah beberapa percobaan.</string>
+    <string name="action_try_another_server">Coba server lain</string>
+    <string name="action_requeue_offer_timeout">Antri ulang</string>
 </resources>

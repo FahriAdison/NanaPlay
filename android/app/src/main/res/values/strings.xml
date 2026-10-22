@@ -770,4 +770,9 @@
     <string name="overlay_shortcut_guide">Guide/Home (hold)</string>
     <string name="overlay_shortcut_l1r1">L1 + R1 (hold)</string>
     <string name="overlay_shortcut_l3r3">L3 + R3 (hold)</string>
+    <!-- Video offer timeout / Server not responding -->
+    <string name="server_not_responding_title">Server not responding</string>
+    <string name="server_not_responding_message">The server did not send video after several attempts.</string>
+    <string name="action_try_another_server">Try another server</string>
+    <string name="action_requeue_offer_timeout">Re-queue</string>
 </resources>

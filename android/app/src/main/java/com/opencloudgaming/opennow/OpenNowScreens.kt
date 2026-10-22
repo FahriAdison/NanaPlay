@@ -7514,6 +7514,9 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
     BackHandler(enabled = streamReady) {
         handleStreamBack()
     }
+    BackHandler(enabled = state.videoOfferTimeout) {
+        viewModel.retryWithAnotherServer()
+    }
     val client = remember {
         NativeStreamClient(
             context = context.applicationContext,
@@ -8063,15 +8066,26 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                 )
             }
             AnimatedVisibility(
-                visible = !initialVideoFrameRendered,
+                visible = !initialVideoFrameRendered || state.videoOfferTimeout,
                 enter = fadeIn(animationSpec = tween(180)) + scaleIn(initialScale = 0.96f),
                 exit = fadeOut(animationSpec = tween(180)) + scaleOut(targetScale = 0.98f),
                 modifier = Modifier.align(Alignment.Center),
             ) {
-                InitialStreamConnectionOverlay(
-                    gameTitle = game?.title,
-                    status = initialStreamConnectionStatus(streamState),
-                )
+                if (state.videoOfferTimeout) {
+                    ServerNotRespondingDialog(
+                        game = game,
+                        onTryAnotherServer = viewModel::retryWithAnotherServer,
+                        onRequeue = viewModel::retryQueue,
+                        modifier = Modifier
+                            .widthIn(max = 560.dp)
+                            .fillMaxWidth(0.9f),
+                    )
+                } else {
+                    InitialStreamConnectionOverlay(
+                        gameTitle = game?.title,
+                        status = initialStreamConnectionStatus(streamState),
+                    )
+                }
             }
             if (touchLayoutEditing) {
                 val doneButtonTone = playButtonTone
@@ -12435,7 +12449,16 @@ private fun QueueLoadingScreen(state: OpenNowUiState, viewModel: OpenNowViewMode
                 .padding(18.dp),
             contentAlignment = Alignment.Center,
         ) {
-            if (state.queueAbandoned) {
+            if (state.videoOfferTimeout) {
+                ServerNotRespondingDialog(
+                    game = game,
+                    onTryAnotherServer = viewModel::retryWithAnotherServer,
+                    onRequeue = viewModel::retryQueue,
+                    modifier = Modifier
+                        .widthIn(max = 620.dp)
+                        .fillMaxWidth(),
+                )
+            } else if (state.queueAbandoned) {
                 QueueAbandonedPanel(
                     game = game,
                     onRequeue = viewModel::retryQueue,
@@ -13103,6 +13126,78 @@ private fun QueueAbandonedPanel(
                         .focusRequester(requeueFocusRequester),
                 ) {
                     Text(stringResource(R.string.action_requeue), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ServerNotRespondingDialog(
+    game: GameInfo?,
+    onTryAnotherServer: () -> Unit,
+    onRequeue: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val requeueFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        delay(80)
+        runCatching { requeueFocusRequester.requestFocus() }
+    }
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(OpenNowRadius.lg),
+        color = OpenNowPalette.PanelOverVideo,
+        border = BorderStroke(1.dp, Color(0xffffb84d)),
+        tonalElevation = 10.dp,
+    ) {
+        Column(
+            Modifier.padding(OpenNowSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(OpenNowSpacing.md),
+        ) {
+            Text(
+                stringResource(R.string.server_not_responding_title),
+                color = TextPrimary,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+            )
+            game?.title?.takeIf { it.isNotBlank() }?.let { title ->
+                Text(
+                    title,
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(
+                stringResource(R.string.server_not_responding_message),
+                color = TextMuted,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                OutlinedButton(onClick = onTryAnotherServer, modifier = Modifier.weight(1f)) {
+                    Text(
+                        stringResource(R.string.action_try_another_server),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Button(
+                    onClick = onRequeue,
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusRequester(requeueFocusRequester),
+                ) {
+                    Text(
+                        stringResource(R.string.action_requeue_offer_timeout),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
         }

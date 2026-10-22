@@ -5574,7 +5574,8 @@ class NativeStreamClient(
         ) {
             return
         }
-        if (!persistentReconnect && reconnectAttempts >= MAX_TRANSPORT_RECONNECT_ATTEMPTS) {
+        val isOfferTimeout = reason.contains("video offer", ignoreCase = true)
+        if ((isOfferTimeout || !persistentReconnect) && reconnectAttempts >= MAX_TRANSPORT_RECONNECT_ATTEMPTS) {
             recordStreamDiagnostic("reconnect limit reached reason=$reason attempts=$reconnectAttempts")
             requestSessionRecovery("$reason. Stream reconnect failed after $MAX_TRANSPORT_RECONNECT_ATTEMPTS attempts.")
             return

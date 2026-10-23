@@ -3057,7 +3057,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
     ): ActiveSessionInfo? {
         repeat(3) { attempt ->
             if (attempt > 0) delay(2000)
-            val polled = runCatching {
+            val polled = try {
                 sessionRepository.pollSession(
                     token = token,
                     streamingBaseUrl = previousSession.streamingBaseUrl,
@@ -3068,7 +3068,13 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     deviceId = previousSession.deviceId,
                     settings = settings,
                 )
-            }.getOrNull()
+            } catch (e: CancellationException) {
+                // A superseded coroutine must unwind instead of falling through to the
+                // next attempt: swallowing cancellation here hides retryQueue()'s stop.
+                throw e
+            } catch (e: Throwable) {
+                null
+            }
             if (polled != null && polled.status in setOf(2, 3) && polled.serverIp.isNotBlank()) {
                 recordDebugEvent("recovery", "Direct session poll hit attempt=$attempt session=${polled.sessionId} status=${polled.status}")
                 return polled.toRecoveryActiveSession(
@@ -3583,9 +3589,13 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         val auth = state.value.authSession ?: return
         val settings = effectiveStreamSettings()
         val token = auth.tokens.idToken ?: auth.tokens.accessToken
-        val active = runCatching { sessionRepository.getActiveSessions(token, effectiveStreamingBaseUrl(auth), settings) }
-            .getOrDefault(emptyList())
-            .firstOrNull { it.status in setOf(1, 2, 3) && it.matchesStreamSettings(settings) }
+        val active = try {
+            sessionRepository.getActiveSessions(token, effectiveStreamingBaseUrl(auth), settings)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            emptyList<ActiveSessionInfo>()
+        }.firstOrNull { it.status in setOf(1, 2, 3) && it.matchesStreamSettings(settings) }
         _state.update { it.copy(activeSession = active) }
     }
 
@@ -3609,7 +3619,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
 
         val pending = active.toPendingSession(zone = "prod")
         recordDebugEvent("queue", "Hydrating active session before resume ${pending.debugSummary()}")
-        val hydrated = runCatching {
+        val hydrated = try {
             sessionRepository.pollSession(
                 token = token,
                 streamingBaseUrl = active.streamingBaseUrl ?: baseUrl,
@@ -3620,8 +3630,13 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 deviceId = null,
                 settings = settings,
             )
-        }.getOrElse { error ->
-            recordDebugEvent("queue", "Resume hydrate failed session=${pending.shortDebugId()} error=${error.debugMessage()}")
+        } catch (e: CancellationException) {
+            // A superseded coroutine must unwind. Swallowing cancellation here would let the
+            // old resume continue into pollUntilReady() after retryQueue() bumped the
+            // polling generation, defeating the guard inside that loop.
+            throw e
+        } catch (e: Throwable) {
+            recordDebugEvent("queue", "Resume hydrate failed session=${pending.shortDebugId()} error=${e.debugMessage()}")
             pending
         }
         val latest = mergeQueueSessionState(pending, hydrated)
@@ -3727,6 +3742,14 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         var consecutiveInvalidSessionPolls = 0
         recordDebugEvent("queue", "Begin polling gen=$currentGeneration ${latest.debugSummary()}")
         val initialPosition = queueDisplayPosition(latest)
+        // Defense-in-depth, not the primary fix: there is no suspend point between the
+        // generation capture above and this first state write, so retryQueue() cannot
+        // interleave here on the single-threaded main dispatcher. The real fix is #1
+        // (stop swallowing CancellationException) plus the guard at the top of the loop below.
+        if (currentGeneration != pollingGeneration) {
+            recordDebugEvent("queue", "Polling cancelled by newer generation before initial state update (current=$currentGeneration, active=$pollingGeneration)")
+            return null
+        }
         _state.update {
             it.copy(
                 streamSession = latest,

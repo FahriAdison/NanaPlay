@@ -775,4 +775,7 @@
     <string name="server_not_responding_message">The server did not send video after several attempts.</string>
     <string name="action_try_another_server">Try another server</string>
     <string name="action_requeue_offer_timeout">Re-queue</string>
+    <!-- Thermal throttling warning -->
+    <string name="thermal_warning_pill">Phone hot (%1$d°C) — cool it down to stop stuttering.</string>
+    <string name="thermal_warning_pill_no_temp">Phone hot — cool it down to stop stuttering.</string>
 </resources>

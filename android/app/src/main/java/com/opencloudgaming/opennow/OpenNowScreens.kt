@@ -8025,6 +8025,17 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                         .padding(top = if (statsVisible && statsAlignment == Alignment.TopCenter) 48.dp else 8.dp),
                 )
             }
+            if (state.thermalWarning) {
+                val baseTopPadding = if (statsVisible && statsAlignment == Alignment.TopCenter) 48.dp else 8.dp
+                val extraTopPadding = (if (activeStreamMode != null) 36.dp else 0.dp) +
+                    (if (recordingPhase == StreamRecorderPhase.Recording) 36.dp else 0.dp)
+                ThermalWarningPill(
+                    tempC = state.thermalWarningTempC,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = baseTopPadding + extraTopPadding),
+                )
+            }
             if (recordingPhase == StreamRecorderPhase.Recording) {
                 Surface(
                     modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp),
@@ -11783,6 +11794,35 @@ private fun ActiveStreamModePill(
                     Text(stringResource(R.string.action_cancel))
                 }
             },
+        )
+    }
+}
+
+@Composable
+private fun ThermalWarningPill(
+    tempC: Float?,
+    modifier: Modifier = Modifier,
+) {
+    val text = if (tempC != null) {
+        stringResource(R.string.thermal_warning_pill, tempC.roundToInt())
+    } else {
+        stringResource(R.string.thermal_warning_pill_no_temp)
+    }
+
+    Surface(
+        modifier = modifier.padding(horizontal = 8.dp),
+        shape = RoundedCornerShape(999.dp),
+        color = Color(0xff4a2f0b).copy(alpha = 0.88f),
+        tonalElevation = 0.dp,
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            color = Color(0xffffd38a),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }

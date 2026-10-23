@@ -774,4 +774,7 @@
     <string name="server_not_responding_message">Server tidak mengirim video setelah beberapa percobaan.</string>
     <string name="action_try_another_server">Coba server lain</string>
     <string name="action_requeue_offer_timeout">Antri ulang</string>
+    <!-- Thermal throttling warning -->
+    <string name="thermal_warning_pill">HP panas (%1$d°C) — dinginkan HP biar nggak patah-patah.</string>
+    <string name="thermal_warning_pill_no_temp">HP panas — dinginkan HP biar nggak patah-patah.</string>
 </resources>

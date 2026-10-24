@@ -394,6 +394,9 @@ internal class AndroidStreamRecorder(
                 truncated = true
             }
             finishOutput()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                outputSaved = true
+            }
             releaseResources()
             copyLegacyOutputIfNeeded()
             outputSaved = true

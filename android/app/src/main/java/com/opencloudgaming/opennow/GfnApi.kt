@@ -180,6 +180,11 @@ internal class CloudMatchRequestStatusException(
     },
 )
 
+internal class CloudMatchHttpException(
+    val code: Int,
+    message: String,
+) : IllegalStateException(message)
+
 /** An unsuccessful lookup cannot establish that it is safe to create another session. */
 internal fun checkActiveSessionsResponse(httpStatus: Int, payload: JsonObject?) {
     val requestStatus = payload?.obj("requestStatus")
@@ -191,7 +196,9 @@ internal fun checkActiveSessionsResponse(httpStatus: Int, payload: JsonObject?) 
             unifiedErrorCode = requestStatus.string("unifiedErrorCode"),
         )
     }
-    check(httpStatus in 200..299) { "Active session lookup failed (HTTP $httpStatus)." }
+    if (httpStatus !in 200..299) {
+        throw CloudMatchHttpException(httpStatus, "Active session lookup failed (HTTP $httpStatus).")
+    }
     check(statusCode == 1) { "Active session lookup returned an invalid response." }
 }
 
@@ -2448,7 +2455,20 @@ class GfnSessionRepository(
             .build()
         val (code, text) = requestHttp.awaitText(request)
         recordDiagnosticResponse("session.poll", request, code, text)
-        val payload = OpenNowJson.parseToJsonElement(text).jsonObject
+        val payload = runCatching { OpenNowJson.parseToJsonElement(text).jsonObject }.getOrNull()
+        val requestStatus = payload?.obj("requestStatus")
+        val statusCode = requestStatus?.int("statusCode")
+        if (statusCode != null && statusCode != 1) {
+            throw CloudMatchRequestStatusException(
+                statusCode = statusCode,
+                statusDescription = requestStatus.string("statusDescription"),
+                unifiedErrorCode = requestStatus.string("unifiedErrorCode"),
+            )
+        }
+        if (code !in 200..299) {
+            throw CloudMatchHttpException(code, "Session poll failed (HTTP $code).")
+        }
+        checkNotNull(payload) { "Session poll returned an invalid response." }
         val realServer = streamingServerIp(payload)
         if (isZoneHostname(host) && realServer != null && !isZoneHostname(realServer) && READY_SESSION_STATUSES.contains(payload.obj("session")?.int("status"))) {
             val directBase = "https://$realServer"
@@ -2456,11 +2476,11 @@ class GfnSessionRepository(
                 .url("$directBase/v2/session/$sessionId")
                 .headers(cloudMatchHeaders(token, cid, did, includeOrigin = false, isAndroidTv = isAndroidTv))
                 .build()
-            val (code, directText) = http.awaitText(directRequest)
-            recordDiagnosticResponse("session.poll.direct", directRequest, code, directText)
-            if (code in 200..299) {
-                val directPayload = OpenNowJson.parseToJsonElement(directText).jsonObject
-                if (directPayload.obj("requestStatus")?.int("statusCode") == 1) {
+            val (directCode, directText) = http.awaitText(directRequest)
+            recordDiagnosticResponse("session.poll.direct", directRequest, directCode, directText)
+            if (directCode in 200..299) {
+                val directPayload = runCatching { OpenNowJson.parseToJsonElement(directText).jsonObject }.getOrNull()
+                if (directPayload?.obj("requestStatus")?.int("statusCode") == 1) {
                     return toSessionInfo(zone, directBase, directPayload, cid, did)
                 }
             }
@@ -2481,6 +2501,20 @@ class GfnSessionRepository(
             .build()
         val (code, text) = requestHttp.awaitText(request)
         recordDiagnosticResponse("session.stop", request, code, text)
+        if (code == 404) return
+        val payload = runCatching { OpenNowJson.parseToJsonElement(text).jsonObject }.getOrNull()
+        val requestStatus = payload?.obj("requestStatus")
+        val statusCode = requestStatus?.int("statusCode")
+        if (statusCode != null && statusCode != 1) {
+            throw CloudMatchRequestStatusException(
+                statusCode = statusCode,
+                statusDescription = requestStatus.string("statusDescription"),
+                unifiedErrorCode = requestStatus.string("unifiedErrorCode"),
+            )
+        }
+        if (code !in 200..299) {
+            throw CloudMatchHttpException(code, "Stop session failed (HTTP $code).")
+        }
     }
 
     suspend fun getActiveSessions(token: String, streamingBaseUrl: String, settings: StreamSettings): List<ActiveSessionInfo> {
@@ -2552,7 +2586,8 @@ class GfnSessionRepository(
             val (code, text) = requestHttp.awaitText(prefetch)
             recordDiagnosticResponse("session.claim.prefetch", prefetch, code, text)
             if (code in 200..299) {
-                streamingServerIp(OpenNowJson.parseToJsonElement(text).jsonObject)?.let { effectiveServerIp = it }
+                runCatching { OpenNowJson.parseToJsonElement(text).jsonObject }.getOrNull()
+                    ?.let { streamingServerIp(it)?.let { ip -> effectiveServerIp = ip } }
             }
         }
         val sessionBase = if (useProviderBaseForSessionOps) providerBase else "https://$effectiveServerIp"
@@ -2564,6 +2599,18 @@ class GfnSessionRepository(
         val (validationCode, validationText) = http.awaitText(validationRequest)
         recordDiagnosticResponse("session.claim.validation", validationRequest, validationCode, validationText)
         val validation = runCatching { OpenNowJson.parseToJsonElement(validationText).jsonObject }.getOrNull()
+        val validationRequestStatus = validation?.obj("requestStatus")
+        val validationStatusCode = validationRequestStatus?.int("statusCode")
+        if (validationStatusCode != null && validationStatusCode != 1) {
+            throw CloudMatchRequestStatusException(
+                statusCode = validationStatusCode,
+                statusDescription = validationRequestStatus.string("statusDescription"),
+                unifiedErrorCode = validationRequestStatus.string("unifiedErrorCode"),
+            )
+        }
+        if (validationCode !in 200..299) {
+            throw CloudMatchHttpException(validationCode, "Session claim validation failed (HTTP $validationCode).")
+        }
         val status = validation?.obj("session")?.int("status")
         if (status != 1) {
             val claimBody = buildClaimRequestBody(
@@ -2580,6 +2627,19 @@ class GfnSessionRepository(
                 .build()
             val (claimCode, claimText) = http.awaitText(claimRequest)
             recordDiagnosticResponse("session.claim.put", claimRequest, claimCode, claimText)
+            val claimPayload = runCatching { OpenNowJson.parseToJsonElement(claimText).jsonObject }.getOrNull()
+            val claimRequestStatus = claimPayload?.obj("requestStatus")
+            val claimStatusCode = claimRequestStatus?.int("statusCode")
+            if (claimStatusCode != null && claimStatusCode != 1) {
+                throw CloudMatchRequestStatusException(
+                    statusCode = claimStatusCode,
+                    statusDescription = claimRequestStatus.string("statusDescription"),
+                    unifiedErrorCode = claimRequestStatus.string("unifiedErrorCode"),
+                )
+            }
+            if (claimCode !in 200..299) {
+                throw CloudMatchHttpException(claimCode, "Session claim PUT failed (HTTP $claimCode).")
+            }
         }
         var latestSession: SessionInfo? = null
         repeat(60) { attempt ->
@@ -2590,12 +2650,15 @@ class GfnSessionRepository(
                 .build()
             val (code, text) = http.awaitText(poll)
             recordDiagnosticResponse("session.claim.poll", poll, code, text)
+            if (code == 401 || code == 403) {
+                throw CloudMatchHttpException(code, "Claim session polling unauthorized or forbidden (HTTP $code).")
+            }
             if (code in 200..299) {
-                val payload = OpenNowJson.parseToJsonElement(text).jsonObject
-                val pollStatus = payload.obj("session")?.int("status")
-                val polledSession = toSessionInfo("", sessionBase, payload, clientId, deviceId)
-                latestSession = polledSession
-                if (pollStatus in READY_SESSION_STATUSES) return polledSession
+                val payload = runCatching { OpenNowJson.parseToJsonElement(text).jsonObject }.getOrNull()
+                val pollStatus = payload?.obj("session")?.int("status")
+                val polledSession = payload?.let { toSessionInfo("", sessionBase, it, clientId, deviceId) }
+                if (polledSession != null) latestSession = polledSession
+                if (pollStatus in READY_SESSION_STATUSES && polledSession != null) return polledSession
             }
         }
         throw SessionClaimNotReadyException(latestSession)

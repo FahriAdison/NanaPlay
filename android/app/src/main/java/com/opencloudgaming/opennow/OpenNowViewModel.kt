@@ -59,6 +59,8 @@ private const val QUEUE_STUCK_WARNING_MS = 10L * 60L * 1000L
 private const val POLL_MAX_DURATION_MS = 40L * 60L * 1000L
 /** Upper bound for the exponential backoff between failed queue polls. */
 private const val POLL_RETRY_MAX_BACKOFF_MS = 30_000L
+/** Consecutive queue polling failures cap before failing fast. */
+private const val QUEUE_POLL_MAX_CONSECUTIVE_FAILURES = 10
 /** Transient-failure retries for session creation before surfacing the error. */
 private const val CREATE_SESSION_MAX_ATTEMPTS = 3
 private const val CREATE_SESSION_RETRY_BASE_MS = 2_000L
@@ -305,6 +307,8 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
     private var gamesJob: Job? = null
     private var catalogServerSearchJob: Job? = null
     private var launchJob: Job? = null
+    private var stopJob: Job? = null
+    private var lastStoppedSessionId: String? = null
     private var pollingGeneration = 0
     private var consecutiveHighThermalTicks = 0
 
@@ -853,7 +857,10 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     }
                 }
                 .onFailure { error ->
-                    if (error is CancellationException) return@onFailure
+                    if (error is CancellationException) {
+                        _state.update { it.copy(diagnosticShare = it.diagnosticShare.copy(uploading = false)) }
+                        throw error
+                    }
                     _state.update {
                         it.copy(
                             diagnosticShare = DiagnosticShareState(
@@ -1965,11 +1972,10 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             val latest = latestSession ?: return false
             queueAbandonedException(latest, status, "uncaught launch failure")
         }
-        showQueueAbandoned(abandoned, settings)
-        return true
+        return showQueueAbandoned(abandoned, settings)
     }
 
-    private fun showQueueAbandoned(error: QueueAbandonedException, settings: StreamSettings) {
+    private fun showQueueAbandoned(error: QueueAbandonedException, settings: StreamSettings): Boolean {
         // Stale-launch guard (same idea as stopStream's stoppedSessionId): a
         // stop or a newer launch may have replaced state while this job was
         // finishing, so only update when the abandoned session is still live.
@@ -1980,7 +1986,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 "queue",
                 "Ignoring stale abandoned state current=${shortDebugId(currentSessionId)} abandoned=${shortDebugId(abandonedSessionId)}",
             )
-            return
+            return false
         }
         _state.update {
             it.copy(
@@ -1999,6 +2005,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 pendingPrintedWasteGame = null,
             )
         }
+        return true
     }
 
     private fun recordQueuedGame(game: GameInfo) {
@@ -2098,11 +2105,12 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         )
         launchJob?.cancel()
         launchJob = null
+        stopJob?.cancel()
         pendingActiveSessionLaunch = null
         resetThermalWarningState()
         // The telephony callback is only needed for the live cellular label in stream stats.
         CellularNetworkStatus.stopMonitoring(getApplication())
-        viewModelScope.launch {
+        stopJob = viewModelScope.launch {
             val auth = state.value.authSession
             val snapshot = state.value
             val returnPage = snapshot.streamReturnPage ?: AppPage.Home
@@ -2111,6 +2119,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             if (auth != null && session != null) {
                 runCatching { sessionRepository.stopSession(auth.tokens.idToken ?: auth.tokens.accessToken, session, streamSettings) }
                     .onSuccess {
+                        lastStoppedSessionId = session.sessionId
                         sessionTimerAnchorStore.clear(session.sessionId)
                         recordDebugEvent("stream", "Stopped cloud session ${session.shortDebugId()}")
                     }
@@ -2125,6 +2134,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 if (active != null) {
                     runCatching { sessionRepository.stopActiveSession(token, active, streamSettings) }
                         .onSuccess {
+                            lastStoppedSessionId = active.sessionId
                             sessionTimerAnchorStore.clear(active.sessionId)
                             recordDebugEvent("stream", "Stopped active session ${active.shortDebugId()}")
                         }
@@ -2141,18 +2151,22 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 ),
             )
             resetThermalWarningState()
-            _state.update {
-                // Only attach this stop's report when no newer session has started
-                // meanwhile (see stoppedSessionId above).
-                val currentSessionId = it.streamSession?.sessionId
+            _state.update { current ->
+                val currentSessionId = current.streamSession?.sessionId
+                val isNewLaunchRunning = launchJob?.isActive == true ||
+                    (currentSessionId != null && currentSessionId != stoppedSessionId)
+                if (isNewLaunchRunning) {
+                    recordDebugEvent("stream", "Skipping trailing stopStream reset because a new launch is active (session=${current.streamSession?.shortDebugId()})")
+                    return@update current
+                }
                 val report = if (completedSessionReport != null &&
                     (currentSessionId == null || currentSessionId == stoppedSessionId)
                 ) {
                     completedSessionReport
                 } else {
-                    it.sessionReport
+                    current.sessionReport
                 }
-                it.copy(
+                current.copy(
                     streamSession = null,
                     activeStreamSettings = null,
                     streamGame = null,
@@ -2664,6 +2678,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     )
                 }
             }.onFailure { error ->
+                if (error is CancellationException) throw error
                 recordDebugEvent("ad", "Report failed action=$normalizedAction ad=${shortDebugId(adId)} error=${error.debugMessage()}")
                 _state.update { current ->
                     val currentSession = current.streamSession
@@ -2953,6 +2968,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     sessionTimerAnchorStore.clear(initialSession.sessionId)
                     recordDebugEvent("recovery", "Stopped dead session after offer timeout: ${initialSession.shortDebugId()}")
                 }.onFailure { error ->
+                    if (error is CancellationException) throw error
                     recordDebugEvent("recovery", "Failed to stop dead session after offer timeout: ${error.debugMessage()}")
                 }
             }
@@ -3101,7 +3117,8 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     }
                     return@onFailure
                 }
-                if (error is CancellationException) return@onFailure
+                if (error is CancellationException) throw error
+                if (handleQueueAbandonedFailure(error, previousSession, currentSettings)) return@onFailure
                 recordDebugEvent("recovery", "Recovery failed error=${error.debugMessage()}")
                 _state.update {
                     it.copy(
@@ -3138,6 +3155,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         fallbackAppId: Int?,
         settings: StreamSettings,
     ): ActiveSessionInfo? {
+        var lastPollError: Throwable? = null
         repeat(3) { attempt ->
             if (attempt > 0) delay(2000)
             val polled = try {
@@ -3156,6 +3174,8 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 // next attempt: swallowing cancellation here hides retryQueue()'s stop.
                 throw e
             } catch (e: Throwable) {
+                lastPollError = e
+                recordDebugEvent("recovery", "Direct session poll attempt=$attempt failed session=${previousSession.shortDebugId()} error=${e.debugMessage()}")
                 null
             }
             if (polled != null && polled.status in setOf(2, 3) && polled.serverIp.isNotBlank()) {
@@ -3166,7 +3186,11 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 )
             }
         }
-        recordDebugEvent("recovery", "Direct session poll missed session=${previousSession.sessionId}")
+        if (lastPollError != null) {
+            recordDebugEvent("recovery", "Direct session poll failed with error session=${previousSession.sessionId} lastError=${lastPollError?.debugMessage()}")
+        } else {
+            recordDebugEvent("recovery", "Direct session poll missed (not ready/found) session=${previousSession.sessionId}")
+        }
         return null
     }
 
@@ -3658,6 +3682,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 )
             }
         }.onFailure { error ->
+            if (error is CancellationException) throw error
             recordDebugEvent("queue", "PrintedWaste queue load failed error=${error.debugMessage()}")
             _state.update {
                 it.copy(
@@ -3672,13 +3697,16 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         val auth = state.value.authSession ?: return
         val settings = effectiveStreamSettings()
         val token = auth.tokens.idToken ?: auth.tokens.accessToken
-        val active = try {
+        val sessions = try {
             sessionRepository.getActiveSessions(token, effectiveStreamingBaseUrl(auth), settings)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
-            emptyList<ActiveSessionInfo>()
-        }.firstOrNull { it.status in setOf(1, 2, 3) && it.matchesStreamSettings(settings) }
+            recordDebugEvent("session", "Failed to refresh active sessions error=${e.debugMessage()}")
+            return
+        }
+        val active = sessions
+            .firstOrNull { it.status in setOf(1, 2, 3) && it.matchesStreamSettings(settings) && it.sessionId != lastStoppedSessionId }
         _state.update { it.copy(activeSession = active) }
     }
 
@@ -3719,6 +3747,16 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             // polling generation, defeating the guard inside that loop.
             throw e
         } catch (e: Throwable) {
+            val providerStatus = (e as? CloudMatchRequestStatusException)?.statusCode
+            val httpCode = (e as? CloudMatchHttpException)?.code
+            if (isQueueAbandonedStatus(providerStatus) ||
+                isQueueInvalidSessionStatus(providerStatus) ||
+                providerStatus == 401 || providerStatus == 403 ||
+                httpCode == 401 || httpCode == 403
+            ) {
+                recordDebugEvent("queue", "Resume hydrate permanent failure session=${pending.shortDebugId()} error=${e.debugMessage()}")
+                throw e
+            }
             recordDebugEvent("queue", "Resume hydrate failed session=${pending.shortDebugId()} error=${e.debugMessage()}")
             pending
         }
@@ -3766,10 +3804,33 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         active: ActiveSessionInfo,
         settings: StreamSettings,
     ): SessionInfo? {
+        val game = _state.value.streamGame
+            ?: pendingActiveSessionLaunch?.game
+            ?: gameForActiveSession(active)
+            ?: run {
+                if (gamesJob?.isActive == true) {
+                    runCatching {
+                        withTimeout(5_000L) {
+                            gamesJob?.join()
+                        }
+                    }
+                }
+                gameForActiveSession(active)
+            }
+        if (_state.value.streamGame == null && game != null) {
+            _state.update { it.copy(streamGame = game) }
+        }
+        if (game == null) {
+            recordDebugEvent(
+                "queue",
+                "Claiming session ${active.shortDebugId()} appId=${active.appId} with null game; defaulting appLaunchMode to GAMEPAD_FRIENDLY",
+            )
+        }
+        val appLaunchMode = appLaunchModeFor(game)
         return try {
             // Claiming re-sends the session request body, so repeating the mode the session was
             // created with keeps it from being downgraded mid-flight.
-            sessionRepository.claimSession(token, active, settings, appLaunchModeFor(_state.value.streamGame))
+            sessionRepository.claimSession(token, active, settings, appLaunchMode)
         } catch (error: SessionClaimNotReadyException) {
             val fallback = active.toPendingSession(zone = "prod")
             val latest = error.latestSession?.let { mergeQueueSessionState(fallback, it) } ?: fallback
@@ -3908,6 +3969,13 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 if (e is CancellationException) throw e
                 if (currentGeneration != pollingGeneration) return null
                 val providerStatus = (e as? CloudMatchRequestStatusException)?.statusCode
+                val httpCode = (e as? CloudMatchHttpException)?.code
+                if (providerStatus == 401 || providerStatus == 403 ||
+                    httpCode == 401 || httpCode == 403
+                ) {
+                    recordDebugEvent("queue", "Poll #$pollCount unauthorized/forbidden (HTTP ${httpCode ?: providerStatus}): ${e.message}")
+                    throw e
+                }
                 when {
                     isQueueAbandonedStatus(providerStatus) -> {
                         throw queueAbandonedException(latest, providerStatus, "poll request")
@@ -3927,6 +3995,10 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                         // A different failure breaks the "consecutive 22" streak.
                         consecutiveInvalidSessionPolls = 0
                         consecutivePollFailures += 1
+                        if (consecutivePollFailures >= QUEUE_POLL_MAX_CONSECUTIVE_FAILURES) {
+                            recordDebugEvent("queue", "Poll #$pollCount reached max consecutive failures ($consecutivePollFailures): ${e.message}")
+                            throw IllegalStateException("Queue polling failed after $consecutivePollFailures consecutive attempts: ${e.message}", e)
+                        }
                         val backoffMs = minOf(POLL_RETRY_MAX_BACKOFF_MS, 2_000L shl consecutivePollFailures.coerceAtMost(4))
                         recordDebugEvent(
                             "queue",

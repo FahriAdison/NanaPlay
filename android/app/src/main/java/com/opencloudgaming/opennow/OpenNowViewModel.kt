@@ -307,6 +307,17 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
     private var launchJob: Job? = null
     private var pollingGeneration = 0
     private var consecutiveHighThermalTicks = 0
+
+    private fun resetThermalWarningState() {
+        consecutiveHighThermalTicks = 0
+        _state.update {
+            it.copy(
+                thermalWarning = false,
+                thermalWarningTempC = null,
+            )
+        }
+    }
+
     private var activeSubscriptionJob: Job? = null
     private var pendingActiveSessionLaunch: PendingActiveSessionLaunch? = null
     private var loginJob: Job? = null
@@ -1823,7 +1834,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     "codec" to settings.codec.name,
                 ),
             )
-            consecutiveHighThermalTicks = 0
+            resetThermalWarningState()
             _state.update {
                 it.copy(
                     streamStatus = "queue",
@@ -1843,8 +1854,6 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     lastPositionChangeMs = 0L,
                     stuckWarningShown = false,
                     videoOfferTimeout = false,
-                    thermalWarning = false,
-                    thermalWarningTempC = null,
                     streamServerPingMs = serverPingMs,
                     streamLaunchBaseUrl = baseUrl,
                     pendingStoreChoiceGame = null,
@@ -2008,7 +2017,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             )
         }
         recordDebugEvent("stream", "Session ready for native stream ${anchoredSession.debugSummary()}")
-        consecutiveHighThermalTicks = 0
+        resetThermalWarningState()
         _state.update {
             it.copy(
                 streamSession = anchoredSession,
@@ -2020,8 +2029,6 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 queueAdActiveId = null,
                 queueAbandoned = false,
                 queueStuckWarning = false,
-                thermalWarning = false,
-                thermalWarningTempC = null,
                 activeSessionDecision = null,
                 page = AppPage.Stream,
             )
@@ -2092,7 +2099,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         launchJob?.cancel()
         launchJob = null
         pendingActiveSessionLaunch = null
-        consecutiveHighThermalTicks = 0
+        resetThermalWarningState()
         // The telephony callback is only needed for the live cellular label in stream stats.
         CellularNetworkStatus.stopMonitoring(getApplication())
         viewModelScope.launch {
@@ -2133,7 +2140,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     "game_id" to (state.value.streamGame?.id ?: ""),
                 ),
             )
-            consecutiveHighThermalTicks = 0
+            resetThermalWarningState()
             _state.update {
                 // Only attach this stop's report when no newer session has started
                 // meanwhile (see stoppedSessionId above).
@@ -2161,8 +2168,6 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     lastPositionChangeMs = 0L,
                     stuckWarningShown = false,
                     videoOfferTimeout = false,
-                    thermalWarning = false,
-                    thermalWarningTempC = null,
                     streamServerPingMs = null,
                     streamLaunchBaseUrl = null,
                     pendingStoreChoiceGame = null,
@@ -2240,6 +2245,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 recordDebugEvent("queue", "Replace active session ignored without an auth session")
                 return@launch
             }
+            resetThermalWarningState()
             _state.update {
                 it.copy(
                     streamStatus = "queue",
@@ -2261,8 +2267,6 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     lastPositionChangeMs = 0L,
                     stuckWarningShown = false,
                     videoOfferTimeout = false,
-                    thermalWarning = false,
-                    thermalWarningTempC = null,
                     streamServerPingMs = null,
                     streamLaunchBaseUrl = pending.baseUrl,
                     sessionReport = null,
@@ -2338,6 +2342,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             val baseUrl = effectiveStreamingBaseUrl(auth)
             val cachedActive = state.value.activeSession
             val returnPage = state.value.page.takeUnless { it == AppPage.Stream } ?: state.value.streamReturnPage ?: AppPage.Home
+            resetThermalWarningState()
             _state.update {
                 it.copy(
                     streamStatus = "queue",
@@ -2359,8 +2364,6 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     lastPositionChangeMs = 0L,
                     stuckWarningShown = false,
                     videoOfferTimeout = false,
-                    thermalWarning = false,
-                    thermalWarningTempC = null,
                     streamServerPingMs = null,
                     streamLaunchBaseUrl = baseUrl,
                     sessionReport = null,
@@ -2793,7 +2796,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         )
         // streamSession must go null together with "idle": isAndroidUpdateCheckBlockedByStream()
         // treats a non-null session as an active stream and would block update checks forever.
-        consecutiveHighThermalTicks = 0
+        resetThermalWarningState()
         _state.update {
             it.copy(
                 error = message,
@@ -2801,8 +2804,6 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 streamSession = null,
                 activeStreamSettings = null,
                 launchPhase = "",
-                thermalWarning = false,
-                thermalWarningTempC = null,
             )
         }
         CellularNetworkStatus.stopMonitoring(getApplication())
@@ -2955,7 +2956,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     recordDebugEvent("recovery", "Failed to stop dead session after offer timeout: ${error.debugMessage()}")
                 }
             }
-            consecutiveHighThermalTicks = 0
+            resetThermalWarningState()
             _state.update {
                 it.copy(
                     videoOfferTimeout = true,
@@ -2971,8 +2972,6 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     bestQueuePosition = null,
                     lastPositionChangeMs = 0L,
                     stuckWarningShown = false,
-                    thermalWarning = false,
-                    thermalWarningTempC = null,
                 )
             }
             return
@@ -4111,7 +4110,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         // job stays "active" until its coroutine finishes), so without this the
         // retry button silently does nothing. Same pattern as launchWithPrintedWaste.
         launchJob = null
-        consecutiveHighThermalTicks = 0
+        resetThermalWarningState()
         _state.update {
             it.copy(
                 queueStuckWarning = false,
@@ -4120,8 +4119,6 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 bestQueuePosition = null,
                 lastPositionChangeMs = 0L,
                 stuckWarningShown = false,
-                thermalWarning = false,
-                thermalWarningTempC = null,
                 queuePosition = null,
                 queueAdActiveId = null,
                 streamSession = null,
@@ -4148,7 +4145,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         launchJob?.cancel()
         launchJob = null
         CellularNetworkStatus.stopMonitoring(getApplication())
-        consecutiveHighThermalTicks = 0
+        resetThermalWarningState()
         _state.update {
             it.copy(
                 videoOfferTimeout = false,
@@ -4166,8 +4163,6 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 bestQueuePosition = null,
                 lastPositionChangeMs = 0L,
                 stuckWarningShown = false,
-                thermalWarning = false,
-                thermalWarningTempC = null,
                 streamServerPingMs = null,
                 streamLaunchBaseUrl = null,
                 pendingStoreChoiceGame = null,

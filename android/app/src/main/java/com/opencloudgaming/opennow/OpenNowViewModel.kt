@@ -1872,32 +1872,52 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 )
             }
             var launchSession: SessionInfo? = null
+            // Hoisted out of runCatching so the failure handler can re-check the account for a
+            // create-time conflict and tell a discovery fallback apart from an ordinary launch.
+            var launchAppId: String? = null
+            var launchSelectedVariant: GameVariant? = null
+            var discoveryFallbackEngaged = false
             runCatching {
                 val token = launchAuthToken(auth)
                 val selectedVariant = game.variants.getOrNull(game.selectedVariantIndex) ?: game.variants.firstOrNull()
+                launchSelectedVariant = selectedVariant
                 val candidateId = selectedVariant?.id ?: game.launchAppId ?: game.uuid ?: game.id
-                val launchAppId = candidateId.takeIf { it.all(Char::isDigit) }
+                val resolvedLaunchAppId = candidateId.takeIf { it.all(Char::isDigit) }
                     ?: game.launchAppId?.takeIf { it.all(Char::isDigit) }
                     ?: catalogRepository.resolveLaunchAppId(token, candidateId, baseUrl)
                     ?: error("Could not resolve numeric appId for ${game.title}")
-                recordDebugEvent("launch", "Resolved appId=$launchAppId candidate=$candidateId game=${game.title}")
+                launchAppId = resolvedLaunchAppId
+                recordDebugEvent("launch", "Resolved appId=$resolvedLaunchAppId candidate=$candidateId game=${game.title}")
 
                 _state.update { it.copy(launchPhase = "Checking active sessions") }
-                val active = sessionRepository.getActiveSessions(token, baseUrl, settings)
-                recordDebugEvent("queue", "Active sessions checked count=${active.size} ${active.joinToString(limit = 4) { it.debugSummary() }}")
-                val numericLaunchAppId = launchAppId.toIntOrNull()
-                val activeConflict = activeSessionLaunchConflict(active, numericLaunchAppId, settings)
-                if (activeConflict != null) {
+                val active = try {
+                    sessionRepository.getActiveSessions(token, baseUrl, settings)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    if (!tryFallThroughToCreateAfterDiscoveryFailure(e, game, auth)) throw e
+                    discoveryFallbackEngaged = true
+                    null
+                }
+                recordDebugEvent(
+                    "queue",
+                    "Active sessions checked count=${active?.size ?: -1} ${active?.joinToString(limit = 4) { it.debugSummary() }.orEmpty()} fallback=$discoveryFallbackEngaged",
+                )
+                val numericLaunchAppId = launchAppId?.toIntOrNull()
+                // A null list means the lookup itself failed, so an unknown-seat launch reads it as
+                // "no seat found" and must never raise the resume/end dialog.
+                val activeConflict = active?.let { activeSessionLaunchConflict(it, numericLaunchAppId, settings) }
+                if (active != null && activeConflict != null) {
                     pendingActiveSessionLaunch = PendingActiveSessionLaunch(
                         game = game,
-                        launchAppId = launchAppId,
+                        launchAppId = resolvedLaunchAppId,
                         baseUrl = baseUrl,
                         settings = settings,
                         accountLinked = shouldSendAccountLinked(game, selectedVariant),
                         activeSession = activeConflict,
                         returnPage = returnPage,
                     )
-                    recordDebugEvent("queue", "Active session decision required ${activeConflict.debugSummary()} requestedApp=$launchAppId")
+                    recordDebugEvent("queue", "Active session decision required ${activeConflict.debugSummary()} requestedApp=$resolvedLaunchAppId")
                     _state.update {
                         it.copy(
                             activeSession = activeConflict,
@@ -1917,12 +1937,13 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 val created = createSessionWithRetry(
                     token = token,
                     streamingBaseUrl = baseUrl,
-                    appId = launchAppId,
+                    appId = resolvedLaunchAppId,
                     internalTitle = game.title,
                     zone = "prod",
                     settings = settings,
                     accountLinked = shouldSendAccountLinked(game, selectedVariant),
                     appLaunchMode = appLaunchModeFor(game),
+                    preferBrowserMode = settings.browserClientMode,
                 )
                 recordDebugEvent("queue", "Created session ${created.debugSummary()}")
                 launchSession = created
@@ -1933,6 +1954,25 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             }.onFailure { error ->
                 if (error is CancellationException) return@onFailure
                 if (handleQueueAbandonedFailure(error, launchSession, settings)) return@onFailure
+                // Upstream OpenNOW PR 1334: after a discovery fallback, a create-time conflict must
+                // reach the resume/end dialog instead of a plain error, and must never trigger a
+                // second create or stop the session that already owns the account.
+                // `launchSession == null` scopes this to create itself: once a session exists, a
+                // later poll or offer failure belongs to that stage, not to a conflict renegotiation.
+                if (discoveryFallbackEngaged && launchSession == null &&
+                    handleCreateConflictAfterDiscoveryFallback(
+                        error = error,
+                        game = game,
+                        auth = auth,
+                        launchAppId = launchAppId,
+                        launchSelectedVariant = launchSelectedVariant,
+                        baseUrl = baseUrl,
+                        settings = settings,
+                        returnPage = returnPage,
+                    )
+                ) {
+                    return@onFailure
+                }
                 recordDebugEvent("launch", "Launch failed game=${game.title} error=${error.debugMessage()}")
                 val returnPage = state.value.streamReturnPage ?: AppPage.Home
                 _state.update {
@@ -1953,6 +1993,126 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 }
             }
         }
+    }
+
+    /**
+     * Port of upstream OpenNOW PR #1334 (`fix(qt): allow new launches during regional discovery
+     * outages`) for NanaPlay's narrower case: the lookup of the user's selected region fails, so a
+     * brand-new launch would be blocked even though no seat is known to be running.
+     *
+     * Qt scans every region, so one broken region used to fail all discovery. NanaPlay asks a single
+     * base URL, so the equivalent incident is "that one base URL did not return an answer".
+     *
+     * The fallback needs both halves: the failure must be a discovery failure, and the launch intent
+     * must still be the current, clean, new-launch intent the Qt guard requires. Anything else keeps
+     * the old behaviour — the launch fails with the original error — so authentication failures,
+     * cancellation, timeouts and transport errors can never create a session on the user's behalf.
+     *
+     * The provider is still the final arbiter: `session.create` answers with a conflict if a session
+     * really is running, and that response is routed to resume/end handling by
+     * [handleCreateConflictAfterDiscoveryFallback].
+     */
+    private fun tryFallThroughToCreateAfterDiscoveryFailure(
+        error: Throwable,
+        game: GameInfo,
+        auth: AuthSession,
+    ): Boolean {
+        val kind = classifyActiveSessionsLookupFailure(error)
+        val snapshot = state.value
+        val guard = NewLaunchIntentGuardInput(
+            signedIn = snapshot.authSession != null,
+            accountUnchanged = snapshot.authSession?.user?.userId == auth.user.userId,
+            selectedGameUnchanged = snapshot.streamGame == game,
+            noStoreChoicePending = snapshot.pendingStoreChoiceGame == null,
+            noPendingConflictLaunch = pendingActiveSessionLaunch == null,
+            noActiveSession = snapshot.streamSession == null && snapshot.activeSession == null,
+            noConflictDecision = snapshot.activeSessionDecision == null,
+            noQueueAbandoned = !snapshot.queueAbandoned,
+        )
+        if (!kind.allowsNewLaunchFallback() || !guard.allowsNewLaunchFallback()) {
+            recordDebugEvent(
+                "launch",
+                "Active-session lookup failed; launch stays strict kind=$kind guard=$guard error=${error.debugMessage()}",
+            )
+            return false
+        }
+        recordDebugEvent(
+            "launch",
+            "Active-session lookup failed (kind=$kind); continuing this new launch through session.create game=${game.title}",
+        )
+        return true
+    }
+
+    /**
+     * A `session.create` that the provider answered with a conflict after incomplete discovery.
+     *
+     * Qt answers the same situation with a `session_conflict` code and routes it to resume/end
+     * handling; a second create is never sent and the running session is never stopped. NanaPlay
+     * reports the conflict as a typed [CloudMatchRequestStatusException] instead, so it reads the
+     * account once more: only when a seat is actually still there does it raise the existing
+     * resume/end dialog ([ActiveSessionDecision] plus [PendingActiveSessionLaunch]) that
+     * [resumeActiveSession], [terminateActiveSessionAndStartNew] and [dismissActiveSessionDecision]
+     * already own. A failed re-read keeps the original launch error, so an outage can only ever give
+     * the user the resume/end choice — never a phantom session.
+     *
+     * Deliberately never calls create and never calls [GfnSessionRepository.stopSession] or
+     * [stopActiveSession]: replacing the game is an explicit user choice through that dialog.
+     */
+    private suspend fun handleCreateConflictAfterDiscoveryFallback(
+        error: Throwable,
+        game: GameInfo,
+        auth: AuthSession,
+        launchAppId: String?,
+        launchSelectedVariant: GameVariant?,
+        baseUrl: String,
+        settings: StreamSettings,
+        returnPage: AppPage,
+    ): Boolean {
+        if (error !is CloudMatchRequestStatusException) return false
+        val resolvedLaunchAppId = launchAppId ?: game.launchAppId ?: game.uuid ?: game.id
+        val token = auth.tokens.idToken ?: auth.tokens.accessToken
+        val existing = try {
+            sessionRepository.getActiveSessions(token, baseUrl, settings)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            recordDebugEvent(
+                "launch",
+                "Create conflict after discovery fallback could not re-read sessions status=${error.statusCode} error=${e.debugMessage()}",
+            )
+            return false
+        }
+        val conflict = existing.firstOrNull { it.status in setOf(1, 2, 3) } ?: return false
+        val numericLaunchAppId = resolvedLaunchAppId.toIntOrNull()
+        val conflictForLaunch = activeSessionLaunchConflict(existing, numericLaunchAppId, settings) ?: conflict
+        recordDebugEvent(
+            "launch",
+            "Create conflict after discovery fallback routed to resume/end session=${conflictForLaunch.shortDebugId()} game=${game.title} createStatus=${error.statusCode}",
+        )
+        pendingActiveSessionLaunch = PendingActiveSessionLaunch(
+            game = game,
+            launchAppId = resolvedLaunchAppId,
+            baseUrl = baseUrl,
+            settings = settings,
+            accountLinked = shouldSendAccountLinked(game, launchSelectedVariant),
+            activeSession = conflictForLaunch,
+            returnPage = returnPage,
+        )
+        _state.update {
+            it.copy(
+                activeSession = conflictForLaunch,
+                activeSessionDecision = ActiveSessionDecision(
+                    activeSession = conflictForLaunch,
+                    requestedGameTitle = game.title,
+                ),
+                streamSession = null,
+                launchPhase = "Active session found",
+                queuePosition = conflictForLaunch.queuePosition,
+                queueAdActiveId = null,
+                error = null,
+            )
+        }
+        return true
     }
 
     /**
@@ -2305,6 +2465,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     settings = pending.settings,
                     accountLinked = pending.accountLinked,
                     appLaunchMode = appLaunchModeFor(pending.game),
+                    preferBrowserMode = pending.settings.browserClientMode,
                 )
                 recordDebugEvent("queue", "Created replacement session ${created.debugSummary()}")
                 launchSession = created
@@ -3829,8 +3990,15 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         val appLaunchMode = appLaunchModeFor(game)
         return try {
             // Claiming re-sends the session request body, so repeating the mode the session was
-            // created with keeps it from being downgraded mid-flight.
-            sessionRepository.claimSession(token, active, settings, appLaunchMode)
+            // created with keeps it from being downgraded mid-flight. Website client mode is carried
+            // the same way: a browser-identity session must be claimed with the browser identity.
+            sessionRepository.claimSession(
+                token = token,
+                active = active,
+                settings = settings,
+                appLaunchMode = appLaunchMode,
+                preferBrowserMode = settings.browserClientMode,
+            )
         } catch (error: SessionClaimNotReadyException) {
             val fallback = active.toPendingSession(zone = "prod")
             val latest = error.latestSession?.let { mergeQueueSessionState(fallback, it) } ?: fallback
@@ -4132,6 +4300,11 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         settings: StreamSettings,
         accountLinked: Boolean,
         appLaunchMode: Int,
+        /**
+         * Website client mode (upstream 2.1.1). Callers pass [StreamSettings.browserClientMode];
+         * the default false keeps the request byte-identical to before the port.
+         */
+        preferBrowserMode: Boolean = false,
     ): SessionInfo {
         var lastError: Throwable? = null
         repeat(CREATE_SESSION_MAX_ATTEMPTS) { attempt ->
@@ -4145,6 +4318,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     settings = settings,
                     accountLinked = accountLinked,
                     appLaunchMode = appLaunchMode,
+                    preferBrowserMode = preferBrowserMode,
                 )
             }
             if (result.isSuccess) return result.getOrThrow()

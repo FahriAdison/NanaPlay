@@ -716,6 +716,13 @@ private fun SettingsContent(
                     color = SettingsTextMuted,
                     style = MaterialTheme.typography.bodySmall,
                 )
+                SettingSwitch(
+                    label = stringResource(R.string.settings_browser_client_mode),
+                    checked = settings.stream.browserClientMode,
+                    description = stringResource(R.string.settings_browser_client_mode_desc),
+                ) { enabled ->
+                    viewModel.updateStreamSettings { s -> s.copy(browserClientMode = enabled) }
+                }
                 if (settings.stream.sessionProxyEnabled) {
                     OutlinedTextField(
                         value = settings.stream.sessionProxyUrl,

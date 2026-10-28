@@ -189,6 +189,21 @@ data class StreamSettings(
     val persistentReconnect: Boolean = false,
     val dynamicNetworkAdjustment: DynamicNetworkAdjustment = DynamicNetworkAdjustment.NoAdjustment,
     val overlayShortcutButton: OverlayShortcutButton = OverlayShortcutButton.Start,
+    /**
+     * Website client mode (upstream 2.1.1 "Website client mode"): run the session with the browser
+     * client identity — `nv-client-type: BROWSER`, `nv-client-streamer: WEBRTC`, browser
+     * User-Agent — instead of the desktop/native identity NanaPlay normally sends.
+     *
+     * Upstream makes this mutually exclusive with native touch: enabling it turns native touch off,
+     * and picking native touch turns it off again. NanaPlay deliberately keeps them COMBINABLE —
+     * the on-screen gamepad, touch-mouse and NanaPlay's other touch controls are NanaPlay's own
+     * input path, and neither the setting nor the launch path disables them here.
+     *
+     * Whether GFN's host actually delivers NanaPlay's touch input inside a browser-typed session is
+     * NOT provable from code: only an on-device test in a game (NTE) answers that. Nothing in this
+     * port claims it works.
+     */
+    val browserClientMode: Boolean = false,
 )
 
 @Serializable
@@ -629,7 +644,12 @@ internal fun streamSettingsSessionSignature(settings: StreamSettings): String {
         "gsync=${if (compatible.enableCloudGsync) 1 else 0}",
         "keyboard=${compatible.keyboardLayout.trim()}",
         "language=${compatible.gameLanguage.trim()}",
-    ).joinToString(";")
+    ).joinToString(";").let { signature ->
+        // Upstream appends ";client=browser" for website client mode. Langkah sama di sini supaya
+        // sesi browser tidak ikut cocok sebagai "sesi yang sama" untuk launch biasa (dan sebaliknya).
+        // Saat OFF tidak ada yang ditambahkan, sehingga signature tidak berubah sedikit pun.
+        if (compatible.browserClientMode) "$signature;client=browser" else signature
+    }
 }
 
 internal data class StreamResolutionOption(

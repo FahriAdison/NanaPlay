@@ -259,6 +259,8 @@
     <string name="settings_session_proxy">Proxy sesi</string>
     <string name="settings_session_proxy_hint">Melewatkan pembuatan sesi GFN dan polling antrean lewat proxy ini. Matikan untuk koneksi langsung.</string>
     <string name="settings_session_proxy_url">URL Proxy</string>
+    <string name="settings_browser_client_mode">Mode klien website</string>
+    <string name="settings_browser_client_mode_desc">Menjalankan sesi sebagai klien website (browser), bukan klien desktop. Gamepad dan kontrol sentuh bawaan NanaPlay tetap jalan bersamaan — apakah host menerimanya di sesi browser belum diuji.</string>
     <string name="settings_codec_diagnostics_copy">Salin diagnostik codec</string>
     <string name="settings_codec_diagnostics_copied">Diagnostik codec tersalin</string>
     <string name="settings_codec_diagnostics_unavailable">Probe codec belum berjalan.</string>

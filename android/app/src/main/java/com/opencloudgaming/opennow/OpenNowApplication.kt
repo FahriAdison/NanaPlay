@@ -28,6 +28,9 @@ class OpenNowApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Installed before anything else: a force close during launch must land on disk, because the
+        // in-app diagnostics buffer is memory-only and dies with the process.
+        CrashReporter.install(this)
 
         startupScope.launch {
             // SettingsStore construction does disk I/O (XML parse) plus a

@@ -841,6 +841,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             // The last crash report is written by CrashReporter on the previous force close and is
             // already sanitized before it is stored; sanitizeDiagnosticExport runs over it again.
             val lastCrashReport = CrashReporter.lastReport(getApplication())
+            val lastNativeCrashReport = NativeCrashReporter.lastReport(getApplication())
             val payload = sanitizeDiagnosticExport(
                 buildString {
                     appendLine(summaryHeader)
@@ -848,6 +849,11 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     if (!lastCrashReport.isNullOrBlank()) {
                         appendLine("---- last crash ----")
                         appendLine(lastCrashReport)
+                        appendLine()
+                    }
+                    if (!lastNativeCrashReport.isNullOrBlank()) {
+                        appendLine("---- last native crash ----")
+                        appendLine(lastNativeCrashReport)
                         appendLine()
                     }
                     append(sanitizedLog)

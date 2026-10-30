@@ -13,6 +13,7 @@ target_compile_options(opennow_native PRIVATE -fexceptions -frtti)
 find_library(log-lib log)
 find_library(android-lib android)
 find_library(mediandk-lib mediandk)
+find_library(dl-lib dl)
 
 target_link_libraries(
     opennow_native
@@ -20,3 +21,6 @@ target_link_libraries(
     ${log-lib}
     ${mediandk-lib}
 )
+if(dl-lib)
+    target_link_libraries(opennow_native ${dl-lib})
+endif()

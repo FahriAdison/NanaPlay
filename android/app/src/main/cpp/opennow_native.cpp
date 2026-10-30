@@ -11,14 +11,8 @@
 #include <cstring>
 #include <cstdio>
 
-#include <android/api-level.h>
-
-#if __ANDROID_API__ >= 33
-#include <execinfo.h>
-#define NANA_HAS_BACKTRACE 1
-#else
-#define NANA_HAS_BACKTRACE 0
-#endif
+#include <unwind.h>
+#include <dlfcn.h>
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_opencloudgaming_opennow_NativeCodecProbe_nativeRuntimeSummary(JNIEnv *env, jobject) {
@@ -65,10 +59,9 @@ Java_com_opencloudgaming_opennow_NativeCodecProbe_nativeDecoderAvailable(JNIEnv 
 // installed handler so the process still dies normally and the platform's own
 // tombstone/debuggerd behaviour is preserved.
 //
-// NOTE: this handler is best-effort, NOT strictly async-signal-safe. snprintf
-// and (where available) backtrace/backtrace_symbols_fd are not in the POSIX
-// async-signal-safe list. Correct process termination is guaranteed by chaining
-// to the old handler below, not by any async-signal-safety claim.
+// NOTE: this handler is best-effort, NOT strictly async-signal-safe. snprintf,
+// _Unwind_Backtrace and dladdr are not in the POSIX async-signal-safe list.
+// chaining guarantees termination only if this handler returns.
 static char g_crashFilePath[4096] = {0};
 
 static const int g_handledSignals[] = { SIGSEGV, SIGABRT, SIGILL, SIGFPE, SIGBUS };
@@ -106,16 +99,57 @@ static void writeNativeCrashReport(int sig, void *faultAddr) {
         (void)write(fd, header, (size_t)hlen);
     }
 
-#if NANA_HAS_BACKTRACE
-    void *frames[64];
-    int frameCount = backtrace(frames, 64);
     const char *btHeader = "backtrace:\n";
     (void)write(fd, btHeader, 11);
-    backtrace_symbols_fd(frames, frameCount, fd);
-#else
-    const char *note = "backtrace: compiled out at minSdk 23 build; platform tombstone carries the full backtrace\n";
-    (void)write(fd, note, sizeof("backtrace: compiled out at minSdk 23 build; platform tombstone carries the full backtrace\n") - 1);
-#endif
+
+    // Runtime unwind via the runtime unwind library's _Unwind_Backtrace. dladdr()
+    // resolves each PC to symbol name + offset + module so the result can be
+    // symbolized offline (addr2line/llvm-symbolizer) even without debug info.
+    struct BacktraceState {
+        void **frames;
+        int frameCount;
+        int maxFrames;
+    };
+    BacktraceState state;
+    void *frames[64];
+    state.frames = frames;
+    state.frameCount = 0;
+    state.maxFrames = 64;
+
+    // _Unwind_Backtrace is provided by the runtime unwind library linked into
+    // every native process.
+    _Unwind_Backtrace(
+        [](_Unwind_Context *ctx, void *arg) -> _Unwind_Reason_Code {
+            BacktraceState *s = (BacktraceState *)arg;
+            if (s->frameCount >= s->maxFrames) return _URC_END_OF_STACK;
+            void *pc = (void *)_Unwind_GetIP(ctx);
+            if (pc != nullptr) s->frames[s->frameCount++] = pc;
+            return _URC_NO_REASON;
+        },
+        &state);
+
+    char line[512];
+    for (int i = 0; i < state.frameCount; i++) {
+        void *pc = frames[i];
+        Dl_info info;
+        if (dladdr(pc, &info) != 0 && info.dli_fname != nullptr) {
+            ptrdiff_t offset;
+            if (info.dli_saddr != nullptr) {
+                offset = (const char *)pc - (const char *)info.dli_saddr;
+            } else {
+                offset = (const char *)pc - (const char *)info.dli_fbase;
+            }
+            const char *sym = (info.dli_sname != nullptr) ? info.dli_sname : "??";
+            int len = snprintf(line, sizeof(line), "#%02d %p %s+%td (%s)\n",
+                               i, pc, sym, offset, info.dli_fname);
+            if (len > (int)sizeof(line) - 1) len = (int)sizeof(line) - 1;
+            if (len > 0) (void)write(fd, line, (size_t)len);
+        } else {
+            int len = snprintf(line, sizeof(line), "#%02d %p\n", i, pc);
+            if (len > (int)sizeof(line) - 1) len = (int)sizeof(line) - 1;
+            if (len > 0) (void)write(fd, line, (size_t)len);
+        }
+    }
 
     close(fd);
 }

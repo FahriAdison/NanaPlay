@@ -5,6 +5,7 @@ import com.papahchan.nanaplay.R
 import android.app.Application
 import android.content.Context
 import android.content.Intent
+import kotlinx.serialization.encodeToString
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
@@ -842,6 +843,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             // already sanitized before it is stored; sanitizeDiagnosticExport runs over it again.
             val lastCrashReport = CrashReporter.lastReport(getApplication())
             val lastNativeCrashReport = NativeCrashReporter.lastReport(getApplication())
+            val exitHistory = AndroidProcessExitDiagnostics.snapshot(getApplication())
             val payload = sanitizeDiagnosticExport(
                 buildString {
                     appendLine(summaryHeader)
@@ -856,6 +858,15 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                         appendLine(lastNativeCrashReport)
                         appendLine()
                     }
+                    appendLine("---- process exit history ----")
+                    appendLine("availability=${exitHistory.availability} records=${exitHistory.records.size}")
+                    for (record in exitHistory.records) {
+                        appendLine("${record.timestamp} reason=${record.reasonCode}(${record.reason}) status=${record.status} pssKiB=${record.pssKiB} rssKiB=${record.rssKiB}")
+                        record.description?.let { appendLine("  desc=${it.take(200)}") }
+                    }
+                    appendLine("json:")
+                    appendLine(OpenNowJson.encodeToString(exitHistory))
+                    appendLine()
                     append(sanitizedLog)
                 },
             )

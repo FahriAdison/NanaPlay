@@ -858,6 +858,12 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                         appendLine(lastNativeCrashReport)
                         appendLine()
                     }
+                    val remoteIceLog = RemoteIceLog.readLog(getApplication())
+                    if (!remoteIceLog.isNullOrBlank()) {
+                        appendLine("---- remote ice candidate history ----")
+                        appendLine(remoteIceLog)
+                        appendLine()
+                    }
                     appendLine("---- process exit history ----")
                     appendLine("availability=${exitHistory.availability} records=${exitHistory.records.size}")
                     for (record in exitHistory.records) {

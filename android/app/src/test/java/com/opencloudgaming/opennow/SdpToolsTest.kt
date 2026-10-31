@@ -169,6 +169,76 @@ class SdpToolsTest {
     }
 
     @Test
+    fun fixCandidateEndpointWithReportRewritesAnyLocalToMediaIp() {
+        val raw = "candidate:1 1 udp 2122260223 0.0.0.0 47998 typ host generation 0"
+        val result = SdpTools.fixCandidateEndpointWithReport(
+            raw,
+            serverIp = "183-78-14-231.yes.geforcenow.nvidiagrid.net",
+            mediaConnectionInfo = MediaConnectionInfo("183.78.14.231", 14317),
+        )
+        assertTrue(result.isRewritten)
+        assertFalse(result.unresolvedPort0)
+        assertEquals("candidate:1 1 udp 2122260223 183.78.14.231 14317 typ host generation 0", result.rewrittenSdp)
+    }
+
+    @Test
+    fun fixCandidateEndpointWithReportRewritesPortZeroWhenMediaPortAvailable() {
+        val raw = "candidate:2 1 udp 2122260223 0.0.0.0 0 typ host"
+        val result = SdpTools.fixCandidateEndpointWithReport(
+            raw,
+            serverIp = "183-78-14-231.yes.geforcenow.nvidiagrid.net",
+            mediaConnectionInfo = MediaConnectionInfo("183.78.14.231", 14317),
+        )
+        assertTrue(result.isRewritten)
+        assertFalse(result.unresolvedPort0)
+        assertEquals("candidate:2 1 udp 2122260223 183.78.14.231 14317 typ host", result.rewrittenSdp)
+    }
+
+    @Test
+    fun fixCandidateEndpointWithReportPreservesPortZeroAndSetsFlagWhenMediaPortMissing() {
+        val raw = "candidate:3 1 udp 2122260223 203.0.113.10 0 typ host"
+        val result = SdpTools.fixCandidateEndpointWithReport(
+            raw,
+            serverIp = "203.0.113.1",
+            mediaConnectionInfo = null,
+        )
+        assertFalse(result.isRewritten)
+        assertTrue(result.unresolvedPort0)
+        assertEquals(raw, result.rewrittenSdp)
+    }
+
+    @Test
+    fun fixCandidateEndpointWithReportIdempotentForValidPublicCandidate() {
+        val raw = "candidate:4 1 udp 2122260223 203.0.113.10 47998 typ host"
+        val result = SdpTools.fixCandidateEndpointWithReport(
+            raw,
+            serverIp = "203.0.113.1",
+            mediaConnectionInfo = null,
+        )
+        assertFalse(result.isRewritten)
+        assertFalse(result.unresolvedPort0)
+        assertEquals(raw, result.rewrittenSdp)
+    }
+
+    @Test
+    fun parsesMLineCountAndMidsAccurately() {
+        val sdp = """
+            v=0
+            o=- 1 1 IN IP4 127.0.0.1
+            s=-
+            t=0 0
+            m=audio 9 UDP/TLS/RTP/SAVPF 111
+            a=mid:audio
+            m=video 9 UDP/TLS/RTP/SAVPF 96
+            a=mid:video
+            m=application 9 UDP/DTLS/SCTP 5000
+            a=mid:data
+        """.trimIndent()
+        assertEquals(3, SdpTools.parseMLineCount(sdp))
+        assertEquals(listOf("audio", "video", "data"), SdpTools.parseMids(sdp))
+    }
+
+    @Test
     fun nvstSdpUsesConfiguredResolutionViewport() {
         val nvst = SdpTools.buildNvstSdp(
             offerSdp = "a=ri.partialReliableThresholdMs:42",

@@ -1,6 +1,7 @@
 package com.opencloudgaming.opennow
 
 import android.content.Context
+import com.papahchan.nanaplay.BuildConfig
 import java.io.File
 
 /**
@@ -33,7 +34,7 @@ internal object NativeCrashReporter {
             runCatching {
                 System.loadLibrary("opennow_native")
                 val path = File(context.filesDir, "last-crash-native.txt").absolutePath
-                installNativeCrashHandler(path)
+                installNativeCrashHandler(path, BuildConfig.VERSION_CODE)
                 installed = true
             }
         }
@@ -55,7 +56,7 @@ internal object NativeCrashReporter {
         runCatching { File(context.filesDir, "last-crash-native.txt").delete() }
     }
 
-    private external fun installNativeCrashHandler(path: String)
+    private external fun installNativeCrashHandler(path: String, versionCode: Int)
 
     init {
         runCatching { System.loadLibrary("opennow_native") }

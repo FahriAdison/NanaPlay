@@ -10,6 +10,7 @@
 #include <sys/types.h>
 #include <cstring>
 #include <cstdio>
+#include <ctime>
 
 #include <unwind.h>
 #include <dlfcn.h>
@@ -63,6 +64,7 @@ Java_com_opencloudgaming_opennow_NativeCodecProbe_nativeDecoderAvailable(JNIEnv 
 // _Unwind_Backtrace and dladdr are not in the POSIX async-signal-safe list.
 // chaining guarantees termination only if this handler returns.
 static char g_crashFilePath[4096] = {0};
+static int g_versionCode = 0;
 
 static const int g_handledSignals[] = { SIGSEGV, SIGABRT, SIGILL, SIGFPE, SIGBUS };
 static const int g_handledSignalCount = 5;
@@ -89,10 +91,11 @@ static void writeNativeCrashReport(int sig, void *faultAddr) {
         case SIGBUS:  sigName = "SIGBUS";  break;
     }
 
-    char header[256];
+    time_t now = time(nullptr);
+    char header[384];
     int hlen = snprintf(header, sizeof(header),
-                        "NanaPlay native crash report\nsignal=%s (%d)\nfaultAddr=%p\n",
-                        sigName, sig, faultAddr);
+                        "NanaPlay native crash report\ntime=%lld\nversionCode=%d\nsignal=%s (%d)\nfaultAddr=%p\n",
+                        (long long)now, g_versionCode, sigName, sig, faultAddr);
     if (hlen > (int)sizeof(header) - 1) hlen = (int)sizeof(header) - 1;
     if (hlen > 0) {
         // Best-effort write; ignore partial writes in a signal handler.
@@ -167,7 +170,8 @@ static void nativeCrashSignalHandler(int sig, siginfo_t *info, void *ucontext) {
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_opencloudgaming_opennow_NativeCrashReporter_installNativeCrashHandler(JNIEnv *env, jobject, jstring path) {
+Java_com_opencloudgaming_opennow_NativeCrashReporter_installNativeCrashHandler(JNIEnv *env, jobject, jstring path, jint versionCode) {
+    g_versionCode = (int)versionCode;
     if (path == nullptr) return;
     const char *p = env->GetStringUTFChars(path, nullptr);
     if (p == nullptr) return;

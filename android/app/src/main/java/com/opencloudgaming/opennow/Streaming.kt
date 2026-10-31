@@ -598,7 +598,7 @@ internal fun shouldAddRemoteIceCandidate(
         && lastIceState != PeerConnection.IceConnectionState.CLOSED
 }
 
-private fun IceCandidate.diagnosticSummary(): String {
+internal fun IceCandidate.diagnosticSummary(): String {
     val raw = sdp
     val protocol = Regex("""\s(udp|tcp)\s""", RegexOption.IGNORE_CASE)
         .find(raw)
@@ -3714,6 +3714,9 @@ class NativeStreamClient(
     private var consecutiveTransportProgressSamples = 0
     private var sessionRecoveryRequested = false
     private var lastIceState: PeerConnection.IceConnectionState? = null
+    private var remoteMLineCount: Int = 0
+    private var remoteMids: List<String> = emptyList()
+    private var iceConnectedAtMs: Long? = null
     private var audioMuted = false
     private var microphoneMuted = false
     private var virtualButtons = 0
@@ -4934,6 +4937,9 @@ class NativeStreamClient(
     private fun startTransport(session: SessionInfo, settings: StreamSettings, generation: Int) {
         inputDropLogged = false
         lastIceState = null
+        remoteMLineCount = 0
+        remoteMids = emptyList()
+        iceConnectedAtMs = null
         lastStatsSample = null
         firstDecodedResolutionEvaluated = false
         transportHasStableMedia = false
@@ -4980,6 +4986,9 @@ class NativeStreamClient(
         offerTimeoutJob = null
         lastStatsSample = null
         lastIceState = null
+        remoteMLineCount = 0
+        remoteMids = emptyList()
+        iceConnectedAtMs = null
         livenessWatchdog.reset()
         signaling?.disconnect()
         signaling = null
@@ -5070,14 +5079,55 @@ class NativeStreamClient(
                 }
                 is SignalingEvent.Log -> recordStreamDiagnostic(event.message)
                 is SignalingEvent.RemoteIce -> {
-                    // Mitigasi defensif, bukan fix akar: validasi sebelum diteruskan ke native.
-                    val pc = peerConnection
-                    val c = event.candidate
-                    if (shouldAddRemoteIceCandidate(c, pc != null, lastIceState)) {
-                        val added = pc!!.addIceCandidate(c)
-                        recordStreamDiagnostic("remote ICE add requested accepted=$added pcReady=true ${c.diagnosticSummary()}")
+                    // Mitigasi defensif, bukan fix akar: log RAW -> rewrite trickle -> guard -> append sinkron (tanpa fsync) -> add.
+                    val rawCandidate = event.candidate
+                    val currentSession = session
+                    val rewriteResult = SdpTools.fixCandidateEndpointWithReport(
+                        rawCandidate.sdp,
+                        currentSession?.serverIp.orEmpty(),
+                        currentSession?.mediaConnectionInfo,
+                    )
+                    val candidate = if (rewriteResult.isRewritten) {
+                        IceCandidate(rawCandidate.sdpMid, rawCandidate.sdpMLineIndex, rewriteResult.rewrittenSdp)
                     } else {
-                        recordStreamDiagnostic("remote ICE skipped invalid/closed pcReady=${pc != null} ${c.diagnosticSummary()}")
+                        rawCandidate
+                    }
+
+                    val pc = peerConnection
+                    val mayAdd = shouldAddRemoteIceCandidate(candidate, pc != null, lastIceState)
+                    val reason = when {
+                        pc == null -> "peer_connection_null"
+                        candidate.sdp.isNullOrBlank() -> "sdp_blank"
+                        candidate.sdpMid.isNullOrBlank() && candidate.sdpMLineIndex < 0 -> "missing_mid_and_negative_index"
+                        lastIceState == PeerConnection.IceConnectionState.CLOSED -> "ice_closed"
+                        else -> "valid"
+                    }
+
+                    val dtConnectedMs = iceConnectedAtMs?.let { SystemClock.elapsedRealtime() - it } ?: -1L
+
+                    // SINKRON ke OS page cache SEBELUM memanggil JNI addIceCandidate.
+                    // Menghilangkan race condition dengan SIGABRT tanpa membebani Main thread dengan fsync disk I/O.
+                    RemoteIceLog.append(
+                        context = appContext,
+                        rawCandidate = rawCandidate,
+                        postCandidate = candidate,
+                        action = if (mayAdd) "ACCEPTED" else "SKIPPED",
+                        reason = reason,
+                        lastIceState = lastIceState?.name ?: "NONE",
+                        remoteMLineCount = remoteMLineCount,
+                        remoteMids = remoteMids,
+                        dtConnectedMs = dtConnectedMs,
+                        unresolvedPort0 = rewriteResult.unresolvedPort0,
+                    )
+
+                    if (mayAdd) {
+                        val added = pc!!.addIceCandidate(candidate)
+                        val rewriteTag = if (rewriteResult.isRewritten) " [rewritten]" else ""
+                        val port0Tag = if (rewriteResult.unresolvedPort0) " [unresolved_port_0]" else ""
+                        recordStreamDiagnostic("remote ICE add requested accepted=$added pcReady=true ${candidate.diagnosticSummary()}$rewriteTag$port0Tag")
+                    } else {
+                        val port0Tag = if (rewriteResult.unresolvedPort0) " [unresolved_port_0]" else ""
+                        recordStreamDiagnostic("remote ICE skipped invalid/closed pcReady=${pc != null} ${candidate.diagnosticSummary()}$port0Tag")
                     }
                 }
                 is SignalingEvent.Offer -> handleOffer(event.sdp, generation)
@@ -5092,6 +5142,9 @@ class NativeStreamClient(
         recordStreamDiagnostic(sdpDiagnosticSummary("raw offer", rawOffer))
         val fixed = prepareRemoteOffer(rawOffer, currentSession)
         val preferred = SdpTools.preferCodec(fixed, settings)
+        remoteMLineCount = SdpTools.parseMLineCount(preferred)
+        remoteMids = SdpTools.parseMids(preferred)
+        recordStreamDiagnostic("offer media sections count=$remoteMLineCount mids=$remoteMids")
         if (fixed != rawOffer) {
             recordStreamDiagnostic(sdpDiagnosticSummary("fixed offer", fixed))
         }
@@ -5463,6 +5516,9 @@ class NativeStreamClient(
                 PeerConnection.IceConnectionState.CONNECTED,
                 PeerConnection.IceConnectionState.COMPLETED,
                 -> {
+                    if (iceConnectedAtMs == null) {
+                        iceConnectedAtMs = SystemClock.elapsedRealtime()
+                    }
                     iceRecoveryJob?.cancel()
                     iceRecoveryJob = null
                     livenessWatchdog.markConnected(SystemClock.elapsedRealtime())
@@ -7054,6 +7110,62 @@ open class SimpleSdpObserver : SdpObserver {
 
 object SdpTools {
     data class RewriteResult(val sdp: String, val replacements: Int)
+
+    data class CandidateRewriteResult(
+        val rewrittenSdp: String,
+        val isRewritten: Boolean,
+        val unresolvedPort0: Boolean,
+    )
+
+    fun fixCandidateEndpointWithReport(
+        candidateSdp: String,
+        serverIp: String,
+        mediaConnectionInfo: MediaConnectionInfo?,
+    ): CandidateRewriteResult {
+        val signalingIp = extractPublicIp(serverIp) ?: return CandidateRewriteResult(candidateSdp, false, false)
+        val mediaIp = mediaConnectionInfo?.ip?.let(::extractPublicIp) ?: signalingIp
+        val mediaPort = mediaConnectionInfo?.port?.takeIf { it in 1..65535 }
+        var hasUnresolvedPort0 = false
+        var modified = false
+
+        val resultSdp = candidateSdp.replace(Regex("((?:a=)?candidate:\\S+\\s+\\d+\\s+\\w+\\s+\\d+\\s+)([^\\s]+)\\s+(\\d+)(\\s+|$)")) { match ->
+            val prefix = match.groupValues[1]
+            val address = match.groupValues[2]
+            val port = match.groupValues[3]
+            val shouldRewriteAddress = shouldRewriteRemoteEndpoint(address, mediaConnectionInfo != null)
+            val isPortZero = port == "0"
+
+            val newAddress = if (shouldRewriteAddress) mediaIp else address
+            val newPort = when {
+                isPortZero && mediaPort != null -> mediaPort.toString()
+                isPortZero && mediaPort == null -> {
+                    hasUnresolvedPort0 = true
+                    port
+                }
+                shouldRewriteAddress && mediaPort != null -> mediaPort.toString()
+                else -> port
+            }
+
+            if (newAddress != address || newPort != port) {
+                modified = true
+                "$prefix$newAddress $newPort${match.groupValues[4]}"
+            } else {
+                match.value
+            }
+        }
+
+        return CandidateRewriteResult(resultSdp, modified, hasUnresolvedPort0)
+    }
+
+    fun parseMLineCount(sdp: String): Int =
+        sdp.lineSequence().count { it.startsWith("m=") }
+
+    fun parseMids(sdp: String): List<String> =
+        sdp.lineSequence()
+            .filter { it.startsWith("a=mid:") }
+            .map { it.removePrefix("a=mid:").trim() }
+            .filter { it.isNotEmpty() }
+            .toList()
 
     fun fixServerIp(sdp: String, serverIp: String): String =
         fixServerEndpoint(sdp, serverIp, mediaConnectionInfo = null)

@@ -579,6 +579,25 @@ internal fun signalingFailureDisposition(
     else -> SignalingFailureDisposition.RetryTransport
 }
 
+internal fun parseRemoteIceCandidate(payload: JsonObject): IceCandidate? {
+    val candidateStr = payload["candidate"]?.jsonPrimitive?.contentOrNull
+        ?: return null
+    val sdpMidStr = payload["sdpMid"]?.jsonPrimitive?.contentOrNull
+    val remoteMLineIndex = payload["sdpMLineIndex"]?.jsonPrimitive?.intOrNull
+    return IceCandidate(sdpMidStr, remoteMLineIndex ?: -1, candidateStr)
+}
+
+internal fun shouldAddRemoteIceCandidate(
+    candidate: IceCandidate,
+    hasPeerConnection: Boolean,
+    lastIceState: PeerConnection.IceConnectionState?,
+): Boolean {
+    return hasPeerConnection
+        && !candidate.sdp.isNullOrBlank()
+        && (candidate.sdpMid?.isNotBlank() == true || candidate.sdpMLineIndex >= 0)
+        && lastIceState != PeerConnection.IceConnectionState.CLOSED
+}
+
 private fun IceCandidate.diagnosticSummary(): String {
     val raw = sdp
     val protocol = Regex("""\s(udp|tcp)\s""", RegexOption.IGNORE_CASE)
@@ -786,13 +805,11 @@ class GfnSignalingClient(
                 }
             }
             payload["candidate"]?.jsonPrimitive?.contentOrNull != null -> {
-                val candidate = IceCandidate(
-                    payload["sdpMid"]?.jsonPrimitive?.contentOrNull,
-                    payload["sdpMLineIndex"]?.jsonPrimitive?.intOrNull ?: 0,
-                    payload["candidate"]?.jsonPrimitive?.contentOrNull.orEmpty(),
-                )
-                onEvent(SignalingEvent.Log("Received remote ICE candidate ${candidate.diagnosticSummary()}"))
-                onEvent(SignalingEvent.RemoteIce(candidate))
+                val remoteCandidate = parseRemoteIceCandidate(payload)
+                if (remoteCandidate != null) {
+                    onEvent(SignalingEvent.Log("Received remote ICE candidate ${remoteCandidate.diagnosticSummary()}"))
+                    onEvent(SignalingEvent.RemoteIce(remoteCandidate))
+                }
             }
         }
     }
@@ -5053,8 +5070,15 @@ class NativeStreamClient(
                 }
                 is SignalingEvent.Log -> recordStreamDiagnostic(event.message)
                 is SignalingEvent.RemoteIce -> {
-                    val added = peerConnection?.addIceCandidate(event.candidate)
-                    recordStreamDiagnostic("remote ICE add requested accepted=${added ?: false} pcReady=${peerConnection != null} ${event.candidate.diagnosticSummary()}")
+                    // Mitigasi defensif, bukan fix akar: validasi sebelum diteruskan ke native.
+                    val pc = peerConnection
+                    val c = event.candidate
+                    if (shouldAddRemoteIceCandidate(c, pc != null, lastIceState)) {
+                        val added = pc!!.addIceCandidate(c)
+                        recordStreamDiagnostic("remote ICE add requested accepted=$added pcReady=true ${c.diagnosticSummary()}")
+                    } else {
+                        recordStreamDiagnostic("remote ICE skipped invalid/closed pcReady=${pc != null} ${c.diagnosticSummary()}")
+                    }
                 }
                 is SignalingEvent.Offer -> handleOffer(event.sdp, generation)
             }

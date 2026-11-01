@@ -587,16 +587,56 @@ internal fun parseRemoteIceCandidate(payload: JsonObject): IceCandidate? {
     return IceCandidate(sdpMidStr, remoteMLineIndex ?: -1, candidateStr)
 }
 
+// Defensive mitigation: Enum hasil evaluasi guard remote ICE kandidat.
+internal enum class CandidateValidationResult(val reasonString: String) {
+    VALID("valid"),
+    PEER_CONNECTION_NULL("peer_connection_null"),
+    SDP_BLANK("sdp_blank"),
+    MISSING_MID_AND_INDEX("missing_mid_and_negative_index"),
+    ICE_CLOSED("ice_closed"),
+    INVALID_ADDRESS("invalid_address"),
+    INVALID_RADDR("invalid_raddr");
+
+    val isValid: Boolean get() = this == VALID
+}
+
+// Defensive mitigation: Evaluasi kepatuhan kandidat remote ICE terhadap struktur SDP, state WebRTC, dan validitas alamat IP numerik.
+internal fun evaluateRemoteIceCandidate(
+    candidate: IceCandidate,
+    hasPeerConnection: Boolean,
+    lastIceState: PeerConnection.IceConnectionState?,
+): CandidateValidationResult {
+    if (!hasPeerConnection) return CandidateValidationResult.PEER_CONNECTION_NULL
+    val sdp = candidate.sdp
+    if (sdp.isNullOrBlank()) return CandidateValidationResult.SDP_BLANK
+    if (candidate.sdpMid.isNullOrBlank() && candidate.sdpMLineIndex < 0) {
+        return CandidateValidationResult.MISSING_MID_AND_INDEX
+    }
+    if (lastIceState == PeerConnection.IceConnectionState.CLOSED) {
+        return CandidateValidationResult.ICE_CLOSED
+    }
+
+    // Defensive mitigation: validasi field connection-address kandidat
+    val candidateAddress = SdpTools.extractCandidateAddress(sdp)
+    if (candidateAddress == null || !SdpTools.isValidIpAddress(candidateAddress)) {
+        return CandidateValidationResult.INVALID_ADDRESS
+    }
+
+    // Defensive mitigation: bila atribut raddr ada, raddr WAJIB berupa IP valid
+    val raddr = SdpTools.extractCandidateRaddr(sdp)
+    if (raddr != null && !SdpTools.isValidIpAddress(raddr)) {
+        return CandidateValidationResult.INVALID_RADDR
+    }
+
+    return CandidateValidationResult.VALID
+}
+
+// Defensive mitigation: Wrapper Boolean mempertahankan signature lama demi backward-compatibility.
 internal fun shouldAddRemoteIceCandidate(
     candidate: IceCandidate,
     hasPeerConnection: Boolean,
     lastIceState: PeerConnection.IceConnectionState?,
-): Boolean {
-    return hasPeerConnection
-        && !candidate.sdp.isNullOrBlank()
-        && (candidate.sdpMid?.isNotBlank() == true || candidate.sdpMLineIndex >= 0)
-        && lastIceState != PeerConnection.IceConnectionState.CLOSED
-}
+): Boolean = evaluateRemoteIceCandidate(candidate, hasPeerConnection, lastIceState).isValid
 
 internal fun IceCandidate.diagnosticSummary(): String {
     val raw = sdp
@@ -5079,7 +5119,7 @@ class NativeStreamClient(
                 }
                 is SignalingEvent.Log -> recordStreamDiagnostic(event.message)
                 is SignalingEvent.RemoteIce -> {
-                    // Mitigasi defensif, bukan fix akar: log RAW -> rewrite trickle -> guard -> append sinkron (tanpa fsync) -> add.
+                    // Defensive mitigation: log RAW -> rewrite trickle -> guard (struktural + IP) -> append sinkron (tanpa fsync) -> add.
                     val rawCandidate = event.candidate
                     val currentSession = session
                     val rewriteResult = SdpTools.fixCandidateEndpointWithReport(
@@ -5094,14 +5134,9 @@ class NativeStreamClient(
                     }
 
                     val pc = peerConnection
-                    val mayAdd = shouldAddRemoteIceCandidate(candidate, pc != null, lastIceState)
-                    val reason = when {
-                        pc == null -> "peer_connection_null"
-                        candidate.sdp.isNullOrBlank() -> "sdp_blank"
-                        candidate.sdpMid.isNullOrBlank() && candidate.sdpMLineIndex < 0 -> "missing_mid_and_negative_index"
-                        lastIceState == PeerConnection.IceConnectionState.CLOSED -> "ice_closed"
-                        else -> "valid"
-                    }
+                    val validation = evaluateRemoteIceCandidate(candidate, pc != null, lastIceState)
+                    val mayAdd = validation.isValid
+                    val reason = validation.reasonString
 
                     val dtConnectedMs = iceConnectedAtMs?.let { SystemClock.elapsedRealtime() - it } ?: -1L
 
@@ -5127,7 +5162,7 @@ class NativeStreamClient(
                         recordStreamDiagnostic("remote ICE add requested accepted=$added pcReady=true ${candidate.diagnosticSummary()}$rewriteTag$port0Tag")
                     } else {
                         val port0Tag = if (rewriteResult.unresolvedPort0) " [unresolved_port_0]" else ""
-                        recordStreamDiagnostic("remote ICE skipped invalid/closed pcReady=${pc != null} ${candidate.diagnosticSummary()}$port0Tag")
+                        recordStreamDiagnostic("remote ICE skipped reason=$reason pcReady=${pc != null} ${candidate.diagnosticSummary()}$port0Tag")
                     }
                 }
                 is SignalingEvent.Offer -> handleOffer(event.sdp, generation)
@@ -7166,6 +7201,69 @@ object SdpTools {
             .map { it.removePrefix("a=mid:").trim() }
             .filter { it.isNotEmpty() }
             .toList()
+
+    // Defensive mitigation: Ekstraksi connection-address dari baris kandidat SDP
+    fun extractCandidateAddress(sdp: String): String? =
+        Regex("""candidate:\S+\s+\d+\s+\S+\s+\d+\s+([^\s]+)\s+(\d+)""")
+            .find(sdp)
+            ?.groupValues
+            ?.getOrNull(1)
+
+    // Defensive mitigation: Ekstraksi atribut raddr dari baris kandidat SDP
+    fun extractCandidateRaddr(sdp: String): String? =
+        Regex("""\braddr\s+([^\s]+)""", RegexOption.IGNORE_CASE)
+            .find(sdp)
+            ?.groupValues
+            ?.getOrNull(1)
+
+    // Defensive mitigation: Validasi sintaksis alamat IP numerik (IPv4 atau IPv6) tanpa DNS lookup
+    fun isValidIpAddress(address: String): Boolean {
+        val clean = address.trim().removeSurrounding("[", "]").substringBefore('%')
+        return isValidIpv4(clean) || isValidIpv6(clean)
+    }
+
+    private fun isValidIpv4(address: String): Boolean {
+        val parts = address.split('.')
+        if (parts.size != 4) return false
+        for (part in parts) {
+            if (part.isEmpty() || part.length > 3) return false
+            val octet = part.toIntOrNull() ?: return false
+            if (octet !in 0..255) return false
+            if (part.length > 1 && part.startsWith('0')) return false
+        }
+        return true
+    }
+
+    // Defensive mitigation: Parser IPv6 numerik murni tanpa DNS lookup.
+    // Catatan limitasi eksplisit (Nanally review): format IPv6-embedded-IPv4 (misal ::ffff:192.0.2.1)
+    // sengaja tidak didukung oleh parser ini karena kandidat WebRTC ICE dari backend GFN
+    // hanya menggunakan literal IPv4 desimal murni atau IPv6 heksadesimal murni.
+    private fun isValidIpv6(address: String): Boolean {
+        if (!address.contains(':')) return false
+        val parts = address.split("::")
+        if (parts.size > 2) return false
+        val isDoubleColon = parts.size == 2
+
+        fun validGroup(g: String): Boolean {
+            if (g.isEmpty()) return true
+            val groups = g.split(':')
+            for (x in groups) {
+                if (x.isEmpty() || x.length > 4) return false
+                if (x.any { !((it in '0'..'9') || (it in 'a'..'f') || (it in 'A'..'F')) }) return false
+            }
+            return true
+        }
+
+        return if (!isDoubleColon) {
+            val groups = address.split(':')
+            groups.size == 8 && validGroup(address)
+        } else {
+            val left = if (parts[0].isNotEmpty()) parts[0].split(':') else emptyList()
+            val right = if (parts[1].isNotEmpty()) parts[1].split(':') else emptyList()
+            if (left.size + right.size > 7) return false
+            validGroup(parts[0]) && validGroup(parts[1])
+        }
+    }
 
     fun fixServerIp(sdp: String, serverIp: String): String =
         fixServerEndpoint(sdp, serverIp, mediaConnectionInfo = null)

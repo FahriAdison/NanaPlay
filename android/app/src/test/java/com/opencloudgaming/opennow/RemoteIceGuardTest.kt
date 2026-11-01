@@ -99,4 +99,67 @@ class RemoteIceGuardTest {
         val payload = buildJsonObject { }
         assertNull(parseRemoteIceCandidate(payload))
     }
+
+    // Defensive mitigation: Uji kandidat srflx dengan raddr "invalid" (pemicu SIGABRT di India NP-BOM-01)
+    @Test
+    fun raddr_literalInvalid_skippedWithInvalidRaddr() {
+        val sdp = "candidate:1467150205 1 udp 1677721855 1.1.1.1 5004 typ srflx raddr invalid rport 0"
+        val c = IceCandidate("0", 0, sdp)
+        assertEquals(CandidateValidationResult.INVALID_RADDR, evaluateRemoteIceCandidate(c, true, null))
+        assertFalse(shouldAddRemoteIceCandidate(c, true, null))
+    }
+
+    // Defensive mitigation: Uji kandidat srflx dengan raddr IPv4 valid
+    @Test
+    fun raddr_validIpv4_added() {
+        val sdp = "candidate:1467150205 1 udp 1677721855 1.1.1.1 5004 typ srflx raddr 10.0.0.1 rport 5000"
+        val c = IceCandidate("0", 0, sdp)
+        assertEquals(CandidateValidationResult.VALID, evaluateRemoteIceCandidate(c, true, null))
+        assertTrue(shouldAddRemoteIceCandidate(c, true, null))
+    }
+
+    // Defensive mitigation: Uji kandidat srflx dengan raddr 0.0.0.0 (placeholder IP valid, wajib diterima)
+    @Test
+    fun raddr_placeholderAnyLocal_added() {
+        val sdp = "candidate:1467150205 1 udp 1677721855 1.1.1.1 5004 typ srflx raddr 0.0.0.0 rport 0"
+        val c = IceCandidate("0", 0, sdp)
+        assertEquals(CandidateValidationResult.VALID, evaluateRemoteIceCandidate(c, true, null))
+        assertTrue(shouldAddRemoteIceCandidate(c, true, null))
+    }
+
+    // Defensive mitigation: Uji kandidat srflx dengan raddr IPv6 valid
+    @Test
+    fun raddr_validIpv6_added() {
+        val sdp = "candidate:1467150205 1 udp 1677721855 1.1.1.1 5004 typ srflx raddr 2001:db8::2 rport 5000"
+        val c = IceCandidate("0", 0, sdp)
+        assertEquals(CandidateValidationResult.VALID, evaluateRemoteIceCandidate(c, true, null))
+        assertTrue(shouldAddRemoteIceCandidate(c, true, null))
+    }
+
+    // Defensive mitigation: Uji kandidat dengan connection-address invalid
+    @Test
+    fun connectionAddress_invalid_skippedWithInvalidAddress() {
+        val sdp = "candidate:1467150205 1 udp 1677721855 invalid 5004 typ host"
+        val c = IceCandidate("0", 0, sdp)
+        assertEquals(CandidateValidationResult.INVALID_ADDRESS, evaluateRemoteIceCandidate(c, true, null))
+        assertFalse(shouldAddRemoteIceCandidate(c, true, null))
+    }
+
+    // Defensive mitigation: Uji kandidat host dengan connection-address IPv6 valid
+    @Test
+    fun connectionAddress_validIpv6_added() {
+        val sdp = "candidate:1467150205 1 udp 1677721855 2001:db8::1 5004 typ host"
+        val c = IceCandidate("0", 0, sdp)
+        assertEquals(CandidateValidationResult.VALID, evaluateRemoteIceCandidate(c, true, null))
+        assertTrue(shouldAddRemoteIceCandidate(c, true, null))
+    }
+
+    // Defensive mitigation: Uji kandidat host tanpa raddr
+    @Test
+    fun candidateWithoutRaddr_hostCandidate_added() {
+        val sdp = "candidate:1 1 UDP 1 1.1.1.1 1 typ host"
+        val c = IceCandidate("0", 0, sdp)
+        assertEquals(CandidateValidationResult.VALID, evaluateRemoteIceCandidate(c, true, null))
+        assertTrue(shouldAddRemoteIceCandidate(c, true, null))
+    }
 }

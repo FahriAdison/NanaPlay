@@ -20,7 +20,7 @@ class InitialStreamConnectionStatusTest {
         assertEquals("Retrying connection", retry.phase)
         assertEquals("Connecting again", retry.title)
         assertEquals(
-            "The initial connection did not finish, so OpenNOW is retrying it.",
+            "The initial connection did not finish, so NanaPlay is retrying it.",
             retry.detail,
         )
     }

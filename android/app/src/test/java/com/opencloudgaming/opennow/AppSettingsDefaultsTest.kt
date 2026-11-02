@@ -34,7 +34,7 @@ class AppSettingsDefaultsTest {
         assertTrue(settings.analyticsOptOut)
         assertFalse(settings.analyticsSharingEnabled)
         assertEquals(TouchJoystickMode.Fixed, settings.androidTouch.joystickMode)
-        assertEquals(0f, settings.androidTouch.joystickDeadZone, 0.0001f)
+        assertEquals(0.08f, settings.androidTouch.joystickDeadZone, 0.0001f)
     }
 
     @Test

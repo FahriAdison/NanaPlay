@@ -184,7 +184,7 @@ class StreamResolutionTest {
         assertFalse(status?.let(::activeStreamModeDisplayChanges).orEmpty().any { it.label == "Resolution" })
         val reason = "AV1 was requested but WebRTC did not negotiate it; restarting with safe H264 profile"
         assertEquals(
-            "WebRTC could not negotiate the requested AV1 codec for this connection, so OpenNOW retried the local video transport with H264.",
+            "WebRTC could not negotiate the requested AV1 codec for this connection, so NanaPlay retried the local video transport with H264.",
             status?.let { activeStreamModeCauseAssessment(it, reason).summary },
         )
         val report = status?.let { activeStreamModeDeveloperReport(it, reason) }

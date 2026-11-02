@@ -33,6 +33,7 @@ internal object RemoteIceLog {
         dtConnectedMs: Long,
         unresolvedPort0: Boolean,
         sanitizedRaddr: Boolean = false,
+        midNormalized: Boolean = false,
     ) {
         runCatching {
             val file = File(context.filesDir, LOG_FILE_NAME)
@@ -48,8 +49,11 @@ internal object RemoteIceLog {
                 append("mLines=").append(remoteMLineCount).append(" ")
                 append("mids=").append(remoteMids.joinToString(",", "[", "]")).append(" ")
                 append("dtConnMs=").append(dtConnectedMs).append(" ")
-                if (unresolvedPort0) append("flag=[unresolved_port_0] ")
-                if (sanitizedRaddr) append("flag=[sanitized_raddr] ")
+                val flags = mutableListOf<String>()
+                if (unresolvedPort0) flags += "unresolved_port_0"
+                if (sanitizedRaddr) flags += "sanitized_raddr"
+                if (midNormalized) flags += "mid_normalized"
+                if (flags.isNotEmpty()) append("flag=[").append(flags.joinToString(",")).append("] ")
                 append(postCandidate.diagnosticSummary()).append(" ")
                 append("rawPre=\"").append(rawCandidate.sdp.take(120)).append("\"")
                 appendLine()

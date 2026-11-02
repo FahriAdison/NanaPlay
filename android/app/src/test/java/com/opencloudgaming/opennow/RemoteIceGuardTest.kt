@@ -6,7 +6,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
+import java.lang.reflect.InvocationTargetException
 import org.webrtc.IceCandidate
 import org.webrtc.PeerConnection
 
@@ -234,5 +236,64 @@ class RemoteIceGuardTest {
         val candidate = IceCandidate("0", 0, result.sanitizedSdp)
         assertEquals(CandidateValidationResult.VALID, evaluateRemoteIceCandidate(candidate, true, null))
         assertTrue(shouldAddRemoteIceCandidate(candidate, true, null))
+    }
+
+    // NanaPlay 1.0.100: Uji sdpMid = "" dengan index 0 lolos evaluasi guard sebagai VALID dan shouldAdd = true
+    @Test
+    fun midEmptyString_indexZero_evaluatesValidAndShouldAdd() {
+        val candidate = IceCandidate("", 0, "candidate:1 1 UDP 1 1.1.1.1 1 typ host")
+        assertEquals(CandidateValidationResult.VALID, evaluateRemoteIceCandidate(candidate, true, null))
+        assertTrue(shouldAddRemoteIceCandidate(candidate, true, null))
+    }
+
+    // NanaPlay 1.0.100: Uji parseRemoteIceCandidate menormalisasi sdpMid yang absen menjadi ""
+    @Test
+    fun parseRemoteIceCandidate_omittedMid_normalizedToEmptyString() {
+        val payload = buildJsonObject {
+            put("candidate", "candidate:1 1 UDP 1 1.1.1.1 1 typ host")
+            put("sdpMLineIndex", 0)
+        }
+        val parsed = parseRemoteIceCandidate(payload)
+        requireNotNull(parsed)
+        assertEquals("", parsed.sdpMid)
+        assertEquals(0, parsed.sdpMLineIndex)
+        assertEquals(CandidateValidationResult.VALID, evaluateRemoteIceCandidate(parsed, true, null))
+        assertTrue(shouldAddRemoteIceCandidate(parsed, true, null))
+    }
+
+    // NanaPlay 1.0.100: Uji parseRemoteIceCandidate menormalisasi sdpMid null eksplisit menjadi ""
+    @Test
+    fun parseRemoteIceCandidate_explicitNullMid_normalizedToEmptyString() {
+        val payload = buildJsonObject {
+            put("candidate", "candidate:1 1 UDP 1 1.1.1.1 1 typ host")
+            put("sdpMid", null as String?)
+            put("sdpMLineIndex", 0)
+        }
+        val parsed = parseRemoteIceCandidate(payload)
+        requireNotNull(parsed)
+        assertEquals("", parsed.sdpMid)
+        assertEquals(0, parsed.sdpMLineIndex)
+        assertEquals(CandidateValidationResult.VALID, evaluateRemoteIceCandidate(parsed, true, null))
+        assertTrue(shouldAddRemoteIceCandidate(parsed, true, null))
+    }
+
+    // NanaPlay 1.0.100: Uji reflektif membuktikan akar crash SIGABRT WebRTC native (getStringBytes(null) -> NPE vs getStringBytes("") -> ByteArray(0))
+    @Test
+    fun jniHelper_getStringBytes_emptyReturnsEmptyByteArray_nullThrowsNpe() {
+        val jniHelperClass = Class.forName("org.webrtc.JniHelper")
+        val method = jniHelperClass.getDeclaredMethod("getStringBytes", String::class.java)
+        method.isAccessible = true
+
+        // String kosong -> ByteArray kosong (0 bytes), aman diproses oleh JavaToNativeString tanpa trigger CHECK_EXCEPTION
+        val emptyResult = method.invoke(null, "") as ByteArray
+        assertEquals(0, emptyResult.size)
+
+        // String null -> Melempar NullPointerException yang dibungkus InvocationTargetException (pemicu SIGABRT di libjingle_peerconnection_so)
+        try {
+            method.invoke(null, null as String?)
+            fail("Expected InvocationTargetException wrapping NullPointerException for null sdpMid")
+        } catch (e: InvocationTargetException) {
+            assertTrue("Underlying exception must be NullPointerException", e.targetException is NullPointerException)
+        }
     }
 }

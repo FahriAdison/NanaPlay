@@ -582,7 +582,7 @@ internal fun signalingFailureDisposition(
 internal fun parseRemoteIceCandidate(payload: JsonObject): IceCandidate? {
     val candidateStr = payload["candidate"]?.jsonPrimitive?.contentOrNull
         ?: return null
-    val sdpMidStr = payload["sdpMid"]?.jsonPrimitive?.contentOrNull
+    val sdpMidStr = payload["sdpMid"]?.jsonPrimitive?.contentOrNull ?: ""
     val remoteMLineIndex = payload["sdpMLineIndex"]?.jsonPrimitive?.intOrNull
     return IceCandidate(sdpMidStr, remoteMLineIndex ?: -1, candidateStr)
 }
@@ -5121,6 +5121,13 @@ class NativeStreamClient(
                 is SignalingEvent.RemoteIce -> {
                     // Defensive mitigation: log RAW -> rewrite trickle -> sanitasi raddr -> guard (struktural + IP) -> append sinkron (tanpa fsync) -> add.
                     val rawCandidate = event.candidate
+                    val safeMid = rawCandidate.sdpMid ?: ""
+                    val midNormalized = rawCandidate.sdpMid.isNullOrEmpty()
+                    val safeRawCandidate = if (rawCandidate.sdpMid == null) {
+                        IceCandidate(safeMid, rawCandidate.sdpMLineIndex, rawCandidate.sdp)
+                    } else {
+                        rawCandidate
+                    }
                     val currentSession = session
                     val rewriteResult = SdpTools.fixCandidateEndpointWithReport(
                         rawCandidate.sdp,
@@ -5141,8 +5148,8 @@ class NativeStreamClient(
                         endpointFixedSdp
                     }
 
-                    val candidate = if (rewriteResult.isRewritten || sanitizeResult.isSanitized) {
-                        IceCandidate(rawCandidate.sdpMid, rawCandidate.sdpMLineIndex, finalSdp)
+                    val candidate = if (rawCandidate.sdpMid == null || rewriteResult.isRewritten || sanitizeResult.isSanitized) {
+                        IceCandidate(safeMid, rawCandidate.sdpMLineIndex, finalSdp)
                     } else {
                         rawCandidate
                     }
@@ -5159,7 +5166,7 @@ class NativeStreamClient(
                     // Menghilangkan race condition dengan SIGABRT tanpa membebani Main thread dengan fsync disk I/O.
                     RemoteIceLog.append(
                         context = appContext,
-                        rawCandidate = rawCandidate,
+                        rawCandidate = safeRawCandidate,
                         postCandidate = candidate,
                         action = if (mayAdd) "ACCEPTED" else "SKIPPED",
                         reason = reason,
@@ -5169,17 +5176,19 @@ class NativeStreamClient(
                         dtConnectedMs = dtConnectedMs,
                         unresolvedPort0 = rewriteResult.unresolvedPort0,
                         sanitizedRaddr = sanitizedRaddr,
+                        midNormalized = midNormalized,
                     )
 
+                    val midTag = if (midNormalized) " [mid_normalized]" else ""
                     if (mayAdd) {
                         val added = pc!!.addIceCandidate(candidate)
                         val rewriteTag = if (rewriteResult.isRewritten) " [rewritten]" else ""
                         val sanitizeTag = if (sanitizedRaddr) " [sanitized_raddr]" else ""
                         val port0Tag = if (rewriteResult.unresolvedPort0) " [unresolved_port_0]" else ""
-                        recordStreamDiagnostic("remote ICE add requested accepted=$added pcReady=true ${candidate.diagnosticSummary()}$rewriteTag$sanitizeTag$port0Tag")
+                        recordStreamDiagnostic("remote ICE add requested accepted=$added pcReady=true ${candidate.diagnosticSummary()}$rewriteTag$sanitizeTag$port0Tag$midTag")
                     } else {
                         val port0Tag = if (rewriteResult.unresolvedPort0) " [unresolved_port_0]" else ""
-                        recordStreamDiagnostic("remote ICE skipped reason=$reason pcReady=${pc != null} ${candidate.diagnosticSummary()}$port0Tag")
+                        recordStreamDiagnostic("remote ICE skipped reason=$reason pcReady=${pc != null} ${candidate.diagnosticSummary()}$port0Tag$midTag")
                     }
                 }
                 is SignalingEvent.Offer -> handleOffer(event.sdp, generation)

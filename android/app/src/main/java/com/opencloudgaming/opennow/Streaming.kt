@@ -5119,7 +5119,7 @@ class NativeStreamClient(
                 }
                 is SignalingEvent.Log -> recordStreamDiagnostic(event.message)
                 is SignalingEvent.RemoteIce -> {
-                    // Defensive mitigation: log RAW -> rewrite trickle -> guard (struktural + IP) -> append sinkron (tanpa fsync) -> add.
+                    // Defensive mitigation: log RAW -> rewrite trickle -> sanitasi raddr -> guard (struktural + IP) -> append sinkron (tanpa fsync) -> add.
                     val rawCandidate = event.candidate
                     val currentSession = session
                     val rewriteResult = SdpTools.fixCandidateEndpointWithReport(
@@ -5127,8 +5127,22 @@ class NativeStreamClient(
                         currentSession?.serverIp.orEmpty(),
                         currentSession?.mediaConnectionInfo,
                     )
-                    val candidate = if (rewriteResult.isRewritten) {
-                        IceCandidate(rawCandidate.sdpMid, rawCandidate.sdpMLineIndex, rewriteResult.rewrittenSdp)
+                    val endpointFixedSdp = if (rewriteResult.isRewritten) {
+                        rewriteResult.rewrittenSdp
+                    } else {
+                        rawCandidate.sdp
+                    }
+
+                    // Defensive mitigation: sanitasi raddr non-IP menjadi 0.0.0.0
+                    val sanitizeResult = SdpTools.sanitizeCandidateRaddr(endpointFixedSdp)
+                    val finalSdp = if (sanitizeResult.isSanitized) {
+                        sanitizeResult.sanitizedSdp
+                    } else {
+                        endpointFixedSdp
+                    }
+
+                    val candidate = if (rewriteResult.isRewritten || sanitizeResult.isSanitized) {
+                        IceCandidate(rawCandidate.sdpMid, rawCandidate.sdpMLineIndex, finalSdp)
                     } else {
                         rawCandidate
                     }
@@ -5139,6 +5153,7 @@ class NativeStreamClient(
                     val reason = validation.reasonString
 
                     val dtConnectedMs = iceConnectedAtMs?.let { SystemClock.elapsedRealtime() - it } ?: -1L
+                    val sanitizedRaddr = sanitizeResult.isSanitized && validation != CandidateValidationResult.INVALID_ADDRESS
 
                     // SINKRON ke OS page cache SEBELUM memanggil JNI addIceCandidate.
                     // Menghilangkan race condition dengan SIGABRT tanpa membebani Main thread dengan fsync disk I/O.
@@ -5153,13 +5168,15 @@ class NativeStreamClient(
                         remoteMids = remoteMids,
                         dtConnectedMs = dtConnectedMs,
                         unresolvedPort0 = rewriteResult.unresolvedPort0,
+                        sanitizedRaddr = sanitizedRaddr,
                     )
 
                     if (mayAdd) {
                         val added = pc!!.addIceCandidate(candidate)
                         val rewriteTag = if (rewriteResult.isRewritten) " [rewritten]" else ""
+                        val sanitizeTag = if (sanitizedRaddr) " [sanitized_raddr]" else ""
                         val port0Tag = if (rewriteResult.unresolvedPort0) " [unresolved_port_0]" else ""
-                        recordStreamDiagnostic("remote ICE add requested accepted=$added pcReady=true ${candidate.diagnosticSummary()}$rewriteTag$port0Tag")
+                        recordStreamDiagnostic("remote ICE add requested accepted=$added pcReady=true ${candidate.diagnosticSummary()}$rewriteTag$sanitizeTag$port0Tag")
                     } else {
                         val port0Tag = if (rewriteResult.unresolvedPort0) " [unresolved_port_0]" else ""
                         recordStreamDiagnostic("remote ICE skipped reason=$reason pcReady=${pc != null} ${candidate.diagnosticSummary()}$port0Tag")
@@ -7152,6 +7169,12 @@ object SdpTools {
         val unresolvedPort0: Boolean,
     )
 
+    // Defensive mitigation: Data class hasil sanitasi atribut raddr kandidat ICE
+    data class CandidateSanitizeResult(
+        val sanitizedSdp: String,
+        val isSanitized: Boolean,
+    )
+
     fun fixCandidateEndpointWithReport(
         candidateSdp: String,
         serverIp: String,
@@ -7215,6 +7238,24 @@ object SdpTools {
             .find(sdp)
             ?.groupValues
             ?.getOrNull(1)
+
+    // Defensive mitigation: sanitasi raddr non-IP menjadi 0.0.0.0
+    // Penanganan raddr IPv6 berbracket: bracket dikupas oleh isValidIpAddress
+    // sebelum validasi, dan string asli dipertahankan apa adanya (sanitized = false).
+    fun sanitizeCandidateRaddr(candidateSdp: String): CandidateSanitizeResult {
+        val raddr = extractCandidateRaddr(candidateSdp)
+            ?: return CandidateSanitizeResult(candidateSdp, isSanitized = false)
+
+        if (isValidIpAddress(raddr)) {
+            return CandidateSanitizeResult(candidateSdp, isSanitized = false)
+        }
+
+        val sanitizedSdp = candidateSdp.replaceFirst(
+            Regex("""\braddr\s+[^\s]+""", RegexOption.IGNORE_CASE),
+            "raddr 0.0.0.0"
+        )
+        return CandidateSanitizeResult(sanitizedSdp, isSanitized = true)
+    }
 
     // Defensive mitigation: Validasi sintaksis alamat IP numerik (IPv4 atau IPv6) tanpa DNS lookup
     fun isValidIpAddress(address: String): Boolean {

@@ -162,4 +162,77 @@ class RemoteIceGuardTest {
         assertEquals(CandidateValidationResult.VALID, evaluateRemoteIceCandidate(c, true, null))
         assertTrue(shouldAddRemoteIceCandidate(c, true, null))
     }
+
+    // Defensive mitigation: Uji raddr "invalid" disanitasi menjadi "0.0.0.0" dan lolos guard sebagai VALID
+    @Test
+    fun sanitizeRaddr_invalidRaddr_sanitizedToZeroIpAndPassesGuard() {
+        val rawSdp = "candidate:1467150205 1 udp 1677721855 1.1.1.1 5004 typ srflx raddr invalid rport 0"
+        val result = SdpTools.sanitizeCandidateRaddr(rawSdp)
+        assertTrue(result.isSanitized)
+        assertEquals("candidate:1467150205 1 udp 1677721855 1.1.1.1 5004 typ srflx raddr 0.0.0.0 rport 0", result.sanitizedSdp)
+        val candidate = IceCandidate("0", 0, result.sanitizedSdp)
+        assertEquals(CandidateValidationResult.VALID, evaluateRemoteIceCandidate(candidate, true, null))
+        assertTrue(shouldAddRemoteIceCandidate(candidate, true, null))
+    }
+
+    // Defensive mitigation: Uji raddr IPv4 valid tidak diubah (sanitized = false)
+    @Test
+    fun sanitizeRaddr_validIpv4_unchanged() {
+        val rawSdp = "candidate:1467150205 1 udp 1677721855 1.1.1.1 5004 typ srflx raddr 10.0.0.1 rport 5000"
+        val result = SdpTools.sanitizeCandidateRaddr(rawSdp)
+        assertFalse(result.isSanitized)
+        assertEquals(rawSdp, result.sanitizedSdp)
+        val candidate = IceCandidate("0", 0, result.sanitizedSdp)
+        assertEquals(CandidateValidationResult.VALID, evaluateRemoteIceCandidate(candidate, true, null))
+        assertTrue(shouldAddRemoteIceCandidate(candidate, true, null))
+    }
+
+    // Defensive mitigation: Uji raddr IPv6 valid tidak diubah (sanitized = false)
+    @Test
+    fun sanitizeRaddr_validIpv6_unchanged() {
+        val rawSdp = "candidate:1467150205 1 udp 1677721855 1.1.1.1 5004 typ srflx raddr 2001:db8::2 rport 5000"
+        val result = SdpTools.sanitizeCandidateRaddr(rawSdp)
+        assertFalse(result.isSanitized)
+        assertEquals(rawSdp, result.sanitizedSdp)
+        val candidate = IceCandidate("0", 0, result.sanitizedSdp)
+        assertEquals(CandidateValidationResult.VALID, evaluateRemoteIceCandidate(candidate, true, null))
+        assertTrue(shouldAddRemoteIceCandidate(candidate, true, null))
+    }
+
+    // Defensive mitigation: Uji kandidat host tanpa raddr tidak diubah (sanitized = false)
+    @Test
+    fun sanitizeRaddr_hostCandidateWithoutRaddr_unchanged() {
+        val rawSdp = "candidate:1 1 UDP 1 1.1.1.1 1 typ host"
+        val result = SdpTools.sanitizeCandidateRaddr(rawSdp)
+        assertFalse(result.isSanitized)
+        assertEquals(rawSdp, result.sanitizedSdp)
+        val candidate = IceCandidate("0", 0, result.sanitizedSdp)
+        assertEquals(CandidateValidationResult.VALID, evaluateRemoteIceCandidate(candidate, true, null))
+        assertTrue(shouldAddRemoteIceCandidate(candidate, true, null))
+    }
+
+    // Defensive mitigation: Uji alamat utama invalid tetap INVALID_ADDRESS meski raddr disanitasi
+    @Test
+    fun sanitizeRaddr_invalidPrimaryAddress_remainsInvalidAddress() {
+        val rawSdp = "candidate:1467150205 1 udp 1677721855 invalid 5004 typ srflx raddr invalid rport 0"
+        val result = SdpTools.sanitizeCandidateRaddr(rawSdp)
+        assertTrue(result.isSanitized)
+        assertEquals("candidate:1467150205 1 udp 1677721855 invalid 5004 typ srflx raddr 0.0.0.0 rport 0", result.sanitizedSdp)
+        val candidate = IceCandidate("0", 0, result.sanitizedSdp)
+        assertEquals(CandidateValidationResult.INVALID_ADDRESS, evaluateRemoteIceCandidate(candidate, true, null))
+        assertFalse(shouldAddRemoteIceCandidate(candidate, true, null))
+    }
+
+    // Defensive mitigation: Uji penanganan raddr IPv6 berbracket dikupas oleh isValidIpAddress untuk validasi,
+    // dan nilai raddr berbracket dipertahankan apa adanya pada string SDP tanpa modifikasi (sanitized = false)
+    @Test
+    fun sanitizeRaddr_bracketedIpv6_preservedUnchanged() {
+        val rawSdp = "candidate:1467150205 1 udp 1677721855 1.1.1.1 5004 typ srflx raddr [2001:db8::1] rport 5000"
+        val result = SdpTools.sanitizeCandidateRaddr(rawSdp)
+        assertFalse(result.isSanitized)
+        assertEquals(rawSdp, result.sanitizedSdp)
+        val candidate = IceCandidate("0", 0, result.sanitizedSdp)
+        assertEquals(CandidateValidationResult.VALID, evaluateRemoteIceCandidate(candidate, true, null))
+        assertTrue(shouldAddRemoteIceCandidate(candidate, true, null))
+    }
 }

@@ -153,6 +153,10 @@ internal object GfnAppLaunchMode {
     const val GAMEPAD_FRIENDLY = 2
     const val TOUCH_FRIENDLY = 3
 }
+
+internal fun shouldUseBrowserIdentity(preferBrowserMode: Boolean, appLaunchMode: Int): Boolean =
+    preferBrowserMode || appLaunchMode == GfnAppLaunchMode.TOUCH_FRIENDLY
+
 private const val LIBRARY_WITH_TIME_QUERY_HASH = "039e8c0d553972975485fee56e59f2549d2fdb518e247a42ab5022056a74406f"
 private const val DEFAULT_LOCALE = "en_US"
 private const val DEFAULT_CATALOG_FETCH_COUNT = 120
@@ -458,6 +462,7 @@ internal fun buildMinimalClaimRequestBody(
 ): JsonObject {
     val profile = settings?.requestProfile()
     val browserIdentity = CloudMatchBrowserIdentity
+    val useBrowserIdentity = shouldUseBrowserIdentity(preferBrowserMode, appLaunchMode)
     return buildJsonObject {
         put("action", 2)
         put("data", "RESUME")
@@ -470,7 +475,7 @@ internal fun buildMinimalClaimRequestBody(
             put("clientVersion", "30.0")
             put("deviceHashId", deviceId)
             put("internalTitle", JsonNull)
-            put("clientPlatformName", if (preferBrowserMode) browserIdentity.PLATFORM_NAME else "android")
+            put("clientPlatformName", if (useBrowserIdentity) browserIdentity.PLATFORM_NAME else "android")
             if (settings != null && profile != null) {
                 putJsonArray("clientRequestMonitorSettings") {
                     add(
@@ -479,7 +484,7 @@ internal fun buildMinimalClaimRequestBody(
                             fps = settings.fps,
                             // Same rule as session creation: the desktop descriptor buys the full
                             // resolution matrix, a browser claim asks for the mobile allocation.
-                            desktopMonitorDescriptor = !preferBrowserMode,
+                            desktopMonitorDescriptor = !useBrowserIdentity,
                         ),
                     )
                 }
@@ -507,7 +512,7 @@ internal fun buildMinimalClaimRequestBody(
             put("partnerCustomData", "")
             put(
                 "enablePersistingInGameSettings",
-                if (preferBrowserMode) browserIdentity.PERSIST_GAME_SETTINGS else CloudMatchDesktopIdentity.PERSIST_GAME_SETTINGS,
+                if (useBrowserIdentity) browserIdentity.PERSIST_GAME_SETTINGS else CloudMatchDesktopIdentity.PERSIST_GAME_SETTINGS,
             )
             put("secureRTSPSupported", false)
             put("userAge", 26)
@@ -745,14 +750,15 @@ internal fun cloudMatchHeaders(
 ): Headers =
     Headers.Builder().apply {
         val touchFriendly = appLaunchMode == GfnAppLaunchMode.TOUCH_FRIENDLY
+        val useBrowserIdentity = shouldUseBrowserIdentity(preferBrowserMode, appLaunchMode)
         val userAgentString = when {
-            preferBrowserMode -> GFN_BROWSER_USER_AGENT
+            useBrowserIdentity -> GFN_BROWSER_USER_AGENT
             isAndroidTv -> GFN_ANDROID_TV_USER_AGENT
             touchFriendly -> GFN_ANDROID_TOUCH_USER_AGENT
             else -> GFN_USER_AGENT
         }
         val deviceType = when {
-            preferBrowserMode -> CloudMatchBrowserIdentity.DEVICE_TYPE
+            useBrowserIdentity -> CloudMatchBrowserIdentity.DEVICE_TYPE
             isAndroidTv -> "DESKTOP"
             touchFriendly -> "TABLET"
             else -> "PHONE"
@@ -762,8 +768,8 @@ internal fun cloudMatchHeaders(
         add("Content-Type", "application/json")
         add("nv-browser-type", "CHROME")
         add("nv-client-id", clientId)
-        add("nv-client-streamer", if (preferBrowserMode) CloudMatchBrowserIdentity.STREAMER else CloudMatchDesktopIdentity.STREAMER)
-        add("nv-client-type", if (preferBrowserMode) CloudMatchBrowserIdentity.CLIENT_TYPE else CloudMatchDesktopIdentity.CLIENT_TYPE)
+        add("nv-client-streamer", if (useBrowserIdentity) CloudMatchBrowserIdentity.STREAMER else CloudMatchDesktopIdentity.STREAMER)
+        add("nv-client-type", if (useBrowserIdentity) CloudMatchBrowserIdentity.CLIENT_TYPE else CloudMatchDesktopIdentity.CLIENT_TYPE)
         add("nv-client-version", GFN_CLIENT_VERSION)
         add("nv-device-make", "UNKNOWN")
         add("nv-device-model", "UNKNOWN")
@@ -2851,66 +2857,69 @@ class GfnSessionRepository(
         }
     }
 
-    private fun buildSessionRequestBody(
-        appId: String,
-        internalTitle: String,
-        settings: StreamSettings,
-        accountLinked: Boolean,
-        deviceId: String,
-        physicalDisplayResolution: Pair<Int, Int>?,
-        appLaunchMode: Int,
-        /**
-         * Website client mode (upstream 2.1.1). ON identifies the session as a browser client and
-         * asks for the plain mobile allocation; OFF (the default) produces the exact body this
-         * builder produced before the port.
-         */
-        preferBrowserMode: Boolean = false,
-    ): JsonObject {
-        val profile = settings.requestProfile()
-        val browserIdentity = CloudMatchBrowserIdentity
-        return buildJsonObject {
-            putJsonObject("sessionRequestData") {
-                put("appId", appId)
-                if (internalTitle.isBlank()) put("internalTitle", JsonNull) else put("internalTitle", internalTitle)
-                putJsonArray("availableSupportedControllers") {}
-                put("networkTestSessionId", JsonNull)
-                put("parentSessionId", JsonNull)
-                put("clientIdentification", "GFN-PC")
-                put("deviceHashId", deviceId)
-                put("clientVersion", "30.0")
-                put("sdkVersion", "1.0")
-                put("streamerVersion", 1)
-                put("clientPlatformName", if (preferBrowserMode) browserIdentity.PLATFORM_NAME else "android")
-                putJsonArray("clientRequestMonitorSettings") {
-                    add(
-                        monitorSettings(
-                            profile = profile,
-                            fps = settings.fps,
-                            // The desktop descriptor is what buys the full resolution matrix;
-                            // browser sessions ask for the plain mobile allocation.
-                            desktopMonitorDescriptor = !preferBrowserMode,
-                        ),
+    companion object {
+        internal fun buildSessionRequestBody(
+            appId: String,
+            internalTitle: String,
+            settings: StreamSettings,
+            accountLinked: Boolean,
+            deviceId: String,
+            physicalDisplayResolution: Pair<Int, Int>?,
+            appLaunchMode: Int,
+            /**
+             * Website client mode (upstream 2.1.1). ON identifies the session as a browser client and
+             * asks for the plain mobile allocation; OFF (the default) produces the exact body this
+             * builder produced before the port.
+             */
+            preferBrowserMode: Boolean = false,
+        ): JsonObject {
+            val profile = settings.requestProfile()
+            val browserIdentity = CloudMatchBrowserIdentity
+            val useBrowserIdentity = shouldUseBrowserIdentity(preferBrowserMode, appLaunchMode)
+            return buildJsonObject {
+                putJsonObject("sessionRequestData") {
+                    put("appId", appId)
+                    if (internalTitle.isBlank()) put("internalTitle", JsonNull) else put("internalTitle", internalTitle)
+                    putJsonArray("availableSupportedControllers") {}
+                    put("networkTestSessionId", JsonNull)
+                    put("parentSessionId", JsonNull)
+                    put("clientIdentification", "GFN-PC")
+                    put("deviceHashId", deviceId)
+                    put("clientVersion", "30.0")
+                    put("sdkVersion", "1.0")
+                    put("streamerVersion", 1)
+                    put("clientPlatformName", if (useBrowserIdentity) browserIdentity.PLATFORM_NAME else "android")
+                    putJsonArray("clientRequestMonitorSettings") {
+                        add(
+                            monitorSettings(
+                                profile = profile,
+                                fps = settings.fps,
+                                // The desktop descriptor is what buys the full resolution matrix;
+                                // browser sessions ask for the plain mobile allocation.
+                                desktopMonitorDescriptor = !useBrowserIdentity,
+                            ),
+                        )
+                    }
+                    put("useOps", true)
+                    put("audioMode", 2)
+                    put("metaData", webRtcSessionMetadata(settings, profile, physicalDisplayResolution))
+                    put("sdrHdrMode", if (profile.hdrEnabled) 1 else 0)
+                    put("clientDisplayHdrCapabilities", if (profile.hdrEnabled) hdrCapabilitiesJson() else JsonNull)
+                    put("surroundAudioInfo", 0)
+                    put("remoteControllersBitmap", 0)
+                    put("clientTimezoneOffset", java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()))
+                    put("enhancedStreamMode", 1)
+                    put("appLaunchMode", appLaunchMode)
+                    put("secureRTSPSupported", false)
+                    put("partnerCustomData", "")
+                    put("accountLinked", accountLinked)
+                    put(
+                        "enablePersistingInGameSettings",
+                        if (useBrowserIdentity) browserIdentity.PERSIST_GAME_SETTINGS else CloudMatchDesktopIdentity.PERSIST_GAME_SETTINGS,
                     )
+                    put("userAge", 26)
+                    put("requestedStreamingFeatures", requestedStreamingFeatures(settings, profile))
                 }
-                put("useOps", true)
-                put("audioMode", 2)
-                put("metaData", webRtcSessionMetadata(settings, profile, physicalDisplayResolution))
-                put("sdrHdrMode", if (profile.hdrEnabled) 1 else 0)
-                put("clientDisplayHdrCapabilities", if (profile.hdrEnabled) hdrCapabilitiesJson() else JsonNull)
-                put("surroundAudioInfo", 0)
-                put("remoteControllersBitmap", 0)
-                put("clientTimezoneOffset", java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()))
-                put("enhancedStreamMode", 1)
-                put("appLaunchMode", appLaunchMode)
-                put("secureRTSPSupported", false)
-                put("partnerCustomData", "")
-                put("accountLinked", accountLinked)
-                put(
-                    "enablePersistingInGameSettings",
-                    if (preferBrowserMode) browserIdentity.PERSIST_GAME_SETTINGS else CloudMatchDesktopIdentity.PERSIST_GAME_SETTINGS,
-                )
-                put("userAge", 26)
-                put("requestedStreamingFeatures", requestedStreamingFeatures(settings, profile))
             }
         }
     }

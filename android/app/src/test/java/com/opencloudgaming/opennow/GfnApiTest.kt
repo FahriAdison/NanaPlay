@@ -17,6 +17,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.opencloudgaming.opennow.GfnSessionRepository.Companion.buildSessionRequestBody
 
 class GfnApiTest {
     @Test
@@ -341,12 +342,12 @@ class GfnApiTest {
             appLaunchMode = GfnAppLaunchMode.TOUCH_FRIENDLY,
         )
 
-        assertEquals("NVIDIA-CLASSIC", headers["nv-client-streamer"])
-        assertEquals("NATIVE", headers["nv-client-type"])
+        assertEquals("WEBRTC", headers["nv-client-streamer"])
+        assertEquals("BROWSER", headers["nv-client-type"])
         assertEquals("ANDROID", headers["nv-device-os"])
-        assertEquals("TABLET", headers["nv-device-type"])
+        assertEquals("PHONE", headers["nv-device-type"])
         val userAgent = headers["User-Agent"].orEmpty()
-        assertTrue(userAgent.contains("Android-Generic-Touch"))
+        assertTrue(userAgent.contains("Chrome"))
         assertEquals("https://play.geforcenow.com", headers["Origin"])
     }
 
@@ -738,14 +739,20 @@ class GfnApiTest {
         val body = buildMinimalClaimRequestBody(
             appId = "123",
             deviceId = "device",
+            settings = StreamSettings(),
             appLaunchMode = GfnAppLaunchMode.TOUCH_FRIENDLY,
+            preferBrowserMode = false,
         )
         val sessionRequestData = body.getValue("sessionRequestData").jsonObject
+        val monitor = sessionRequestData.getValue("clientRequestMonitorSettings").jsonArray.single().jsonObject
 
-        // TOUCH_FRIENDLY sessions declare themselves as "android" to trigger in-game mobile UI
-        // layouts (e.g. NTE: Neverness to Everness) and bypass browser resolution caps.
-        assertEquals("android", sessionRequestData.getValue("clientPlatformName").jsonPrimitive.content)
+        // TOUCH_FRIENDLY sessions use browser identity so GFN server provisions WebRTC stream,
+        // while appLaunchMode = 3 provisions the virtual touch digitizer on the host.
+        assertEquals("browser", sessionRequestData.getValue("clientPlatformName").jsonPrimitive.content)
         assertEquals(GfnAppLaunchMode.TOUCH_FRIENDLY, sessionRequestData.getValue("appLaunchMode").jsonPrimitive.int)
+        assertFalse(sessionRequestData.getValue("enablePersistingInGameSettings").jsonPrimitive.boolean)
+        assertNull(monitor["monitorId"])
+        assertEquals(0, monitor.getValue("dpi").jsonPrimitive.int)
     }
 
     @Test
@@ -760,4 +767,112 @@ class GfnApiTest {
         assertEquals(GfnAppLaunchMode.GAMEPAD_FRIENDLY, sessionRequestData.getValue("appLaunchMode").jsonPrimitive.int)
     }
 
+    @Test
+    fun touchFriendlySessionRequestUsesBrowserIdentityWhenPreferBrowserModeIsFalse() {
+        val body = buildSessionRequestBody(
+            appId = "123",
+            internalTitle = "Neverness to Everness",
+            settings = StreamSettings(),
+            accountLinked = true,
+            deviceId = "device",
+            physicalDisplayResolution = null,
+            appLaunchMode = GfnAppLaunchMode.TOUCH_FRIENDLY,
+            preferBrowserMode = false,
+        )
+        val sessionRequestData = body.getValue("sessionRequestData").jsonObject
+        val monitor = sessionRequestData.getValue("clientRequestMonitorSettings").jsonArray.single().jsonObject
+
+        assertEquals("browser", sessionRequestData.getValue("clientPlatformName").jsonPrimitive.content)
+        assertEquals(GfnAppLaunchMode.TOUCH_FRIENDLY, sessionRequestData.getValue("appLaunchMode").jsonPrimitive.int)
+        assertFalse(sessionRequestData.getValue("enablePersistingInGameSettings").jsonPrimitive.boolean)
+        assertNull(monitor["monitorId"])
+        assertEquals(0, monitor.getValue("dpi").jsonPrimitive.int)
+    }
+
+    @Test
+    fun touchFriendlyAlwaysUsesBrowserIdentityRegardlessOfPreferBrowserMode() {
+        val headersOff = cloudMatchHeaders(
+            token = "token",
+            clientId = "client",
+            deviceId = "device",
+            includeOrigin = true,
+            appLaunchMode = GfnAppLaunchMode.TOUCH_FRIENDLY,
+            preferBrowserMode = false,
+        )
+        val headersOn = cloudMatchHeaders(
+            token = "token",
+            clientId = "client",
+            deviceId = "device",
+            includeOrigin = true,
+            appLaunchMode = GfnAppLaunchMode.TOUCH_FRIENDLY,
+            preferBrowserMode = true,
+        )
+
+        assertEquals("WEBRTC", headersOff["nv-client-streamer"])
+        assertEquals("BROWSER", headersOff["nv-client-type"])
+        assertEquals("PHONE", headersOff["nv-device-type"])
+        assertEquals(headersOn["nv-client-streamer"], headersOff["nv-client-streamer"])
+        assertEquals(headersOn["nv-client-type"], headersOff["nv-client-type"])
+        assertEquals(headersOn["nv-device-type"], headersOff["nv-device-type"])
+        assertEquals(headersOn["User-Agent"], headersOff["User-Agent"])
+    }
+
+    @Test
+    fun gamepadFriendlyMaintainsDesktopIdentityWhenPreferBrowserModeIsFalse() {
+        val headers = cloudMatchHeaders(
+            token = "token",
+            clientId = "client",
+            deviceId = "device",
+            includeOrigin = true,
+            appLaunchMode = GfnAppLaunchMode.GAMEPAD_FRIENDLY,
+            preferBrowserMode = false,
+        )
+        assertEquals("NVIDIA-CLASSIC", headers["nv-client-streamer"])
+        assertEquals("NATIVE", headers["nv-client-type"])
+        assertEquals("PHONE", headers["nv-device-type"])
+        val userAgent = headers["User-Agent"].orEmpty()
+        assertTrue(userAgent.contains("Android"))
+        assertFalse(userAgent.contains("Chrome"))
+
+        val claimBody = buildMinimalClaimRequestBody(
+            appId = "123",
+            deviceId = "device",
+            settings = StreamSettings(),
+            appLaunchMode = GfnAppLaunchMode.GAMEPAD_FRIENDLY,
+            preferBrowserMode = false,
+        )
+        val claimData = claimBody.getValue("sessionRequestData").jsonObject
+        val claimMonitor = claimData.getValue("clientRequestMonitorSettings").jsonArray.single().jsonObject
+        assertEquals("android", claimData.getValue("clientPlatformName").jsonPrimitive.content)
+        assertTrue(claimData.getValue("enablePersistingInGameSettings").jsonPrimitive.boolean)
+        assertEquals(0, claimMonitor.getValue("monitorId").jsonPrimitive.int)
+        assertEquals(100, claimMonitor.getValue("dpi").jsonPrimitive.int)
+
+        val sessionBody = buildSessionRequestBody(
+            appId = "123",
+            internalTitle = "Gamepad Game",
+            settings = StreamSettings(),
+            accountLinked = true,
+            deviceId = "device",
+            physicalDisplayResolution = null,
+            appLaunchMode = GfnAppLaunchMode.GAMEPAD_FRIENDLY,
+            preferBrowserMode = false,
+        )
+        val sessionData = sessionBody.getValue("sessionRequestData").jsonObject
+        val sessionMonitor = sessionData.getValue("clientRequestMonitorSettings").jsonArray.single().jsonObject
+        assertEquals("android", sessionData.getValue("clientPlatformName").jsonPrimitive.content)
+        assertTrue(sessionData.getValue("enablePersistingInGameSettings").jsonPrimitive.boolean)
+        assertEquals(0, sessionMonitor.getValue("monitorId").jsonPrimitive.int)
+        assertEquals(100, sessionMonitor.getValue("dpi").jsonPrimitive.int)
+    }
+
+    @Test
+    fun helperShouldUseBrowserIdentityDecisionTable() {
+        assertTrue(shouldUseBrowserIdentity(preferBrowserMode = false, appLaunchMode = GfnAppLaunchMode.TOUCH_FRIENDLY))
+        assertTrue(shouldUseBrowserIdentity(preferBrowserMode = true, appLaunchMode = GfnAppLaunchMode.TOUCH_FRIENDLY))
+        assertTrue(shouldUseBrowserIdentity(preferBrowserMode = true, appLaunchMode = GfnAppLaunchMode.GAMEPAD_FRIENDLY))
+        assertFalse(shouldUseBrowserIdentity(preferBrowserMode = false, appLaunchMode = GfnAppLaunchMode.GAMEPAD_FRIENDLY))
+        assertTrue(shouldUseBrowserIdentity(preferBrowserMode = true, appLaunchMode = GfnAppLaunchMode.DEFAULT))
+        assertFalse(shouldUseBrowserIdentity(preferBrowserMode = false, appLaunchMode = GfnAppLaunchMode.DEFAULT))
+    }
 }

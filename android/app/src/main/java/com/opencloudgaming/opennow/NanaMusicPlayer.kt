@@ -133,6 +133,24 @@ object NanaMusicPlayer {
             return _tracks.value.getOrNull(idx)
         }
 
+    // 1.0.102: Ring buffer 50 entri event playback untuk diagnostik (hunt player-stop vs crash)
+    private const val MAX_PLAYBACK_HISTORY_ENTRIES = 50
+    private val playbackHistory = ArrayDeque<String>(MAX_PLAYBACK_HISTORY_ENTRIES)
+
+    private fun logMusicEvent(event: String) {
+        val timestamp = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date())
+        synchronized(playbackHistory) {
+            if (playbackHistory.size >= MAX_PLAYBACK_HISTORY_ENTRIES) {
+                playbackHistory.removeFirst()
+            }
+            playbackHistory.addLast("$timestamp $event")
+        }
+    }
+
+    fun getPlaybackHistory(): List<String> = synchronized(playbackHistory) {
+        playbackHistory.toList()
+    }
+
     // ---- 1.0.26: playback state persistence (Spotify-style restore) ----
     // Persists the playlist (local URIs + online saavnIds/metadata), the
     // current track identity, and the playback position. Restored lazily on
@@ -513,6 +531,9 @@ object NanaMusicPlayer {
         exo.addListener(
             object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
+                    val posMs = runCatching { exo.currentPosition }.getOrDefault(-1L)
+                    val durMs = runCatching { exo.duration }.getOrDefault(-1L)
+                    logMusicEvent("onIsPlayingChanged isPlaying=$isPlaying posMs=$posMs durMs=$durMs")
                     _isPlaying.value = isPlaying
                     if (isPlaying) {
                         _lastError.value = null
@@ -534,6 +555,7 @@ object NanaMusicPlayer {
                 }
 
                 override fun onPlayerError(error: PlaybackException) {
+                    logMusicEvent("onPlayerError code=${error.errorCode} name=${error.errorCodeName} message=${error.message}")
                     // 1.0.43: this callback must NEVER crash the app (ExoPlayer
                     // invokes it on the main thread). All failure handling
                     // lives in handlePlayerError, itself fully guarded — this
@@ -546,6 +568,15 @@ object NanaMusicPlayer {
                 }
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
+                    val stateName = when (playbackState) {
+                        Player.STATE_IDLE -> "IDLE"
+                        Player.STATE_BUFFERING -> "BUFFERING"
+                        Player.STATE_READY -> "READY"
+                        Player.STATE_ENDED -> "ENDED"
+                        else -> "STATE_$playbackState"
+                    }
+                    val posMs = runCatching { exo.currentPosition }.getOrDefault(-1L)
+                    logMusicEvent("onPlaybackStateChanged state=$stateName posMs=$posMs")
                     _isBuffering.value = playbackState == Player.STATE_BUFFERING
                     if (playbackState == Player.STATE_ENDED) {
                         val appCtx = appContextRef ?: return
@@ -655,8 +686,14 @@ object NanaMusicPlayer {
      * pause was ours so resumeAfterCall() can undo exactly that.
      */
     fun pauseForCall() {
-        val exo = synchronized(this) { player } ?: return
-        if (exo.isPlaying) {
+        val exo = synchronized(this) { player }
+        if (exo == null) {
+            logMusicEvent("pauseForCall ignored (player=null)")
+            return
+        }
+        val isPlaying = exo.isPlaying
+        logMusicEvent("pauseForCall isPlaying=$isPlaying")
+        if (isPlaying) {
             wasPlayingBeforeCall = true
             pausedForCall = true
             playRequested = false
@@ -670,6 +707,7 @@ object NanaMusicPlayer {
      * (togglePlayPause clears pausedForCall).
      */
     fun resumeAfterCall() {
+        logMusicEvent("resumeAfterCall pausedForCall=$pausedForCall wasPlayingBeforeCall=$wasPlayingBeforeCall")
         if (!pausedForCall) return
         pausedForCall = false
         if (wasPlayingBeforeCall) {

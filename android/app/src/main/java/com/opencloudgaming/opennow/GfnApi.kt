@@ -154,8 +154,8 @@ internal object GfnAppLaunchMode {
     const val TOUCH_FRIENDLY = 3
 }
 
-internal fun shouldUseBrowserIdentity(preferBrowserMode: Boolean, appLaunchMode: Int): Boolean =
-    preferBrowserMode || appLaunchMode == GfnAppLaunchMode.TOUCH_FRIENDLY
+internal fun shouldUseBrowserIdentity(appLaunchMode: Int): Boolean =
+    appLaunchMode == GfnAppLaunchMode.TOUCH_FRIENDLY
 
 private const val LIBRARY_WITH_TIME_QUERY_HASH = "039e8c0d553972975485fee56e59f2549d2fdb518e247a42ab5022056a74406f"
 private const val DEFAULT_LOCALE = "en_US"
@@ -452,17 +452,10 @@ internal fun buildMinimalClaimRequestBody(
     settings: StreamSettings? = null,
     physicalDisplayResolution: Pair<Int, Int>? = null,
     appLaunchMode: Int = GfnAppLaunchMode.GAMEPAD_FRIENDLY,
-    /**
-     * Website client mode (upstream 2.1.1). A claim re-sends the session request body, so the body
-     * must carry the same client identity the session was created with — a browser-identity
-     * session claimed with a desktop body is an identity mismatch. Default false keeps the body
-     * byte-identical to before the port.
-     */
-    preferBrowserMode: Boolean = false,
 ): JsonObject {
     val profile = settings?.requestProfile()
     val browserIdentity = CloudMatchBrowserIdentity
-    val useBrowserIdentity = shouldUseBrowserIdentity(preferBrowserMode, appLaunchMode)
+    val useBrowserIdentity = shouldUseBrowserIdentity(appLaunchMode)
     return buildJsonObject {
         put("action", 2)
         put("data", "RESUME")
@@ -742,15 +735,10 @@ internal fun cloudMatchHeaders(
     includeOrigin: Boolean,
     appLaunchMode: Int = GfnAppLaunchMode.GAMEPAD_FRIENDLY,
     isAndroidTv: Boolean = false,
-    /**
-     * Website client mode (upstream 2.1.1). ON swaps the client identity to the browser one;
-     * OFF (the default) leaves every header exactly as it was before this port.
-     */
-    preferBrowserMode: Boolean = false,
 ): Headers =
     Headers.Builder().apply {
         val touchFriendly = appLaunchMode == GfnAppLaunchMode.TOUCH_FRIENDLY
-        val useBrowserIdentity = shouldUseBrowserIdentity(preferBrowserMode, appLaunchMode)
+        val useBrowserIdentity = shouldUseBrowserIdentity(appLaunchMode)
         val userAgentString = when {
             useBrowserIdentity -> GFN_BROWSER_USER_AGENT
             isAndroidTv -> GFN_ANDROID_TV_USER_AGENT
@@ -2477,11 +2465,6 @@ class GfnSessionRepository(
         // Decided here and never again: the host provisions its virtual input devices from this,
         // so a session created without it cannot be given a touchscreen later.
         appLaunchMode: Int = GfnAppLaunchMode.GAMEPAD_FRIENDLY,
-        /**
-         * Website client mode (upstream 2.1.1). Pass [StreamSettings.browserClientMode] here; the
-         * default false keeps the request byte-identical to before the port.
-         */
-        preferBrowserMode: Boolean = false,
     ): SessionInfo {
         require(appId.all(Char::isDigit)) { "Invalid launch appId '$appId'." }
         val clientId = UUID.randomUUID().toString()
@@ -2495,7 +2478,6 @@ class GfnSessionRepository(
             deviceId = deviceId,
             physicalDisplayResolution = physicalDisplayResolutionProvider(),
             appLaunchMode = appLaunchMode,
-            preferBrowserMode = preferBrowserMode,
         )
         val url = "$base/v2/session?keyboardLayout=${encoded(settings.keyboardLayout)}&languageCode=${encoded(settings.gameLanguage)}"
         val host = Uri.parse(base).host.orEmpty()
@@ -2510,7 +2492,6 @@ class GfnSessionRepository(
                     includeOrigin = true,
                     appLaunchMode = appLaunchMode,
                     isAndroidTv = isAndroidTv,
-                    preferBrowserMode = preferBrowserMode,
                 ),
             )
             .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
@@ -2654,12 +2635,6 @@ class GfnSessionRepository(
         active: ActiveSessionInfo,
         settings: StreamSettings,
         appLaunchMode: Int = GfnAppLaunchMode.GAMEPAD_FRIENDLY,
-        /**
-         * Website client mode (upstream 2.1.1). A claim re-sends the session request body, so it
-         * must carry the same client identity the session was created with. Default false keeps the
-         * claim byte-identical to before the port.
-         */
-        preferBrowserMode: Boolean = false,
     ): SessionInfo {
         val deviceId = authStore.stableDeviceId()
         val clientId = UUID.randomUUID().toString()
@@ -2712,10 +2687,6 @@ class GfnSessionRepository(
                 settings = settings,
                 physicalDisplayResolution = physicalDisplayResolutionProvider(),
                 appLaunchMode = appLaunchMode,
-                // A claim re-sends the session request body, so it must carry the same client
-                // identity the header already claims (see the header builder below) — otherwise
-                // website client mode would send a browser header with a desktop body.
-                preferBrowserMode = preferBrowserMode,
             )
             val claimRequest = Request.Builder()
                 .url("$sessionBase/v2/session/${active.sessionId}?keyboardLayout=${encoded(settings.keyboardLayout)}&languageCode=${encoded(settings.gameLanguage)}")
@@ -2727,7 +2698,6 @@ class GfnSessionRepository(
                         includeOrigin = true,
                         appLaunchMode = appLaunchMode,
                         isAndroidTv = isAndroidTv,
-                        preferBrowserMode = preferBrowserMode,
                     ),
                 )
                 .put(claimBody.toString().toRequestBody(JSON_MEDIA_TYPE))
@@ -2866,16 +2836,10 @@ class GfnSessionRepository(
             deviceId: String,
             physicalDisplayResolution: Pair<Int, Int>?,
             appLaunchMode: Int,
-            /**
-             * Website client mode (upstream 2.1.1). ON identifies the session as a browser client and
-             * asks for the plain mobile allocation; OFF (the default) produces the exact body this
-             * builder produced before the port.
-             */
-            preferBrowserMode: Boolean = false,
         ): JsonObject {
             val profile = settings.requestProfile()
             val browserIdentity = CloudMatchBrowserIdentity
-            val useBrowserIdentity = shouldUseBrowserIdentity(preferBrowserMode, appLaunchMode)
+            val useBrowserIdentity = shouldUseBrowserIdentity(appLaunchMode)
             return buildJsonObject {
                 putJsonObject("sessionRequestData") {
                     put("appId", appId)
@@ -2930,14 +2894,8 @@ class GfnSessionRepository(
         settings: StreamSettings,
         physicalDisplayResolution: Pair<Int, Int>?,
         appLaunchMode: Int,
-        /**
-         * Website client mode (upstream 2.1.1). Forwards to [buildMinimalClaimRequestBody] so the
-         * claim body carries the same client identity as [buildSessionRequestBody] used at create.
-         * Default false keeps the body byte-identical to before the port.
-         */
-        preferBrowserMode: Boolean = false,
     ): JsonObject =
-        buildMinimalClaimRequestBody(appId, deviceId, settings, physicalDisplayResolution, appLaunchMode, preferBrowserMode)
+        buildMinimalClaimRequestBody(appId, deviceId, settings, physicalDisplayResolution, appLaunchMode)
 
     private suspend fun toSessionInfo(zone: String, base: String, payload: JsonObject, clientId: String, deviceId: String): SessionInfo {
         val requestStatus = payload.obj("requestStatus")

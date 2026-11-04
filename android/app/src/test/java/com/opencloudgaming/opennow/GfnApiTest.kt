@@ -741,7 +741,6 @@ class GfnApiTest {
             deviceId = "device",
             settings = StreamSettings(),
             appLaunchMode = GfnAppLaunchMode.TOUCH_FRIENDLY,
-            preferBrowserMode = false,
         )
         val sessionRequestData = body.getValue("sessionRequestData").jsonObject
         val monitor = sessionRequestData.getValue("clientRequestMonitorSettings").jsonArray.single().jsonObject
@@ -768,7 +767,7 @@ class GfnApiTest {
     }
 
     @Test
-    fun touchFriendlySessionRequestUsesBrowserIdentityWhenPreferBrowserModeIsFalse() {
+    fun touchFriendlySessionRequestUsesBrowserIdentity() {
         val body = buildSessionRequestBody(
             appId = "123",
             internalTitle = "Neverness to Everness",
@@ -777,7 +776,6 @@ class GfnApiTest {
             deviceId = "device",
             physicalDisplayResolution = null,
             appLaunchMode = GfnAppLaunchMode.TOUCH_FRIENDLY,
-            preferBrowserMode = false,
         )
         val sessionRequestData = body.getValue("sessionRequestData").jsonObject
         val monitor = sessionRequestData.getValue("clientRequestMonitorSettings").jsonArray.single().jsonObject
@@ -790,42 +788,30 @@ class GfnApiTest {
     }
 
     @Test
-    fun touchFriendlyAlwaysUsesBrowserIdentityRegardlessOfPreferBrowserMode() {
-        val headersOff = cloudMatchHeaders(
+    fun touchFriendlyUsesBrowserIdentityHeaders() {
+        val headers = cloudMatchHeaders(
             token = "token",
             clientId = "client",
             deviceId = "device",
             includeOrigin = true,
             appLaunchMode = GfnAppLaunchMode.TOUCH_FRIENDLY,
-            preferBrowserMode = false,
-        )
-        val headersOn = cloudMatchHeaders(
-            token = "token",
-            clientId = "client",
-            deviceId = "device",
-            includeOrigin = true,
-            appLaunchMode = GfnAppLaunchMode.TOUCH_FRIENDLY,
-            preferBrowserMode = true,
         )
 
-        assertEquals("WEBRTC", headersOff["nv-client-streamer"])
-        assertEquals("BROWSER", headersOff["nv-client-type"])
-        assertEquals("PHONE", headersOff["nv-device-type"])
-        assertEquals(headersOn["nv-client-streamer"], headersOff["nv-client-streamer"])
-        assertEquals(headersOn["nv-client-type"], headersOff["nv-client-type"])
-        assertEquals(headersOn["nv-device-type"], headersOff["nv-device-type"])
-        assertEquals(headersOn["User-Agent"], headersOff["User-Agent"])
+        assertEquals("WEBRTC", headers["nv-client-streamer"])
+        assertEquals("BROWSER", headers["nv-client-type"])
+        assertEquals("PHONE", headers["nv-device-type"])
+        val userAgent = headers["User-Agent"].orEmpty()
+        assertTrue(userAgent.contains("Chrome"))
     }
 
     @Test
-    fun gamepadFriendlyMaintainsDesktopIdentityWhenPreferBrowserModeIsFalse() {
+    fun gamepadFriendlyMaintainsDesktopIdentity() {
         val headers = cloudMatchHeaders(
             token = "token",
             clientId = "client",
             deviceId = "device",
             includeOrigin = true,
             appLaunchMode = GfnAppLaunchMode.GAMEPAD_FRIENDLY,
-            preferBrowserMode = false,
         )
         assertEquals("NVIDIA-CLASSIC", headers["nv-client-streamer"])
         assertEquals("NATIVE", headers["nv-client-type"])
@@ -839,7 +825,6 @@ class GfnApiTest {
             deviceId = "device",
             settings = StreamSettings(),
             appLaunchMode = GfnAppLaunchMode.GAMEPAD_FRIENDLY,
-            preferBrowserMode = false,
         )
         val claimData = claimBody.getValue("sessionRequestData").jsonObject
         val claimMonitor = claimData.getValue("clientRequestMonitorSettings").jsonArray.single().jsonObject
@@ -856,7 +841,6 @@ class GfnApiTest {
             deviceId = "device",
             physicalDisplayResolution = null,
             appLaunchMode = GfnAppLaunchMode.GAMEPAD_FRIENDLY,
-            preferBrowserMode = false,
         )
         val sessionData = sessionBody.getValue("sessionRequestData").jsonObject
         val sessionMonitor = sessionData.getValue("clientRequestMonitorSettings").jsonArray.single().jsonObject
@@ -868,11 +852,8 @@ class GfnApiTest {
 
     @Test
     fun helperShouldUseBrowserIdentityDecisionTable() {
-        assertTrue(shouldUseBrowserIdentity(preferBrowserMode = false, appLaunchMode = GfnAppLaunchMode.TOUCH_FRIENDLY))
-        assertTrue(shouldUseBrowserIdentity(preferBrowserMode = true, appLaunchMode = GfnAppLaunchMode.TOUCH_FRIENDLY))
-        assertTrue(shouldUseBrowserIdentity(preferBrowserMode = true, appLaunchMode = GfnAppLaunchMode.GAMEPAD_FRIENDLY))
-        assertFalse(shouldUseBrowserIdentity(preferBrowserMode = false, appLaunchMode = GfnAppLaunchMode.GAMEPAD_FRIENDLY))
-        assertTrue(shouldUseBrowserIdentity(preferBrowserMode = true, appLaunchMode = GfnAppLaunchMode.DEFAULT))
-        assertFalse(shouldUseBrowserIdentity(preferBrowserMode = false, appLaunchMode = GfnAppLaunchMode.DEFAULT))
+        assertTrue(shouldUseBrowserIdentity(appLaunchMode = GfnAppLaunchMode.TOUCH_FRIENDLY))
+        assertFalse(shouldUseBrowserIdentity(appLaunchMode = GfnAppLaunchMode.GAMEPAD_FRIENDLY))
+        assertFalse(shouldUseBrowserIdentity(appLaunchMode = GfnAppLaunchMode.DEFAULT))
     }
 }

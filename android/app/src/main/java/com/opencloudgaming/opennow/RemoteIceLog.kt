@@ -1,6 +1,7 @@
 package com.opencloudgaming.opennow
 
 import android.content.Context
+import android.util.Log
 import com.papahchan.nanaplay.BuildConfig
 import org.webrtc.IceCandidate
 import java.io.File
@@ -63,6 +64,8 @@ internal object RemoteIceLog {
                 // Sengaja tidak memanggil fos.fd.sync(): penulisan ke OS page cache
                 // selesai dalam mikrodetik dan tetap bertahan saat SIGABRT process death.
             }
+        }.onFailure { t ->
+            Log.w("RemoteIceLog", "Failed to append remote ICE candidate log", t)
         }
     }
 

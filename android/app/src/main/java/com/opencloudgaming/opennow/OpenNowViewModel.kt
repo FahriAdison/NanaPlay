@@ -1974,7 +1974,6 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     settings = settings,
                     accountLinked = shouldSendAccountLinked(game, selectedVariant),
                     appLaunchMode = appLaunchModeFor(game),
-                    preferBrowserMode = settings.browserClientMode,
                 )
                 recordDebugEvent("queue", "Created session ${created.debugSummary()}")
                 launchSession = created
@@ -2496,7 +2495,6 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     settings = pending.settings,
                     accountLinked = pending.accountLinked,
                     appLaunchMode = appLaunchModeFor(pending.game),
-                    preferBrowserMode = pending.settings.browserClientMode,
                 )
                 recordDebugEvent("queue", "Created replacement session ${created.debugSummary()}")
                 launchSession = created
@@ -3489,6 +3487,11 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             // 1.0.38: include the most recent music-player crash (if any) so a
             // Share-diagnostics export right after a crash carries the cause.
             appendLine("music.lastCrash=${runCatching { NanaMusicPlayer.lastCrashSummary() }.getOrNull() ?: "none"}")
+            val musicEvents = runCatching { NanaMusicPlayer.getPlaybackHistory() }.getOrDefault(emptyList())
+            appendLine("music.events.count=${musicEvents.size}")
+            musicEvents.forEachIndexed { index, event ->
+                appendLine("music.event.${index + 1}=$event")
+            }
             codecReport?.capabilities?.forEach { cap ->
                 appendLine("codec.${cap.codec}: decoder=${cap.decoderName ?: "none"} hardware=${cap.hardwareDecoder} nativeAvailable=${cap.nativeDecoderAvailable ?: "unknown"} webRtc=${cap.webRtcDecoderName ?: "none"} webRtcAvailable=${cap.webRtcDecoderAvailable ?: "unknown"} webRtcHardware=${cap.webRtcHardwareDecoderAvailable ?: "unknown"} encoder=${cap.encoderName ?: "none"}")
             }
@@ -4021,14 +4024,12 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         val appLaunchMode = appLaunchModeFor(game)
         return try {
             // Claiming re-sends the session request body, so repeating the mode the session was
-            // created with keeps it from being downgraded mid-flight. Website client mode is carried
-            // the same way: a browser-identity session must be claimed with the browser identity.
+            // created with keeps it from being downgraded mid-flight.
             sessionRepository.claimSession(
                 token = token,
                 active = active,
                 settings = settings,
                 appLaunchMode = appLaunchMode,
-                preferBrowserMode = settings.browserClientMode,
             )
         } catch (error: SessionClaimNotReadyException) {
             val fallback = active.toPendingSession(zone = "prod")
@@ -4331,11 +4332,6 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         settings: StreamSettings,
         accountLinked: Boolean,
         appLaunchMode: Int,
-        /**
-         * Website client mode (upstream 2.1.1). Callers pass [StreamSettings.browserClientMode];
-         * the default false keeps the request byte-identical to before the port.
-         */
-        preferBrowserMode: Boolean = false,
     ): SessionInfo {
         var lastError: Throwable? = null
         repeat(CREATE_SESSION_MAX_ATTEMPTS) { attempt ->
@@ -4349,20 +4345,30 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     settings = settings,
                     accountLinked = accountLinked,
                     appLaunchMode = appLaunchMode,
-                    preferBrowserMode = preferBrowserMode,
                 )
             }
-            if (result.isSuccess) return result.getOrThrow()
+            if (result.isSuccess) {
+                val created = result.getOrThrow()
+                recordDebugEvent("queue", "createSession attempt ${attempt + 1} succeeded: ${created.debugSummary()}")
+                return created
+            }
             val error = result.exceptionOrNull()
             if (error is CancellationException) throw error
+            val detail = when (error) {
+                is CloudMatchRequestStatusException ->
+                    "statusCode=${error.statusCode} unifiedCode=${error.unifiedErrorCode} desc=${error.statusDescription}"
+                is CloudMatchHttpException ->
+                    "httpCode=${error.code} message=${error.message}"
+                else -> error?.debugMessage()
+            }
             if (!isTransientCreateSessionError(error)) {
-                recordDebugEvent("queue", "createSession failed non-transient: ${error?.debugMessage()}")
+                recordDebugEvent("queue", "createSession attempt ${attempt + 1} failed non-transient ($detail)")
                 throw error ?: IllegalStateException("Session creation failed")
             }
             lastError = error
             if (attempt < CREATE_SESSION_MAX_ATTEMPTS - 1) {
                 val backoffMs = CREATE_SESSION_RETRY_BASE_MS shl attempt
-                recordDebugEvent("queue", "createSession attempt ${attempt + 1} failed transient (${error?.debugMessage()}), retrying in ${backoffMs}ms")
+                recordDebugEvent("queue", "createSession attempt ${attempt + 1} failed transient ($detail), retrying in ${backoffMs}ms")
                 kotlinx.coroutines.delay(backoffMs)
             }
         }
@@ -4378,9 +4384,17 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         pollingGeneration++
         val snapshot = state.value
         val game = snapshot.streamGame ?: return
+        val oldSession = snapshot.streamSession
+        val lastQueuePos = oldSession?.queuePosition ?: snapshot.queuePosition
+        val waitDurationSec = oldSession?.timerStartedAtMs?.let {
+            ((System.currentTimeMillis() - it) / 1000L).coerceAtLeast(0L)
+        }
+        val targetServerId = oldSession?.zone?.takeIf { it.isNotBlank() } ?: hostForDebug(snapshot.streamLaunchBaseUrl)
         recordDebugEvent(
             "queue",
-            "Queue retry requested by user gen=$pollingGeneration game=${game.title} abandoned=${snapshot.queueAbandoned} base=${hostForDebug(snapshot.streamLaunchBaseUrl)}",
+            "Queue retry requested by user gen=$pollingGeneration game=${game.title} abandoned=${snapshot.queueAbandoned} " +
+                "oldSessionId=${oldSession?.shortDebugId() ?: "-"} lastQueuePos=${lastQueuePos ?: "-"} waitDurationSec=${waitDurationSec ?: "-"} " +
+                "targetServerId=$targetServerId base=${hostForDebug(snapshot.streamLaunchBaseUrl)}",
         )
         launchJob?.cancel()
         // Null it immediately: play() refuses while launchJob.isActive (a cancelled
@@ -4670,8 +4684,15 @@ private fun TimedStreamRuntimeStats.debugSummary(nowMs: Long): String {
 
 private fun SessionInfo.shortDebugId(): String = shortDebugId(sessionId)
 
-private fun SessionInfo.debugSummary(): String =
-    "id=${shortDebugId()} status=$status ready=${isReadyForStream()} queue=${queuePosition ?: "-"} seat=${seatSetupStep ?: "-"} adsRequired=${isSessionAdsRequired(adState)} ads=${sessionAdItems(adState).size} paused=${adState?.isQueuePaused} base=${hostForDebug(streamingBaseUrl)} server=${serverIp.take(80)}"
+private fun SessionInfo.debugSummary(): String {
+    val elapsedSec = timerStartedAtMs?.let { ((System.currentTimeMillis() - it) / 1000L).coerceAtLeast(0L) } ?: "-"
+    val urlHost = hostForDebug(streamingBaseUrl)
+    val regionServerId = zone.ifBlank { "-" }
+    val queuePos = queuePosition ?: "-"
+    val seatStep = seatSetupStep ?: "-"
+    val seatEta = seatSetupEta ?: "-"
+    return "id=${shortDebugId()} status=$status ready=${isReadyForStream()} queuePos=$queuePos seatStep=$seatStep seatEta=$seatEta region/serverId=$regionServerId urlHost=$urlHost elapsedSec=$elapsedSec adsRequired=${isSessionAdsRequired(adState)} ads=${sessionAdItems(adState).size} paused=${adState?.isQueuePaused} base=$urlHost server=${serverIp.take(80)}"
+}
 
 private fun ActiveSessionInfo.shortDebugId(): String = shortDebugId(sessionId)
 

@@ -49,6 +49,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -58,6 +59,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -448,6 +450,7 @@ private fun SettingsContent(
     val settings = state.settings
     val context = LocalContext.current
     val deviceHasBattery = rememberDeviceHasBattery()
+    var isPerformanceWarningDismissed by rememberSaveable { mutableStateOf(false) }
     var pendingMicrophoneMode by remember { mutableStateOf<MicrophoneMode?>(null) }
     val microphonePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -521,8 +524,11 @@ private fun SettingsContent(
                     viewModel.applyStreamPreset(StreamPreset.valueOf(value))
                 }
                 val performanceWarningReasons = settings.stream.lowPowerPerformanceWarningReasons(state.codecReport)
-                if (performanceWarningReasons.isNotEmpty()) {
-                    LowPowerStreamWarning(performanceWarningReasons)
+                if (performanceWarningReasons.isNotEmpty() && !isPerformanceWarningDismissed) {
+                    LowPowerStreamWarning(
+                        reasons = performanceWarningReasons,
+                        onDismiss = { isPerformanceWarningDismissed = true },
+                    )
                 }
                 val resolutionChoices = streamResolutionChoicesForAspect(settings.stream.aspectRatio).ifEmpty {
                     streamResolutionChoicesForAspect("16:9")
@@ -716,13 +722,6 @@ private fun SettingsContent(
                     color = SettingsTextMuted,
                     style = MaterialTheme.typography.bodySmall,
                 )
-                SettingSwitch(
-                    label = stringResource(R.string.settings_browser_client_mode),
-                    checked = settings.stream.browserClientMode,
-                    description = stringResource(R.string.settings_browser_client_mode_desc),
-                ) { enabled ->
-                    viewModel.updateStreamSettings { s -> s.copy(browserClientMode = enabled) }
-                }
                 if (settings.stream.sessionProxyEnabled) {
                     OutlinedTextField(
                         value = settings.stream.sessionProxyUrl,
@@ -1131,7 +1130,10 @@ private fun SettingsContent(
 }
 
 @Composable
-private fun LowPowerStreamWarning(reasons: List<String>) {
+private fun LowPowerStreamWarning(
+    reasons: List<String>,
+    onDismiss: () -> Unit,
+) {
     val warningColor = Color(0xffffc266)
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -1160,6 +1162,20 @@ private fun LowPowerStreamWarning(reasons: List<String>) {
                 color = SettingsTextMuted,
                 style = MaterialTheme.typography.bodySmall,
             )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(
+                    onClick = onDismiss,
+                ) {
+                    Text(
+                        "Mengerti",
+                        color = warningColor,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
         }
     }
 }

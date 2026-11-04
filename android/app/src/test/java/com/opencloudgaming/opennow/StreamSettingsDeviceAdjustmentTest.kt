@@ -722,6 +722,88 @@ class StreamSettingsDeviceAdjustmentTest {
     }
 
     @Test
+    fun recommendedLowPowerProfileDoesNotWarnOn21x9Aspect() {
+        val settings = StreamSettings(
+            resolution = "1680x720",
+            aspectRatio = "21:9",
+            fps = 60,
+            maxBitrateMbps = 18,
+        )
+        val report = codecReport(
+            VideoCodec.H264,
+            hardwareDecoder = true,
+            realtimeSafe = true,
+            lowPower = true,
+            constrainedRuntime = false,
+        )
+
+        assertTrue(settings.lowPowerPerformanceWarningReasons(report).isEmpty())
+    }
+
+    @Test
+    fun constrainedProfileStillWarnsAbove30Fps() {
+        val settings = StreamSettings(
+            resolution = "1280x720",
+            aspectRatio = "16:9",
+            fps = 60,
+            maxBitrateMbps = 12,
+        )
+        val report = codecReport(
+            VideoCodec.H264,
+            hardwareDecoder = true,
+            realtimeSafe = true,
+            lowPower = true,
+            constrainedRuntime = true,
+        )
+
+        assertEquals(listOf("60 FPS"), settings.lowPowerPerformanceWarningReasons(report))
+    }
+
+    @Test
+    fun resolutionsHigherThan720pStillWarnOnLowPower() {
+        val settings = StreamSettings(
+            resolution = "1920x1080",
+            aspectRatio = "16:9",
+            fps = 60,
+            maxBitrateMbps = 18,
+        )
+        val report = codecReport(
+            VideoCodec.H264,
+            hardwareDecoder = true,
+            realtimeSafe = true,
+            lowPower = true,
+            constrainedRuntime = false,
+        )
+
+        assertEquals(listOf("1920x1080 resolution"), settings.lowPowerPerformanceWarningReasons(report))
+    }
+
+    @Test
+    fun heavyFeaturesStillWarn() {
+        val settings = StreamSettings(
+            resolution = "1280x720",
+            aspectRatio = "16:9",
+            fps = 30,
+            maxBitrateMbps = 12,
+            hdrEnabled = true,
+            enableCloudGsync = true,
+            streamSharpeningEnabled = true,
+        )
+        val report = codecReport(
+            VideoCodec.H264,
+            hardwareDecoder = true,
+            realtimeSafe = true,
+            lowPower = true,
+            constrainedRuntime = false,
+        )
+
+        assertEquals(
+            listOf("HDR", "Cloud G-Sync", "stream sharpening"),
+            settings.lowPowerPerformanceWarningReasons(report),
+        )
+    }
+
+    @Test
     fun preservesHardwareH265ForLowPowerAndroidTvInsideSafeLimits() {
         val adjusted = StreamSettings(
             resolution = "3840x2160",

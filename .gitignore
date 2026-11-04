@@ -70,3 +70,7 @@ build/
 .gradle/
 *.apk
 *.aab
+
+# Kotlin incremental cache
+android/.kotlin/
+.kotlin/

@@ -1416,6 +1416,17 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         settingsStore.replace(next)
     }
 
+    /**
+     * F-11: atomic read-modify-write for partial in-stream updates (drag-end callbacks).
+     * Unlike [updateSettings], which replaces the whole object with the given snapshot,
+     * this runs [transform] on the store's latest value, so a stale closure can never
+     * revert unrelated fields. The transform must be pure (see SettingsStore.update).
+     * Full-object writes from the Settings screens keep using [updateSettings].
+     */
+    fun updateSettingsTransform(transform: (AppSettings) -> AppSettings) {
+        settingsStore.update(transform)
+    }
+
     /** 1.0.49: update Control Center button order. */
     fun updateControlCenterOrder(order: List<String>) {
         val current = state.value.settings

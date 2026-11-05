@@ -8503,7 +8503,15 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                     musicMiniPlayerOpen = musicMiniPlayerOpen,
                     browserOpen = browserOpen,
                     onFabPositionChange = { x, y ->
-                        viewModel.updateSettings(state.settings.copy(quickAccessFabX = x, quickAccessFabY = y))
+                        // F-11: persist via the atomic update-transform, not replace(): the
+                        // drag handler is captured by pointerInput(Unit) at first composition,
+                        // so a stale state.settings.copy() here would revert every settings
+                        // change made since (e.g. androidTouch.enabled, which hides the
+                        // touch gamepad) on every drag-end. The transform runs on the
+                        // store's latest value (it), never on a composition snapshot.
+                        viewModel.updateSettingsTransform {
+                            it.copy(quickAccessFabX = x, quickAccessFabY = y)
+                        }
                     },
                     onToggleKeyboard = { keyboardOpen = !keyboardOpen },
                     onToggleTouchControls = {
@@ -8637,6 +8645,11 @@ private fun QuickAccessFab(
 ) {
     // 1.0.33: drawer collapsed by default — one button, tap to expand.
     var expanded by remember { mutableStateOf(false) }
+    // F-11: pointerInput(Unit) below runs its block once and keeps the first-composition
+    // callbacks, so onDragEnd would otherwise call a stale onFabPositionChange forever;
+    // rememberUpdatedState keeps it pointed at the latest callback (which writes through
+    // updateSettingsTransform, never a stale replace()).
+    val currentOnFabPositionChange by rememberUpdatedState(onFabPositionChange)
     BoxWithConstraints(modifier.fillMaxSize()) {
         val density = LocalDensity.current
         val maxWidthPx = with(density) { maxWidth.toPx() }
@@ -8669,7 +8682,7 @@ private fun QuickAccessFab(
                             )
                         },
                         onDragEnd = {
-                            onFabPositionChange(
+                            currentOnFabPositionChange(
                                 (offsetPx.x / maxWidthPx).coerceIn(0f, 1f),
                                 (offsetPx.y / maxHeightPx).coerceIn(0f, 1f),
                             )

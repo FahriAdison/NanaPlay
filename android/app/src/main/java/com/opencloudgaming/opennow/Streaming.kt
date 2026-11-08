@@ -3651,6 +3651,11 @@ private class TouchMouseState {
 
 class NativeStreamClient(
     context: Context,
+    // F1: both flags come from the caller's authoritative settings (the same store the
+    // ViewModel exposes as state.settings), read once at construction — never from a
+    // freshly built SettingsStore, whose disk load can lag behind async persists.
+    private val lowLatencyGameAudio: Boolean,
+    private val nativeLowLatencyDecoder: Boolean,
     private val onState: (String) -> Unit,
     private val onError: (String) -> Unit,
     private val onVideoTransportFallbackApplied: (String, StreamSettings) -> Unit = { _, _ -> },
@@ -3662,7 +3667,6 @@ class NativeStreamClient(
 ) {
     private val appContext = context.applicationContext
     private val initialAndroidTvProfile = isAndroidTvProfile(appContext)
-    private val lowLatencyGameAudio: Boolean = SettingsStore(appContext).settings.value.lowLatencyGameAudio
     private val eglBase: EglBase = EglBase.create()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     // 1.0.83 (DSH P1#2): dedicated scope for recording finalization, independent
@@ -3864,7 +3868,7 @@ class NativeStreamClient(
 
     init {
         WebRtcRuntime.ensureInitialized(appContext)
-        val lowLatencyEnabled = SettingsStore(appContext).settings.value.nativeLowLatencyDecoder
+        val lowLatencyEnabled = nativeLowLatencyDecoder
         factory = PeerConnectionFactory.builder()
             .setOptions(PeerConnectionFactory.Options())
             .setAudioDeviceModule(audioDeviceModule)
@@ -5497,7 +5501,7 @@ class NativeStreamClient(
             rtcpMuxPolicy = PeerConnection.RtcpMuxPolicy.REQUIRE
         }
         recordStreamDiagnostic(
-            "peer connection create generation=$generation iceServers=${ice.size} iceUrls=${session.iceServers.flatMap { it.urls }.joinToString(limit = 8) { url -> url.substringBefore('?').take(120) }}",
+            "peer connection create generation=$generation iceServers=${ice.size} iceUrls=${session.iceServers.flatMap { it.urls }.joinToString(limit = 8) { url -> stripUrlUserinfo(url.substringBefore('?')).take(120) }}",
         )
         val pc = requireNotNull(factory).createPeerConnection(config, object : PeerConnection.Observer {
             override fun onSignalingChange(state: PeerConnection.SignalingState?) {

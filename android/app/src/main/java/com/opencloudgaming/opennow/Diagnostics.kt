@@ -150,6 +150,25 @@ internal fun redactDiagnosticUrl(raw: String): String {
     return builder.build().toString()
 }
 
+/**
+ * Strips `user:pass@` userinfo from a URL before logging. Unlike [redactDiagnosticUrl], which
+ * only redacts sensitive query-parameter names, this removes credentials embedded in the
+ * authority component (e.g. `turn:user:pass@host:3478` -> `turn:host:3478`). ICE server URLs
+ * arrive verbatim from the cloud-match response, so they must never be logged with userinfo
+ * intact. Only use on copies destined for logs — the live [Models.IceServer] URLs may carry
+ * the only TURN credentials and must keep their userinfo for the connection itself.
+ */
+internal fun stripUrlUserinfo(raw: String): String {
+    val schemeEnd = raw.indexOf("://").let { if (it >= 0) it + 3 else raw.indexOf(':') + 1 }
+    if (schemeEnd <= 0) return raw
+    val authorityEnd = raw.indexOf('/', schemeEnd).let { if (it < 0) raw.length else it }
+    // lastIndexOf: the authority ends at the LAST '@' before the path, so a password that
+    // itself contains '@' is stripped completely instead of leaving a partial userinfo.
+    val at = raw.lastIndexOf('@')
+    if (at < schemeEnd || at >= authorityEnd) return raw
+    return raw.substring(0, schemeEnd) + raw.substring(at + 1)
+}
+
 private fun redactDiagnosticJsonElement(element: JsonElement, keyHint: String? = null): JsonElement =
     when {
         keyHint != null && shouldRedactDiagnosticKey(keyHint) -> JsonPrimitive("[redacted]")

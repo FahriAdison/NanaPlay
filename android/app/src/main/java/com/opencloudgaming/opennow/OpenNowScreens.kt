@@ -7520,6 +7520,9 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
     val client = remember {
         NativeStreamClient(
             context = context.applicationContext,
+            // F1: read once at construction from the same settings the ViewModel holds.
+            lowLatencyGameAudio = state.settings.lowLatencyGameAudio,
+            nativeLowLatencyDecoder = state.settings.nativeLowLatencyDecoder,
             onState = {
                 streamState = it
                 viewModel.recordNativeStreamState(it)
@@ -7756,7 +7759,7 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
             // 1.0.33: mark dismissed the moment it shows — it must never
             // reappear (e.g. after dragging the quick-access bar), even if
             // the user never taps Skip/Open controls.
-            viewModel.updateSettings(state.settings.copy(androidStreamGuideDismissed = true))
+            viewModel.updateSettingsTransform { it.copy(androidStreamGuideDismissed = true) }
         }
     }
 
@@ -7978,9 +7981,6 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                         )
                     )
                 }
-                // F-10: rememberUpdatedState so the drag-end callback always sees the
-                // latest settings, not the snapshot from first composition.
-                val currentSettings by rememberUpdatedState(state.settings)
                 StreamStatsPill(
                     streamStats = streamStats,
                     streamSettings = launchStreamSettings,
@@ -7999,12 +7999,12 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                         .pointerInput(Unit) {
                             detectDragGestures(
                                 onDragEnd = {
-                                    viewModel.updateSettings(
-                                        currentSettings.copy(
+                                    viewModel.updateSettingsTransform {
+                                        it.copy(
                                             streamStatsOffsetX = statsDragOffset.x,
                                             streamStatsOffsetY = statsDragOffset.y,
                                         )
-                                    )
+                                    }
                                 }
                             ) { change, dragAmount ->
                                 change.consume()
@@ -8067,11 +8067,13 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                     },
                     layoutEditing = touchLayoutEditing,
                     onSaveAllOffsets = { allOffsets ->
-                        var touch = state.settings.androidTouch
-                        allOffsets.forEach { (key, offset) ->
-                            touch = touch.withOffset(key, offset.x, offset.y)
+                        viewModel.updateSettingsTransform { current ->
+                            var touch = current.androidTouch
+                            allOffsets.forEach { (key, offset) ->
+                                touch = touch.withOffset(key, offset.x, offset.y)
+                            }
+                            current.copy(androidTouch = touch)
                         }
-                        viewModel.updateSettings(state.settings.copy(androidTouch = touch))
                     },
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
@@ -8410,16 +8412,16 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                         )
                     },
                     onTouchScaleChange = { value ->
-                        viewModel.updateSettings(state.settings.copy(androidTouch = state.settings.androidTouch.copy(scale = value)))
+                        viewModel.updateSettingsTransform { it.copy(androidTouch = it.androidTouch.copy(scale = value)) }
                     },
                     onButtonScaleChange = { value ->
-                        viewModel.updateSettings(state.settings.copy(androidTouch = state.settings.androidTouch.copy(buttonScale = value)))
+                        viewModel.updateSettingsTransform { it.copy(androidTouch = it.androidTouch.copy(buttonScale = value)) }
                     },
                     onStickScaleChange = { value ->
-                        viewModel.updateSettings(state.settings.copy(androidTouch = state.settings.androidTouch.copy(stickScale = value)))
+                        viewModel.updateSettingsTransform { it.copy(androidTouch = it.androidTouch.copy(stickScale = value)) }
                     },
                     onOpacityChange = { value ->
-                        viewModel.updateSettings(state.settings.copy(androidTouch = state.settings.androidTouch.copy(opacity = value)))
+                        viewModel.updateSettingsTransform { it.copy(androidTouch = it.androidTouch.copy(opacity = value)) }
                     },
                     onMouseSensitivityChange = { value ->
                         viewModel.updateStreamSettings { s -> s.copy(mouseSensitivity = value) }
@@ -8428,22 +8430,22 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                         viewModel.updateStreamSettings { s -> s.copy(mouseScrollSensitivity = value) }
                     },
                     onNativeTouchScrollScaleChange = { value ->
-                        viewModel.updateSettings(state.settings.copy(androidTouch = state.settings.androidTouch.copy(nativeTouchScrollScale = value)))
+                        viewModel.updateSettingsTransform { it.copy(androidTouch = it.androidTouch.copy(nativeTouchScrollScale = value)) }
                     },
                     onNativeTouchJitterThresholdChange = { value ->
-                        viewModel.updateSettings(state.settings.copy(androidTouch = state.settings.androidTouch.copy(nativeTouchJitterThresholdDp = value)))
+                        viewModel.updateSettingsTransform { it.copy(androidTouch = it.androidTouch.copy(nativeTouchJitterThresholdDp = value)) }
                     },
                     onTouchEdgePaddingChange = { value ->
-                        viewModel.updateSettings(state.settings.copy(androidTouch = state.settings.androidTouch.copy(edgePaddingDp = value)))
+                        viewModel.updateSettingsTransform { it.copy(androidTouch = it.androidTouch.copy(edgePaddingDp = value)) }
                     },
                     onTouchBottomPaddingChange = { value ->
-                        viewModel.updateSettings(state.settings.copy(androidTouch = state.settings.androidTouch.copy(bottomPaddingDp = value)))
+                        viewModel.updateSettingsTransform { it.copy(androidTouch = it.androidTouch.copy(bottomPaddingDp = value)) }
                     },
                     onTouchLeftOffsetChange = { value ->
-                        viewModel.updateSettings(state.settings.copy(androidTouch = state.settings.androidTouch.copy(leftOffsetYDp = value)))
+                        viewModel.updateSettingsTransform { it.copy(androidTouch = it.androidTouch.copy(leftOffsetYDp = value)) }
                     },
                     onTouchRightOffsetChange = { value ->
-                        viewModel.updateSettings(state.settings.copy(androidTouch = state.settings.androidTouch.copy(rightOffsetYDp = value)))
+                        viewModel.updateSettingsTransform { it.copy(androidTouch = it.androidTouch.copy(rightOffsetYDp = value)) }
                     },
                     onTouchLayoutReset = {
                         viewModel.updateSettings(
@@ -8647,8 +8649,8 @@ private fun QuickAccessFab(
     var expanded by remember { mutableStateOf(false) }
     // F-11: pointerInput(Unit) below runs its block once and keeps the first-composition
     // callbacks, so onDragEnd would otherwise call a stale onFabPositionChange forever;
-    // rememberUpdatedState keeps it pointed at the latest callback (which writes through
-    // updateSettingsTransform, never a stale replace()).
+    // rememberUpdatedState keeps it pointed at the latest callback. This callback writes
+    // through updateSettingsTransform, so even a stale capture cannot replace() settings.
     val currentOnFabPositionChange by rememberUpdatedState(onFabPositionChange)
     BoxWithConstraints(modifier.fillMaxSize()) {
         val density = LocalDensity.current

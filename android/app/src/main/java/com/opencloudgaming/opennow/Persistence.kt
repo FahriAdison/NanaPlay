@@ -6,6 +6,7 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.decodeFromJsonElement
@@ -23,6 +24,7 @@ import java.io.File
 import java.io.FileInputStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 private const val STORE_NAME = "opennow_native"
@@ -273,6 +275,27 @@ class ExternalPrefs private constructor(context: Context, val name: String) {
     }
 }
 
+/**
+ * In-memory holder for [AppSettings] with atomic read-modify-write semantics, extracted from
+ * [SettingsStore] so they can be unit-tested without an Android [Context]. [update] always
+ * runs its transform on the latest value — on update, a stale caller can never revert other
+ * fields. That guarantee does NOT extend to [replace]: replace overwrites the whole object
+ * (full-object writes from the Settings screens) and will revert fields a stale caller holds.
+ */
+internal class AtomicSettingsCell(initial: AppSettings) {
+    private val flow = MutableStateFlow(initial)
+    val settings: StateFlow<AppSettings> = flow.asStateFlow()
+    val value: AppSettings get() = flow.value
+
+    fun replace(next: AppSettings) {
+        flow.value = next
+    }
+
+    fun update(transform: (AppSettings) -> AppSettings) {
+        flow.update(transform)
+    }
+}
+
 class SettingsStore(context: Context) {
     private val prefs = ExternalPrefs.get(context, STORE_NAME)
     // Proxy credentials may embed username:password — kept in internal
@@ -280,12 +303,15 @@ class SettingsStore(context: Context) {
     private val securePrefs =
         context.applicationContext.getSharedPreferences(PROXY_STORE_NAME, Context.MODE_PRIVATE)
     private val androidTvProfile = isAndroidTvProfile(context)
-    private val _settings = MutableStateFlow(
+    // Single-thread background writer: every persist runs here in submission order, so the
+    // calling thread (settings clicks, per-frame slider drags) never blocks on disk I/O.
+    private val persistScope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
+    private val cell = AtomicSettingsCell(
         load()
             .withCurrentStreamPresentationDefaults(androidTvProfile)
             .normalizedForAndroid(),
     )
-    val settings: StateFlow<AppSettings> = _settings
+    val settings: StateFlow<AppSettings> = cell.settings
 
     private fun load(): AppSettings {
         val raw = prefs.getString(KEY_SETTINGS, null) ?: return AppSettings().withStoredProxyUrl()
@@ -321,7 +347,7 @@ class SettingsStore(context: Context) {
         var previous: AppSettings? = null
         var next: AppSettings? = null
         // Atomic read-modify-write on the in-memory state; the transform must be pure.
-        _settings.update { current ->
+        cell.update { current ->
             previous = current
             next = transform(current)
                 .withCurrentStreamPresentationDefaults(androidTvProfile)
@@ -334,7 +360,7 @@ class SettingsStore(context: Context) {
     fun replace(next: AppSettings) {
         var previous: AppSettings? = null
         var normalized: AppSettings? = null
-        _settings.update { current ->
+        cell.update { current ->
             previous = current
             normalized = next
                 .withCurrentStreamPresentationDefaults(androidTvProfile)
@@ -345,25 +371,29 @@ class SettingsStore(context: Context) {
     }
 
     /**
-     * Persists settings without blocking the caller: proxy credentials go to
-     * internal storage (synchronously — a single key, so the external JSON can
-     * never become the only copy), the external JSON is written with the proxy
-     * stripped, and the previous JSON is kept as a last-known-good backup.
+     * Persists settings without blocking the caller: all writes are queued on the
+     * single-thread [persistScope] in submission order. Ordering is still
+     * credentials-first — the proxy URL is committed to internal storage before the
+     * external JSON is applied, so the external file can never become the only copy.
+     * The external JSON is written with the proxy stripped, and the previous JSON is
+     * kept as a last-known-good backup.
      */
     private fun persistSettings(previous: AppSettings?, next: AppSettings) {
-        // Credentials first: the external JSON must never be the only copy.
-        securePrefs.edit().putString(KEY_PROXY_URL, next.stream.sessionProxyUrl).commit()
-        val editor = prefs.edit()
-        if (previous != null) {
+        persistScope.launch {
+            // Credentials first: the external JSON must never be the only copy.
+            securePrefs.edit().putString(KEY_PROXY_URL, next.stream.sessionProxyUrl).commit()
+            val editor = prefs.edit()
+            if (previous != null) {
+                editor.putString(
+                    KEY_SETTINGS_BACKUP,
+                    OpenNowJson.encodeToString(previous.withoutProxyUrl()),
+                )
+            }
             editor.putString(
-                KEY_SETTINGS_BACKUP,
-                OpenNowJson.encodeToString(previous.withoutProxyUrl()),
-            )
+                KEY_SETTINGS,
+                OpenNowJson.encodeToString(next.withoutProxyUrl()),
+            ).apply()
         }
-        editor.putString(
-            KEY_SETTINGS,
-            OpenNowJson.encodeToString(next.withoutProxyUrl()),
-        ).apply()
     }
 
     /**
@@ -371,7 +401,7 @@ class SettingsStore(context: Context) {
      * Call after a catalog refresh with the ids of all known games.
      */
     fun prunePerGameSettings(knownGameIds: Set<String>) {
-        val current = _settings.value
+        val current = cell.value
         if (current.perGameSettings.keys.all { it in knownGameIds }) return
         update { it.copy(perGameSettings = it.perGameSettings.filterKeys { id -> id in knownGameIds }) }
     }
@@ -380,8 +410,11 @@ class SettingsStore(context: Context) {
         replace(AppSettings())
     }
 
-    /** Stream-level normalization, shared by global settings and per-game overrides. */
-    private fun StreamSettings.normalizedStreamForAndroid(): StreamSettings =
+}
+
+/** Stream-level normalization, shared by global settings and per-game overrides. Pure top-level
+ *  function (extracted from SettingsStore) so replace/update normalization is unit-testable. */
+internal fun StreamSettings.normalizedStreamForAndroid(): StreamSettings =
         withCodecColorCompatibility().copy(
             sessionProxyUrl = sessionProxyUrl.trim(),
             maxBitrateMbps = maxBitrateMbps.coerceIn(1, 150),
@@ -389,7 +422,7 @@ class SettingsStore(context: Context) {
             streamSharpeningAmount = streamSharpeningAmount.coerceIn(0f, 1f),
         )
 
-    private fun AppSettings.normalizedForAndroid(): AppSettings {
+internal fun AppSettings.normalizedForAndroid(): AppSettings {
         return copy(
             stream = stream.normalizedStreamForAndroid(),
             perGameSettings = perGameSettings.mapValues { (_, override) ->
@@ -426,7 +459,6 @@ class SettingsStore(context: Context) {
             controllerUiSounds = controllerUiSounds,
             autoFullScreen = true,
         )
-    }
 }
 
 class AuthStore(context: Context) {

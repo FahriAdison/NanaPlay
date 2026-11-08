@@ -151,6 +151,36 @@ object NanaMusicPlayer {
         playbackHistory.toList()
     }
 
+    private const val LIFECYCLE_LOG_NAME = "nana_music_lifecycle.log"
+    private const val MAX_LIFECYCLE_LOG_BYTES = 64 * 1024
+
+    /**
+     * Instrumentasi murni (tanpa mengubah perilaku playback): marker lifecycle service musik,
+     * dicatat ke ring buffer via [logMusicEvent] AND ke file persisten (ditulis off-thread lewat
+     * persistScope). Supaya paste diagnostik pasca-kejadian bisa membedakan "musik berhenti
+     * saat proses masih hidup" (ada marker onDestroy/onTaskRemoved, tidak ada record baru di
+     * process exit history) vs "proses/service mati" (ada record exit reason pada timestamp
+     * yang sama di AndroidProcessExitDiagnostics).
+     */
+    fun logLifecycleMarker(context: Context, event: String) {
+        logMusicEvent(event)
+        val appContext = context.applicationContext
+        val line = "${System.currentTimeMillis()} $event\n"
+        persistScope.launch {
+            runCatching {
+                val file = java.io.File(appContext.filesDir, LIFECYCLE_LOG_NAME)
+                file.appendText(line)
+                if (file.length() > MAX_LIFECYCLE_LOG_BYTES) {
+                    file.writeText(file.readText().takeLast(MAX_LIFECYCLE_LOG_BYTES / 2))
+                }
+            }
+        }
+    }
+
+    fun readLifecycleLog(context: Context): String = runCatching {
+        java.io.File(context.applicationContext.filesDir, LIFECYCLE_LOG_NAME).readText()
+    }.getOrDefault("")
+
     // ---- 1.0.26: playback state persistence (Spotify-style restore) ----
     // Persists the playlist (local URIs + online saavnIds/metadata), the
     // current track identity, and the playback position. Restored lazily on

@@ -864,6 +864,14 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                         appendLine(remoteIceLog)
                         appendLine()
                     }
+                    // Instrumentasi hunt musik berhenti sendiri: marker lifecycle service
+                    // persisten, bisa dikorelasikan dengan process exit history di bawah.
+                    val musicLifecycleLog = NanaMusicPlayer.readLifecycleLog(getApplication())
+                    if (musicLifecycleLog.isNotBlank()) {
+                        appendLine("---- music service lifecycle ----")
+                        appendLine(musicLifecycleLog.trimEnd())
+                        appendLine()
+                    }
                     appendLine("---- process exit history ----")
                     appendLine("availability=${exitHistory.availability} records=${exitHistory.records.size}")
                     for (record in exitHistory.records) {
@@ -4426,6 +4434,27 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 streamSession = null,
                 error = null,
             )
+        }
+        // Stop the abandoned cloud session before re-queueing: without this the old
+        // session stays alive server-side and can block the new one (queue looking
+        // stuck again right after a retry). Tolerant by design — a failed stop is
+        // only logged and must never cancel the play() below.
+        val auth = snapshot.authSession
+        if (auth != null && oldSession != null) {
+            val token = auth.tokens.idToken ?: auth.tokens.accessToken
+            val stopSettings = snapshot.activeStreamSettings ?: effectiveStreamSettings()
+            viewModelScope.launch {
+                runCatching { sessionRepository.stopSession(token, oldSession, stopSettings) }
+                    .onSuccess {
+                        lastStoppedSessionId = oldSession.sessionId
+                        recordDebugEvent("queue", "Stopped abandoned cloud session ${oldSession.shortDebugId()} before retry")
+                    }
+                    .onFailure { error ->
+                        recordDebugEvent("queue", "Failed to stop abandoned cloud session ${oldSession.shortDebugId()} before retry error=${error.debugMessage()}")
+                    }
+            }
+        } else {
+            recordDebugEvent("queue", "Retry requested with nothing to stop auth=${auth != null} oldSession=${oldSession?.shortDebugId() ?: "-"}")
         }
         // Re-create the session from scratch on the same server, keeping the
         // measured ping so the high-ping warning survives the retry.

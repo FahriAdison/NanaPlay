@@ -88,12 +88,16 @@ class NanaMusicPlaybackService : MediaSessionService() {
         // Swiping the app away must NOT stop the music — background playback
         // is the entire point of this service. Only stop when idle.
         val player = session?.player
+        // Instrumentasi saja: marker lifecycle persisten untuk hunt "musik berhenti sendiri".
+        NanaMusicPlayer.logLifecycleMarker(this, "music.onTaskRemoved playWhenReady=${player?.playWhenReady} state=${player?.playbackState}")
         if (player == null || !player.playWhenReady || player.playbackState == Player.STATE_IDLE) {
             stopSelf()
         }
     }
 
     override fun onDestroy() {
+        // Instrumentasi saja: marker lifecycle persisten untuk hunt "musik berhenti sendiri".
+        NanaMusicPlayer.logLifecycleMarker(this, "music.onDestroy playWhenReady=${session?.player?.playWhenReady} state=${session?.player?.playbackState}")
         session?.release()
         session = null
         super.onDestroy()

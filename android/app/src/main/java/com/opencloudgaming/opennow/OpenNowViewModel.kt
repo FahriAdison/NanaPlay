@@ -24,6 +24,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -65,6 +66,11 @@ private const val QUEUE_POLL_MAX_CONSECUTIVE_FAILURES = 10
 /** Transient-failure retries for session creation before surfacing the error. */
 private const val CREATE_SESSION_MAX_ATTEMPTS = 3
 private const val CREATE_SESSION_RETRY_BASE_MS = 2_000L
+// The GFN OkHttp client sets no callTimeout (15s connect + 30s read), so a hung DELETE
+// could hold the retry for ~45s. 5s covers a normal DELETE on mobile data while keeping
+// the retry button responsive; past it we continue with the retry, and only a DELETE we
+// know returned success keeps its session id out of the launch conflict check.
+private const val RETRY_QUEUE_STOP_TIMEOUT_MS = 5_000L
 /** Matches "CloudMatch returned status N" in toSessionInfo check() failures. */
 private val CLOUDMATCH_STATUS_REGEX = Regex("""\bCloudMatch returned status\s+(\d+)\b""")
 /** Give up stream recovery after this long instead of hanging on "Reconnecting stream" forever. */
@@ -309,6 +315,9 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
     private var catalogServerSearchJob: Job? = null
     private var launchJob: Job? = null
     private var stopJob: Job? = null
+    // Single-flight guard for the "queue looks stuck" retry. Deliberately not launchJob:
+    // play() refuses to run while launchJob.isActive.
+    private var retryQueueJob: Job? = null
     private var lastStoppedSessionId: String? = null
     private var pollingGeneration = 0
     private var consecutiveHighThermalTicks = 0
@@ -1813,6 +1822,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         skipPrintedWaste: Boolean = false,
         skipStoreChoice: Boolean = false,
         serverPingMs: Long? = null,
+        excludeActiveSessionId: String? = null,
     ) {
         if (launchJob?.isActive == true) {
             recordDebugEvent("launch", "Ignored play request while another launch is active game=${game.title}")
@@ -1838,6 +1848,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     skipPrintedWaste,
                     skipStoreChoice = true,
                     serverPingMs = serverPingMs,
+                    excludeActiveSessionId = excludeActiveSessionId,
                 )
                 return
             }
@@ -1956,7 +1967,9 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 val numericLaunchAppId = launchAppId?.toIntOrNull()
                 // A null list means the lookup itself failed, so an unknown-seat launch reads it as
                 // "no seat found" and must never raise the resume/end dialog.
-                val activeConflict = active?.let { activeSessionLaunchConflict(it, numericLaunchAppId, settings) }
+                val activeConflict = active?.let {
+                    activeSessionLaunchConflict(it, numericLaunchAppId, settings, excludeActiveSessionId)
+                }
                 if (active != null && activeConflict != null) {
                     pendingActiveSessionLaunch = PendingActiveSessionLaunch(
                         game = game,
@@ -4400,6 +4413,10 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
      * cancels the wedged launch and starts a fresh session creation.
      */
     fun retryQueue() {
+        if (retryQueueJob?.isActive == true) {
+            recordDebugEvent("queue", "Ignored queue retry while the previous retry is still running")
+            return
+        }
         pollingGeneration++
         val snapshot = state.value
         val game = snapshot.streamGame ?: return
@@ -4437,34 +4454,64 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         }
         // Stop the abandoned cloud session before re-queueing: without this the old
         // session stays alive server-side and can block the new one (queue looking
-        // stuck again right after a retry). Tolerant by design — a failed stop is
-        // only logged and must never cancel the play() below.
+        // stuck again right after a retry). The stop is awaited inside a dedicated job
+        // so play()'s active-session check runs after the DELETE finished; a
+        // fire-and-forget stop raced that check and made the retry land straight back
+        // in the "Active session found" dialog. Tolerant by design — a failed or slow
+        // stop is only logged and must never cancel the play() below.
         val auth = snapshot.authSession
-        if (auth != null && oldSession != null) {
-            val token = auth.tokens.idToken ?: auth.tokens.accessToken
-            val stopSettings = snapshot.activeStreamSettings ?: effectiveStreamSettings()
-            viewModelScope.launch {
-                runCatching { sessionRepository.stopSession(token, oldSession, stopSettings) }
-                    .onSuccess {
+        val stopSettings = snapshot.activeStreamSettings ?: effectiveStreamSettings()
+        retryQueueJob = viewModelScope.launch {
+            try {
+                var stoppedSessionId: String? = null
+                if (auth != null && oldSession != null) {
+                    val token = auth.tokens.idToken ?: auth.tokens.accessToken
+                    val stopped = try {
+                        withTimeoutOrNull(RETRY_QUEUE_STOP_TIMEOUT_MS) {
+                            sessionRepository.stopSession(token, oldSession, stopSettings)
+                            true
+                        } ?: run {
+                            recordDebugEvent(
+                                "queue",
+                                "Timed out after ${RETRY_QUEUE_STOP_TIMEOUT_MS}ms stopping abandoned cloud session " +
+                                    "${oldSession.shortDebugId()} before retry, continuing",
+                            )
+                            false
+                        }
+                    } catch (e: CancellationException) {
+                        // ViewModel teardown must unwind instead of being reported as an
+                        // ordinary network failure.
+                        throw e
+                    } catch (e: Throwable) {
+                        recordDebugEvent("queue", "Failed to stop abandoned cloud session ${oldSession.shortDebugId()} before retry error=${e.debugMessage()}")
+                        false
+                    }
+                    if (stopped) {
                         lastStoppedSessionId = oldSession.sessionId
+                        stoppedSessionId = oldSession.sessionId
                         recordDebugEvent("queue", "Stopped abandoned cloud session ${oldSession.shortDebugId()} before retry")
                     }
-                    .onFailure { error ->
-                        recordDebugEvent("queue", "Failed to stop abandoned cloud session ${oldSession.shortDebugId()} before retry error=${error.debugMessage()}")
-                    }
+                } else {
+                    recordDebugEvent("queue", "Retry requested with nothing to stop auth=${auth != null} oldSession=${oldSession?.shortDebugId() ?: "-"}")
+                }
+                // Re-create the session from scratch on the same server, keeping the
+                // measured ping so the high-ping warning survives the retry. The id we
+                // just deleted is excluded from the launch conflict check: the active
+                // session list can still list it briefly after the DELETE (and a timed
+                // out DELETE leaves the outcome open), so treating it as a conflict
+                // would put the retry right back into the stuck queue.
+                play(
+                    game,
+                    streamingBaseUrlOverride = snapshot.streamLaunchBaseUrl,
+                    skipPrintedWaste = true,
+                    skipStoreChoice = true,
+                    serverPingMs = snapshot.streamServerPingMs,
+                    excludeActiveSessionId = stoppedSessionId,
+                )
+            } finally {
+                retryQueueJob = null
             }
-        } else {
-            recordDebugEvent("queue", "Retry requested with nothing to stop auth=${auth != null} oldSession=${oldSession?.shortDebugId() ?: "-"}")
         }
-        // Re-create the session from scratch on the same server, keeping the
-        // measured ping so the high-ping warning survives the retry.
-        play(
-            game,
-            streamingBaseUrlOverride = snapshot.streamLaunchBaseUrl,
-            skipPrintedWaste = true,
-            skipStoreChoice = true,
-            serverPingMs = snapshot.streamServerPingMs,
-        )
     }
 
     fun retryWithAnotherServer() {

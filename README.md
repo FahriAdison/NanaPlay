@@ -11,6 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/FahriAdison/NanaPlay/releases/latest">Downloads</a> ·
+  <a href="#why-nanaplay">Why NanaPlay</a> ·
   <a href="#features">Features</a> ·
   <a href="#building">Build from source</a> ·
   <a href="#changelog-recent">Changelog</a> ·
@@ -24,6 +25,11 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/codexgpt497-ai/nanaplay-builder/actions/workflows/test.yml">
+    <img src="https://github.com/codexgpt497-ai/nanaplay-builder/actions/workflows/test.yml/badge.svg?branch=main" alt="Tests">
+  </a>
+  <img src="https://img.shields.io/github/downloads/FahriAdison/NanaPlay/total?style=flat-square&label=Downloads" alt="Total downloads">
+  <img src="https://img.shields.io/github/stars/FahriAdison/NanaPlay?style=flat-square" alt="GitHub stars">
   <img src="https://img.shields.io/badge/Status-Beta-orange?style=flat-square" alt="Beta">
   <img src="https://img.shields.io/badge/Platform-Android-3DDC84?style=flat-square&logo=android&logoColor=white" alt="Android">
   <img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" alt="MIT License">
@@ -34,22 +40,33 @@
 
 ---
 
+## Contents
+
+- [Screenshots](#screenshots)
+- [Why NanaPlay](#why-nanaplay)
+- [Features](#features)
+- [Download](#download)
+- [FAQ](#faq)
+- [Building](#building)
+- [Changelog](#changelog-recent)
+- [Roadmap](#roadmap)
+- [Community](#community)
+- [Support](#support)
+- [Credits](#credits)
+- [Disclaimer](#disclaimer)
+- [License](#license)
+
+---
+
 NanaPlay is a community fork of [OpenNOW](https://github.com/OpenCloudGaming/OpenNOW) by [Zortos](https://github.com/OpenCloudGaming), recoded for Android by **Papah Chan** ([FahriAdison](https://github.com/FahriAdison)).
 
 It keeps OpenNOW's GeForce NOW streaming core and builds a console-style experience on top: a PS5-inspired interface, touch controls you can rearrange freely, smarter queue handling, and tuning for players on slower or unstable networks.
 
+> [!WARNING]
 > **Beta status.** NanaPlay is tested on real devices and works, but it's still beta — expect some rough edges. Bug reports are welcome in [Issues](https://github.com/FahriAdison/NanaPlay/issues) or on Discord.
 
+> [!IMPORTANT]
 > **You need your own GeForce NOW account.** Your subscription tier and region determine which games and stream settings are available to you.
-
----
-
-## Download
-
-Grab the latest APK from the [Releases page](https://github.com/FahriAdison/NanaPlay/releases/latest). The in-app updater will notify you when a new version is out.
-
-- **Package:** `com.papahchan.nanaplay` — different from upstream OpenNOW, so both can be installed side-by-side.
-- If you previously installed a NanaPlay build under the old package (`com.opencloudgaming.opennow`), uninstall it first. Your GeForce NOW login is server-side, so just sign in again.
 
 ---
 
@@ -59,6 +76,20 @@ Grab the latest APK from the [Releases page](https://github.com/FahriAdison/Nana
   <img src="screenshot-console.png" width="720" alt="NanaPlay Console Mode">
 </p>
 <p align="center"><em>Console Mode — PS5-style interface in landscape</em></p>
+
+---
+
+## Why NanaPlay
+
+Same GeForce NOW streaming core as OpenNOW — a different experience on top:
+
+|  | NanaPlay | OpenNOW (Android) |
+|---|---|---|
+| Interface | PS5-style Console Mode, D-pad navigation | Standard layout |
+| Queue | Redesigned queue with route picker, ping bars, live countdown | Standard queue |
+| Poor networks | Persistent reconnect with backoff, low-bandwidth fallback under ~4 Mbps | Standard reconnect |
+| Touch controls | Fully rearrangable layout, Quick Bar, remappable overlay shortcut | Fixed touch layout |
+| Updates | In-app updater via GitHub Releases + in-app announcements | GitHub Releases |
 
 ---
 
@@ -80,6 +111,52 @@ Grab the latest APK from the [Releases page](https://github.com/FahriAdison/Nana
 - **Floating browser** — lightweight WebView over the stream for maps and guides.
 - **Stream recording & screenshots** — record to MP4, capture PNGs.
 - **Low-latency audio toggle**, **maintenance/patching banners** with pre-play confirmation, in-app announcements.
+
+---
+
+## Download
+
+Grab the latest APK from the [Releases page](https://github.com/FahriAdison/NanaPlay/releases/latest). The in-app updater will notify you when a new version is out.
+
+- **Package:** `com.papahchan.nanaplay` — different from upstream OpenNOW, so both can be installed side-by-side.
+- If you previously installed a NanaPlay build under the old package (`com.opencloudgaming.opennow`), uninstall it first. Your GeForce NOW login is server-side, so just sign in again.
+- **Minimum Android:** 6.0 (API 23).
+
+### APK Info
+
+Verify your download is really from Papah Chan. The release APK is signed with the NanaPlay key — check the certificate fingerprint:
+
+```
+SHA-256: EF:0A:A2:68:4A:45:F5:3C:4E:98:C7:7E:B1:AB:E8:01:53:7A:DB:BA:81:77:30:B6:B6:B8:6C:4C:EE:4F:D6:E2
+```
+
+```bash
+apksigner verify --print-certs NanaPlay-1.0.106.apk
+```
+
+If the fingerprint does not match, do not install the file — get the APK from the Releases page above.
+
+---
+
+## FAQ
+
+**Do I need a GeForce NOW account?**
+Yes — your own account. Your subscription tier and region decide which games and stream settings you can use.
+
+**Can I install NanaPlay alongside OpenNOW?**
+Yes. NanaPlay uses the package `com.papahchan.nanaplay`, different from OpenNOW, so both live side-by-side.
+
+**What Android version do I need?**
+Android 6.0 (API 23) or newer.
+
+**I keep getting "Server tidak merespons" / "Server not responding". Is it the app?**
+Usually not. Since late October 2026 this has mostly been a server-side GeForce NOW issue affecting third-party clients (including OpenNOW) — the official GFN app sometimes still works while it lasts. End the stream normally and try again later. If NanaPlay itself misbehaves, report it (see below) — the 1.0.106 update also added launch diagnostics to help trace these incidents.
+
+**How do I report a bug?**
+In the app: Settings → Share diagnostics, then send the link to Papah. Or open an [Issue](https://github.com/FahriAdison/NanaPlay/issues) / ask on [Discord](https://discord.gg/TyBrNKnavR). Include your build, device, and steps to reproduce — and the diagnostics link for streaming bugs.
+
+**Is NanaPlay on the Play Store?**
+No. Download the APK from the [Releases page](https://github.com/FahriAdison/NanaPlay/releases/latest); the in-app updater will tell you when a new version is out.
 
 ---
 
@@ -119,18 +196,25 @@ Repository layout:
 
 | Version | Highlights |
 |---------|------------|
+| 1.0.106 | Launch identity diagnostics; retry selected video profile on first video-offer timeout; CloudMatch launch-mode headers |
+| 1.0.105 | Queue retry no longer races the session stop (no more false "Active session found") |
 | 1.0.80 | Fixed touch-layout edits being wiped when dragging the quick bar, keyboard bar, or control panel |
 | 1.0.79 | Layout lock toggle + reset confirmation; analog stick auto-recenter |
 | 1.0.78 | Fixed false APK signature-mismatch error on Android 9 |
 | 1.0.77 | Customizable overlay shortcut; updated About page |
 | 1.0.76 | Maintenance/patching warning banner with pre-play confirmation |
 | 1.0.75 | Session management (ported from upstream) |
-| 1.0.74 | Browser panel drag fix; queue dock in portrait console mode |
-| 1.0.72 | Adaptive network adjustment; mouse-to-touch-drag for NTE |
-| 1.0.71 | Music player hardening: repeat/shuffle, notification controls, call auto-pause |
-| 1.0.20 | New package `com.papahchan.nanaplay`; first GitHub release |
-| 1.0.19 | Persistent reconnect for poor networks |
-| 1.0.10 | First Console Mode |
+
+Full history: [Releases](https://github.com/FahriAdison/NanaPlay/releases).
+
+---
+
+## Roadmap
+
+- Music player hardening pass
+- Per-game settings memory
+- Smarter low-power Stream warning (no more false alarms on wide 720p)
+- "Tombol Bebas" — free-place keyboard overlay
 
 ---
 

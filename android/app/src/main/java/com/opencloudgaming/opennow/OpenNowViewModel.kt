@@ -1952,7 +1952,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
 
                 _state.update { it.copy(launchPhase = "Checking active sessions") }
                 val active = try {
-                    sessionRepository.getActiveSessions(token, baseUrl, settings)
+                    sessionRepository.getActiveSessions(token, baseUrl, settings, appLaunchMode = currentAppLaunchMode(game))
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Throwable) {
@@ -2134,7 +2134,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         val resolvedLaunchAppId = launchAppId ?: game.launchAppId ?: game.uuid ?: game.id
         val token = auth.tokens.idToken ?: auth.tokens.accessToken
         val existing = try {
-            sessionRepository.getActiveSessions(token, baseUrl, settings)
+            sessionRepository.getActiveSessions(token, baseUrl, settings, appLaunchMode = currentAppLaunchMode(game))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
@@ -2339,7 +2339,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             val session = snapshot.streamSession
             val streamSettings = snapshot.activeStreamSettings ?: effectiveStreamSettings()
             if (auth != null && session != null) {
-                runCatching { sessionRepository.stopSession(auth.tokens.idToken ?: auth.tokens.accessToken, session, streamSettings) }
+                runCatching { sessionRepository.stopSession(auth.tokens.idToken ?: auth.tokens.accessToken, session, streamSettings, appLaunchMode = currentAppLaunchMode(snapshot.streamGame)) }
                     .onSuccess {
                         lastStoppedSessionId = session.sessionId
                         sessionTimerAnchorStore.clear(session.sessionId)
@@ -2350,11 +2350,11 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 val token = auth.tokens.idToken ?: auth.tokens.accessToken
                 val active = snapshot.activeSession
                     ?: runCatching {
-                        sessionRepository.getActiveSessions(token, effectiveStreamingBaseUrl(auth), streamSettings)
+                        sessionRepository.getActiveSessions(token, effectiveStreamingBaseUrl(auth), streamSettings, appLaunchMode = currentAppLaunchMode(snapshot.streamGame))
                             .firstOrNull { it.status in setOf(1, 2, 3) }
                     }.getOrNull()
                 if (active != null) {
-                    runCatching { sessionRepository.stopActiveSession(token, active, streamSettings) }
+                    runCatching { sessionRepository.stopActiveSession(token, active, streamSettings, appLaunchMode = currentAppLaunchMode(snapshot.streamGame)) }
                         .onSuccess {
                             lastStoppedSessionId = active.sessionId
                             sessionTimerAnchorStore.clear(active.sessionId)
@@ -2511,7 +2511,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             var launchSession: SessionInfo? = null
             runCatching {
                 val token = launchAuthToken(auth)
-                runCatching { sessionRepository.stopActiveSession(token, pending.activeSession, pending.settings) }
+                runCatching { sessionRepository.stopActiveSession(token, pending.activeSession, pending.settings, appLaunchMode = currentAppLaunchMode(pending.game)) }
                     .onSuccess {
                         sessionTimerAnchorStore.clear(pending.activeSession.sessionId)
                         recordDebugEvent("queue", "Stopped active session before new launch ${pending.activeSession.shortDebugId()}")
@@ -2608,7 +2608,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             var resumeSession: SessionInfo? = null
             runCatching {
                 val token = launchAuthToken(auth)
-                val active = cachedActive ?: sessionRepository.getActiveSessions(token, baseUrl, settings)
+                val active = cachedActive ?: sessionRepository.getActiveSessions(token, baseUrl, settings, appLaunchMode = currentAppLaunchMode(state.value.streamGame))
                     .let { activeSessionLaunchConflict(it, launchAppId = null, settings = settings) }
                     ?: error("No active cloud session was found. Start a game to create a new one.")
                 val resumeSettings = resumeSettingsForActiveSession(active, settings)
@@ -2878,6 +2878,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                         pausedTimeInMs = pausedTimeInMs ?: 0L,
                         cancelReason = cancelReason,
                         errorInfo = errorInfo,
+                        appLaunchMode = currentAppLaunchMode(state.value.streamGame),
                     )
                 }
             }.onSuccess { updated ->
@@ -3121,6 +3122,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     clientId = session.clientId,
                     deviceId = session.deviceId,
                     settings = settings,
+                    appLaunchMode = currentAppLaunchMode(initial.streamGame),
                 )
             }.getOrElse { error ->
                 if (error is CancellationException) throw error
@@ -3185,7 +3187,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             viewModelScope.launch {
                 val token = auth.tokens.idToken ?: auth.tokens.accessToken
                 runCatching {
-                    sessionRepository.stopSession(token, initialSession, currentSettings)
+                    sessionRepository.stopSession(token, initialSession, currentSettings, appLaunchMode = currentAppLaunchMode(initial.streamGame))
                 }.onSuccess {
                     sessionTimerAnchorStore.clear(initialSession.sessionId)
                     recordDebugEvent("recovery", "Stopped dead session after offer timeout: ${initialSession.shortDebugId()}")
@@ -3265,7 +3267,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                         fallbackAppId = active?.appId,
                         settings = currentSettings,
                     )
-                    val activeSessions = sessionRepository.getActiveSessions(token, baseUrl, currentSettings)
+                    val activeSessions = sessionRepository.getActiveSessions(token, baseUrl, currentSettings, appLaunchMode = currentAppLaunchMode(state.value.streamGame))
                     recordDebugEvent("recovery", "Recovery active sessions count=${activeSessions.size} base=${hostForDebug(baseUrl)}")
                     // 1.0.37 (port from upstream): zero active sessions means the old
                     // session is fully gone — strict matching cannot succeed. Fail fast
@@ -3390,6 +3392,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     clientId = previousSession.clientId,
                     deviceId = previousSession.deviceId,
                     settings = settings,
+                    appLaunchMode = currentAppLaunchMode(state.value.streamGame),
                 )
             } catch (e: CancellationException) {
                 // A superseded coroutine must unwind instead of falling through to the
@@ -3967,6 +3970,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 clientId = null,
                 deviceId = null,
                 settings = settings,
+                appLaunchMode = currentAppLaunchMode(gameForActiveSession(active)),
             )
         } catch (e: CancellationException) {
             // A superseded coroutine must unwind. Swallowing cancellation here would let the
@@ -4019,12 +4023,22 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
      * a session created as GAMEPAD_FRIENDLY has no touchscreen, and will silently drop perfectly
      * well-formed touch packets.
      */
-    private fun appLaunchModeFor(game: GameInfo?): Int =
-        if (!androidTvProfile && shouldUseNativeTouch(_state.value.settings.androidTouch.nativeTouchMode, game)) {
-            GfnAppLaunchMode.TOUCH_FRIENDLY
-        } else {
-            GfnAppLaunchMode.GAMEPAD_FRIENDLY
-        }
+    private fun currentAppLaunchMode(game: GameInfo?): Int =
+        appLaunchModeFor(_state.value.settings.androidTouch.nativeTouchMode, game, androidTvProfile)
+
+    private fun appLaunchModeFor(game: GameInfo?): Int {
+        val nativeTouchMode = _state.value.settings.androidTouch.nativeTouchMode
+        val useNativeTouch = shouldUseNativeTouch(nativeTouchMode, game)
+        val appLaunchMode = currentAppLaunchMode(game)
+        recordDebugEvent(
+            "launch",
+            "Session identity title=${game?.title ?: "unknown"} id=${game?.id ?: "unknown"} " +
+                "nativeTouchMode=$nativeTouchMode nativeTouch=$useNativeTouch " +
+                "appLaunchMode=$appLaunchMode " +
+                "identity=${if (shouldUseBrowserIdentity(appLaunchMode)) "browser" else "desktop"}",
+        )
+        return appLaunchMode
+    }
 
     private suspend fun claimActiveSessionOrContinuePolling(
         token: String,
@@ -4196,6 +4210,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     clientId = latest.clientId,
                     deviceId = latest.deviceId,
                     settings = settings,
+                    appLaunchMode = currentAppLaunchMode(state.value.streamGame),
                 )
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
@@ -4468,7 +4483,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     val token = auth.tokens.idToken ?: auth.tokens.accessToken
                     val stopped = try {
                         withTimeoutOrNull(RETRY_QUEUE_STOP_TIMEOUT_MS) {
-                            sessionRepository.stopSession(token, oldSession, stopSettings)
+                            sessionRepository.stopSession(token, oldSession, stopSettings, appLaunchMode = currentAppLaunchMode(game))
                             true
                         } ?: run {
                             recordDebugEvent(

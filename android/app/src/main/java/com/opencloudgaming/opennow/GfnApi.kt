@@ -2511,6 +2511,7 @@ class GfnSessionRepository(
         clientId: String?,
         deviceId: String?,
         settings: StreamSettings,
+        appLaunchMode: Int = GfnAppLaunchMode.GAMEPAD_FRIENDLY,
     ): SessionInfo {
         val cid = clientId ?: UUID.randomUUID().toString()
         val did = deviceId ?: authStore.stableDeviceId()
@@ -2519,7 +2520,7 @@ class GfnSessionRepository(
         val requestHttp = if (isZoneHostname(host)) sessionProxyHttpClient(settings, http) else http
         val request = Request.Builder()
             .url("$base/v2/session/$sessionId")
-            .headers(cloudMatchHeaders(token, cid, did, includeOrigin = false, isAndroidTv = isAndroidTv))
+            .headers(cloudMatchHeaders(token, cid, did, includeOrigin = false, appLaunchMode = appLaunchMode, isAndroidTv = isAndroidTv))
             .build()
         val (code, text) = requestHttp.awaitText(request)
         recordDiagnosticResponse("session.poll", request, code, text)
@@ -2542,7 +2543,7 @@ class GfnSessionRepository(
             val directBase = "https://$realServer"
             val directRequest = Request.Builder()
                 .url("$directBase/v2/session/$sessionId")
-                .headers(cloudMatchHeaders(token, cid, did, includeOrigin = false, isAndroidTv = isAndroidTv))
+                .headers(cloudMatchHeaders(token, cid, did, includeOrigin = false, appLaunchMode = appLaunchMode, isAndroidTv = isAndroidTv))
                 .build()
             val (directCode, directText) = http.awaitText(directRequest)
             recordDiagnosticResponse("session.poll.direct", directRequest, directCode, directText)
@@ -2556,7 +2557,12 @@ class GfnSessionRepository(
         return toSessionInfo(zone, base, payload, cid, did)
     }
 
-    suspend fun stopSession(token: String, input: SessionInfo, settings: StreamSettings) {
+    suspend fun stopSession(
+        token: String,
+        input: SessionInfo,
+        settings: StreamSettings,
+        appLaunchMode: Int = GfnAppLaunchMode.GAMEPAD_FRIENDLY,
+    ) {
         val base = resolvePollStopBase(input.zone, input.streamingBaseUrl, input.serverIp)
         val host = Uri.parse(base).host.orEmpty()
         val requestHttp = if (isZoneHostname(host)) sessionProxyHttpClient(settings, http) else http
@@ -2564,7 +2570,7 @@ class GfnSessionRepository(
         val did = input.deviceId ?: authStore.stableDeviceId()
         val request = Request.Builder()
             .url("$base/v2/session/${input.sessionId}")
-            .headers(cloudMatchHeaders(token, cid, did, includeOrigin = false, isAndroidTv = isAndroidTv))
+            .headers(cloudMatchHeaders(token, cid, did, includeOrigin = false, appLaunchMode = appLaunchMode, isAndroidTv = isAndroidTv))
             .delete()
             .build()
         val (code, text) = requestHttp.awaitText(request)
@@ -2585,13 +2591,18 @@ class GfnSessionRepository(
         }
     }
 
-    suspend fun getActiveSessions(token: String, streamingBaseUrl: String, settings: StreamSettings): List<ActiveSessionInfo> {
+    suspend fun getActiveSessions(
+        token: String,
+        streamingBaseUrl: String,
+        settings: StreamSettings,
+        appLaunchMode: Int = GfnAppLaunchMode.GAMEPAD_FRIENDLY,
+    ): List<ActiveSessionInfo> {
         val base = streamingBaseUrl.trim().trimEnd('/')
         val host = Uri.parse(base).host.orEmpty()
         val requestHttp = if (isZoneHostname(host)) sessionProxyHttpClient(settings, http) else http
         val request = Request.Builder()
             .url("$base/v2/session")
-            .headers(cloudMatchHeaders(token, UUID.randomUUID().toString(), authStore.stableDeviceId(), includeOrigin = false, isAndroidTv = isAndroidTv))
+            .headers(cloudMatchHeaders(token, UUID.randomUUID().toString(), authStore.stableDeviceId(), includeOrigin = false, appLaunchMode = appLaunchMode, isAndroidTv = isAndroidTv))
             .build()
         val (code, text) = requestHttp.awaitText(request)
         recordDiagnosticResponse("session.active", request, code, text)
@@ -2649,7 +2660,7 @@ class GfnSessionRepository(
             val requestHttp = sessionProxyHttpClient(settings, http)
             val prefetch = Request.Builder()
                 .url("https://$effectiveServerIp/v2/session/${active.sessionId}")
-                .headers(cloudMatchHeaders(token, clientId, deviceId, includeOrigin = false, isAndroidTv = isAndroidTv))
+                .headers(cloudMatchHeaders(token, clientId, deviceId, includeOrigin = false, appLaunchMode = appLaunchMode, isAndroidTv = isAndroidTv))
                 .build()
             val (code, text) = requestHttp.awaitText(prefetch)
             recordDiagnosticResponse("session.claim.prefetch", prefetch, code, text)
@@ -2662,7 +2673,7 @@ class GfnSessionRepository(
         val validationUrl = "$sessionBase/v2/session/${active.sessionId}"
         val validationRequest = Request.Builder()
             .url(validationUrl)
-            .headers(cloudMatchHeaders(token, clientId, deviceId, includeOrigin = false, isAndroidTv = isAndroidTv))
+            .headers(cloudMatchHeaders(token, clientId, deviceId, includeOrigin = false, appLaunchMode = appLaunchMode, isAndroidTv = isAndroidTv))
             .build()
         val (validationCode, validationText) = http.awaitText(validationRequest)
         recordDiagnosticResponse("session.claim.validation", validationRequest, validationCode, validationText)
@@ -2723,7 +2734,7 @@ class GfnSessionRepository(
             if (attempt > 0) delay(1000)
             val poll = Request.Builder()
                 .url(validationUrl)
-                .headers(cloudMatchHeaders(token, clientId, deviceId, includeOrigin = false, isAndroidTv = isAndroidTv))
+                .headers(cloudMatchHeaders(token, clientId, deviceId, includeOrigin = false, appLaunchMode = appLaunchMode, isAndroidTv = isAndroidTv))
                 .build()
             val (code, text) = http.awaitText(poll)
             recordDiagnosticResponse("session.claim.poll", poll, code, text)
@@ -2741,9 +2752,15 @@ class GfnSessionRepository(
         throw SessionClaimNotReadyException(latestSession)
     }
 
-    suspend fun stopActiveSession(token: String, active: ActiveSessionInfo, settings: StreamSettings) {
+    suspend fun stopActiveSession(
+        token: String,
+        active: ActiveSessionInfo,
+        settings: StreamSettings,
+        appLaunchMode: Int = GfnAppLaunchMode.GAMEPAD_FRIENDLY,
+    ) {
         stopSession(
             token = token,
+            appLaunchMode = appLaunchMode,
             input = SessionInfo(
                 sessionId = active.sessionId,
                 status = active.status,
@@ -2772,6 +2789,7 @@ class GfnSessionRepository(
         pausedTimeInMs: Long? = null,
         cancelReason: String? = null,
         errorInfo: String? = null,
+        appLaunchMode: Int = GfnAppLaunchMode.GAMEPAD_FRIENDLY,
     ): SessionInfo {
         val base = resolvePollStopBase(session.zone, session.streamingBaseUrl, session.serverIp)
         val host = Uri.parse(base).host.orEmpty()
@@ -2803,7 +2821,7 @@ class GfnSessionRepository(
         }
         val request = Request.Builder()
             .url("$base/v2/session/${session.sessionId}")
-            .headers(cloudMatchHeaders(token, cid, did, includeOrigin = true, isAndroidTv = isAndroidTv))
+            .headers(cloudMatchHeaders(token, cid, did, includeOrigin = true, appLaunchMode = appLaunchMode, isAndroidTv = isAndroidTv))
             .put(body.toString().toRequestBody(JSON_MEDIA_TYPE))
             .build()
         val (code, text) = requestHttp.awaitText(request)

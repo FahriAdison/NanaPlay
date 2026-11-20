@@ -74,6 +74,17 @@ internal fun shouldUseNativeTouch(mode: NativeTouchMode, game: GameInfo?): Boole
     NativeTouchMode.Auto -> game != null && isKnownNativeTouchGame(game)
 }
 
+internal fun appLaunchModeFor(
+    nativeTouchMode: NativeTouchMode,
+    game: GameInfo?,
+    androidTvProfile: Boolean,
+): Int =
+    if (!androidTvProfile && shouldUseNativeTouch(nativeTouchMode, game)) {
+        GfnAppLaunchMode.TOUCH_FRIENDLY
+    } else {
+        GfnAppLaunchMode.GAMEPAD_FRIENDLY
+    }
+
 /**
  * One line per session, so the fixed list above can be filled in from real data and so we can see
  * whether `supportedControls` agrees with it. Deliberately includes games we do *not* enable.

@@ -352,6 +352,27 @@ class GfnApiTest {
     }
 
     @Test
+    fun explicitGamepadLaunchModeMatchesDefaultDesktopHeaders() {
+        val defaultHeaders = cloudMatchHeaders(
+            token = "token",
+            clientId = "client",
+            deviceId = "device",
+            includeOrigin = true,
+        )
+        val explicitGamepadHeaders = cloudMatchHeaders(
+            token = "token",
+            clientId = "client",
+            deviceId = "device",
+            includeOrigin = true,
+            appLaunchMode = GfnAppLaunchMode.GAMEPAD_FRIENDLY,
+        )
+
+        assertEquals(defaultHeaders, explicitGamepadHeaders)
+        assertEquals("NATIVE", explicitGamepadHeaders["nv-client-type"])
+        assertEquals("NVIDIA-CLASSIC", explicitGamepadHeaders["nv-client-streamer"])
+    }
+
+    @Test
     fun cloudMatchUsesAndroidTvIdentityForTvProfile() {
         val headers = cloudMatchHeaders(
             token = "token",

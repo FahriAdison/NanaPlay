@@ -1585,9 +1585,10 @@ internal fun activeSessionLaunchConflict(
     sessions: List<ActiveSessionInfo>,
     launchAppId: Int?,
     settings: StreamSettings,
+    excludeSessionId: String? = null,
 ): ActiveSessionInfo? =
     sessions
-        .filter { it.status in setOf(1, 2, 3) }
+        .filter { it.status in setOf(1, 2, 3) && it.sessionId != excludeSessionId }
         .sortedWith(
             compareByDescending<ActiveSessionInfo> { launchAppId != null && it.appId == launchAppId }
                 .thenByDescending { it.matchesStreamSettings(settings) }

@@ -1,0 +1,351 @@
+From 2cbf9f55dca0bfd5569d25cfdc3c7683c047a42f Mon Sep 17 00:00:00 2001
+From: FahriAdison <fahriadison12@gmail.com>
+Date: Fri, 20 Nov 2026 03:04:16 +0000
+Subject: [PATCH] fix(android): tunggu stop sesi lama sebelum retry antrean
+ (1.0.105)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Retry antrean dulu mem-fire-and-forget stopSession() lalu langsung play(),
+jadi play() bisa masih melihat sesi lama aktif di server dan berhenti di
+dialog "Active session found" — antrean terlihat macet lagi. Stop sekarang
+ditunggu di job khusus (retryQueueJob, bukan launchJob) dengan timeout 5s,
+kegagalan stop tetap dilanjutkan, CancellationException dilempar ulang, dan
+job dibersihkan di finally. Tap retry kedua diabaikan selama retry berjalan,
+dan sesi yang baru berhasil dihapus dikecualikan dari cek konflik launch.
+
+🤖 Generated with Codebuff
+Co-Authored-By: Codebuff <noreply@codebuff.com>
+---
+ .../com/opencloudgaming/opennow/Models.kt     |  3 +-
+ .../opennow/OpenNowViewModel.kt               | 93 ++++++++++++++-----
+ .../opennow/StreamResolutionTest.kt           | 51 ++++++++++
+ .../2026-11-20-nanaplay-retry-race-1.0.105.md | 71 ++++++++++++++
+ 4 files changed, 194 insertions(+), 24 deletions(-)
+ create mode 100644 docs/superpowers/plans/2026-11-20-nanaplay-retry-race-1.0.105.md
+
+diff --git a/android/app/src/main/java/com/opencloudgaming/opennow/Models.kt b/android/app/src/main/java/com/opencloudgaming/opennow/Models.kt
+index 6c36ad5..aa8e24b 100644
+--- a/android/app/src/main/java/com/opencloudgaming/opennow/Models.kt
++++ b/android/app/src/main/java/com/opencloudgaming/opennow/Models.kt
+@@ -1585,9 +1585,10 @@ internal fun activeSessionLaunchConflict(
+     sessions: List<ActiveSessionInfo>,
+     launchAppId: Int?,
+     settings: StreamSettings,
++    excludeSessionId: String? = null,
+ ): ActiveSessionInfo? =
+     sessions
+-        .filter { it.status in setOf(1, 2, 3) }
++        .filter { it.status in setOf(1, 2, 3) && it.sessionId != excludeSessionId }
+         .sortedWith(
+             compareByDescending<ActiveSessionInfo> { launchAppId != null && it.appId == launchAppId }
+                 .thenByDescending { it.matchesStreamSettings(settings) }
+diff --git a/android/app/src/main/java/com/opencloudgaming/opennow/OpenNowViewModel.kt b/android/app/src/main/java/com/opencloudgaming/opennow/OpenNowViewModel.kt
+index 562334f..ce29357 100644
+--- a/android/app/src/main/java/com/opencloudgaming/opennow/OpenNowViewModel.kt
++++ b/android/app/src/main/java/com/opencloudgaming/opennow/OpenNowViewModel.kt
+@@ -24,6 +24,7 @@ import kotlinx.coroutines.async
+ import kotlinx.coroutines.coroutineScope
+ import kotlinx.coroutines.delay
+ import kotlinx.coroutines.withTimeout
++import kotlinx.coroutines.withTimeoutOrNull
+ import kotlinx.coroutines.withContext
+ import kotlinx.coroutines.flow.distinctUntilChanged
+ import kotlinx.coroutines.flow.map
+@@ -65,6 +66,11 @@ private const val QUEUE_POLL_MAX_CONSECUTIVE_FAILURES = 10
+ /** Transient-failure retries for session creation before surfacing the error. */
+ private const val CREATE_SESSION_MAX_ATTEMPTS = 3
+ private const val CREATE_SESSION_RETRY_BASE_MS = 2_000L
++// The GFN OkHttp client sets no callTimeout (15s connect + 30s read), so a hung DELETE
++// could hold the retry for ~45s. 5s covers a normal DELETE on mobile data while keeping
++// the retry button responsive; past it we continue with the retry, and only a DELETE we
++// know returned success keeps its session id out of the launch conflict check.
++private const val RETRY_QUEUE_STOP_TIMEOUT_MS = 5_000L
+ /** Matches "CloudMatch returned status N" in toSessionInfo check() failures. */
+ private val CLOUDMATCH_STATUS_REGEX = Regex("""\bCloudMatch returned status\s+(\d+)\b""")
+ /** Give up stream recovery after this long instead of hanging on "Reconnecting stream" forever. */
+@@ -309,6 +315,9 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
+     private var catalogServerSearchJob: Job? = null
+     private var launchJob: Job? = null
+     private var stopJob: Job? = null
++    // Single-flight guard for the "queue looks stuck" retry. Deliberately not launchJob:
++    // play() refuses to run while launchJob.isActive.
++    private var retryQueueJob: Job? = null
+     private var lastStoppedSessionId: String? = null
+     private var pollingGeneration = 0
+     private var consecutiveHighThermalTicks = 0
+@@ -1813,6 +1822,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
+         skipPrintedWaste: Boolean = false,
+         skipStoreChoice: Boolean = false,
+         serverPingMs: Long? = null,
++        excludeActiveSessionId: String? = null,
+     ) {
+         if (launchJob?.isActive == true) {
+             recordDebugEvent("launch", "Ignored play request while another launch is active game=${game.title}")
+@@ -1838,6 +1848,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
+                     skipPrintedWaste,
+                     skipStoreChoice = true,
+                     serverPingMs = serverPingMs,
++                    excludeActiveSessionId = excludeActiveSessionId,
+                 )
+                 return
+             }
+@@ -1956,7 +1967,9 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
+                 val numericLaunchAppId = launchAppId?.toIntOrNull()
+                 // A null list means the lookup itself failed, so an unknown-seat launch reads it as
+                 // "no seat found" and must never raise the resume/end dialog.
+-                val activeConflict = active?.let { activeSessionLaunchConflict(it, numericLaunchAppId, settings) }
++                val activeConflict = active?.let {
++                    activeSessionLaunchConflict(it, numericLaunchAppId, settings, excludeActiveSessionId)
++                }
+                 if (active != null && activeConflict != null) {
+                     pendingActiveSessionLaunch = PendingActiveSessionLaunch(
+                         game = game,
+@@ -4400,6 +4413,10 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
+      * cancels the wedged launch and starts a fresh session creation.
+      */
+     fun retryQueue() {
++        if (retryQueueJob?.isActive == true) {
++            recordDebugEvent("queue", "Ignored queue retry while the previous retry is still running")
++            return
++        }
+         pollingGeneration++
+         val snapshot = state.value
+         val game = snapshot.streamGame ?: return
+@@ -4437,34 +4454,64 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
+         }
+         // Stop the abandoned cloud session before re-queueing: without this the old
+         // session stays alive server-side and can block the new one (queue looking
+-        // stuck again right after a retry). Tolerant by design — a failed stop is
+-        // only logged and must never cancel the play() below.
++        // stuck again right after a retry). The stop is awaited inside a dedicated job
++        // so play()'s active-session check runs after the DELETE finished; a
++        // fire-and-forget stop raced that check and made the retry land straight back
++        // in the "Active session found" dialog. Tolerant by design — a failed or slow
++        // stop is only logged and must never cancel the play() below.
+         val auth = snapshot.authSession
+-        if (auth != null && oldSession != null) {
+-            val token = auth.tokens.idToken ?: auth.tokens.accessToken
+-            val stopSettings = snapshot.activeStreamSettings ?: effectiveStreamSettings()
+-            viewModelScope.launch {
+-                runCatching { sessionRepository.stopSession(token, oldSession, stopSettings) }
+-                    .onSuccess {
++        val stopSettings = snapshot.activeStreamSettings ?: effectiveStreamSettings()
++        retryQueueJob = viewModelScope.launch {
++            try {
++                var stoppedSessionId: String? = null
++                if (auth != null && oldSession != null) {
++                    val token = auth.tokens.idToken ?: auth.tokens.accessToken
++                    val stopped = try {
++                        withTimeoutOrNull(RETRY_QUEUE_STOP_TIMEOUT_MS) {
++                            sessionRepository.stopSession(token, oldSession, stopSettings)
++                            true
++                        } ?: run {
++                            recordDebugEvent(
++                                "queue",
++                                "Timed out after ${RETRY_QUEUE_STOP_TIMEOUT_MS}ms stopping abandoned cloud session " +
++                                    "${oldSession.shortDebugId()} before retry, continuing",
++                            )
++                            false
++                        }
++                    } catch (e: CancellationException) {
++                        // ViewModel teardown must unwind instead of being reported as an
++                        // ordinary network failure.
++                        throw e
++                    } catch (e: Throwable) {
++                        recordDebugEvent("queue", "Failed to stop abandoned cloud session ${oldSession.shortDebugId()} before retry error=${e.debugMessage()}")
++                        false
++                    }
++                    if (stopped) {
+                         lastStoppedSessionId = oldSession.sessionId
++                        stoppedSessionId = oldSession.sessionId
+                         recordDebugEvent("queue", "Stopped abandoned cloud session ${oldSession.shortDebugId()} before retry")
+                     }
+-                    .onFailure { error ->
+-                        recordDebugEvent("queue", "Failed to stop abandoned cloud session ${oldSession.shortDebugId()} before retry error=${error.debugMessage()}")
+-                    }
++                } else {
++                    recordDebugEvent("queue", "Retry requested with nothing to stop auth=${auth != null} oldSession=${oldSession?.shortDebugId() ?: "-"}")
++                }
++                // Re-create the session from scratch on the same server, keeping the
++                // measured ping so the high-ping warning survives the retry. The id we
++                // just deleted is excluded from the launch conflict check: the active
++                // session list can still list it briefly after the DELETE (and a timed
++                // out DELETE leaves the outcome open), so treating it as a conflict
++                // would put the retry right back into the stuck queue.
++                play(
++                    game,
++                    streamingBaseUrlOverride = snapshot.streamLaunchBaseUrl,
++                    skipPrintedWaste = true,
++                    skipStoreChoice = true,
++                    serverPingMs = snapshot.streamServerPingMs,
++                    excludeActiveSessionId = stoppedSessionId,
++                )
++            } finally {
++                retryQueueJob = null
+             }
+-        } else {
+-            recordDebugEvent("queue", "Retry requested with nothing to stop auth=${auth != null} oldSession=${oldSession?.shortDebugId() ?: "-"}")
+         }
+-        // Re-create the session from scratch on the same server, keeping the
+-        // measured ping so the high-ping warning survives the retry.
+-        play(
+-            game,
+-            streamingBaseUrlOverride = snapshot.streamLaunchBaseUrl,
+-            skipPrintedWaste = true,
+-            skipStoreChoice = true,
+-            serverPingMs = snapshot.streamServerPingMs,
+-        )
+     }
+ 
+     fun retryWithAnotherServer() {
+diff --git a/android/app/src/test/java/com/opencloudgaming/opennow/StreamResolutionTest.kt b/android/app/src/test/java/com/opencloudgaming/opennow/StreamResolutionTest.kt
+index 299d935..cc80ebe 100644
+--- a/android/app/src/test/java/com/opencloudgaming/opennow/StreamResolutionTest.kt
++++ b/android/app/src/test/java/com/opencloudgaming/opennow/StreamResolutionTest.kt
+@@ -2,6 +2,7 @@ package com.opencloudgaming.opennow
+ 
+ import org.junit.Assert.assertEquals
+ import org.junit.Assert.assertFalse
++import org.junit.Assert.assertNull
+ import org.junit.Assert.assertTrue
+ import org.junit.Test
+ 
+@@ -746,6 +747,56 @@ class StreamResolutionTest {
+         )
+     }
+ 
++    @Test
++    fun activeSessionConflictSkipsSessionJustStoppedByRetry() {
++        val settings = StreamSettings(resolution = "1680x720", aspectRatio = "21:9", fps = 60)
++        val stopped = activeSession(
++            sessionId = "stopped-by-retry",
++            appId = 100,
++            resolution = "1680x720",
++            fps = 60,
++            settingsSignature = streamSettingsSessionSignature(settings),
++        )
++
++        assertNull(
++            activeSessionLaunchConflict(
++                listOf(stopped),
++                launchAppId = 100,
++                settings = settings,
++                excludeSessionId = "stopped-by-retry",
++            ),
++        )
++    }
++
++    @Test
++    fun activeSessionConflictFallsBackToOtherSessionWhenStoppedOneIsExcluded() {
++        val settings = StreamSettings(resolution = "1680x720", aspectRatio = "21:9", fps = 60)
++        val stopped = activeSession(
++            sessionId = "stopped-by-retry",
++            appId = 100,
++            resolution = "1680x720",
++            fps = 60,
++            settingsSignature = streamSettingsSessionSignature(settings),
++        )
++        val stillActive = activeSession(
++            sessionId = "still-active",
++            appId = 200,
++            resolution = "1680x720",
++            fps = 60,
++            settingsSignature = streamSettingsSessionSignature(settings),
++        )
++
++        assertEquals(
++            "still-active",
++            activeSessionLaunchConflict(
++                listOf(stopped, stillActive),
++                launchAppId = 100,
++                settings = settings,
++                excludeSessionId = "stopped-by-retry",
++            )?.sessionId,
++        )
++    }
++
+     private fun activeSession(
+         sessionId: String = "session",
+         appId: Int = 100,
+diff --git a/docs/superpowers/plans/2026-11-20-nanaplay-retry-race-1.0.105.md b/docs/superpowers/plans/2026-11-20-nanaplay-retry-race-1.0.105.md
+new file mode 100644
+index 0000000..0178daa
+--- /dev/null
++++ b/docs/superpowers/plans/2026-11-20-nanaplay-retry-race-1.0.105.md
+@@ -0,0 +1,71 @@
++# Retry Queue Race Fix (1.0.105) Implementation Plan
++
++> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
++
++**Goal:** Make the "queue looks stuck" retry wait for the abandoned cloud session stop before it re-creates a session, so the retry cannot bounce back into the active-session conflict dialog.
++
++**Architecture:** `retryQueue()` stops using a fire-and-forget `viewModelScope.launch` for `stopSession()`. It owns one dedicated single-flight job (`retryQueueJob`, deliberately **not** `launchJob`, which `play()` refuses to run under) that awaits the DELETE with a timeout, tolerates failure, rethrows cancellation, calls `play()` with the just-stopped session excluded from the launch conflict check, and clears the guard in `finally`.
++
++**Tech Stack:** Kotlin, Android ViewModel + `viewModelScope`, kotlinx-coroutines, JUnit4 unit tests (`android/app/src/test`).
++
++**Spec:** `NanaPlay_retry_queue_review_13_6php.md` (adjudikasi Nanally 8 Nov 2026), transcribed into the 1.0.105 task prompt.
++
++## Global Constraints
++
++- Base: `main` @ `2c3ae39` (1.0.104). Work only on `fix/retry-race-1.0.105`. No merge, no release.
++- Scope: only the retry flow. No changes to `retryWithAnotherServer()`, strings, colour tokens, or other behavior.
++- `retryQueueJob` must never be stored in `launchJob`: `play()` returns early while `launchJob.isActive` (`OpenNowViewModel.kt:1817-1819`).
++- Stop failure must never cancel the retry; `CancellationException` must be rethrown.
++- No new dependencies, no secrets in the tree.
++
++## Decisions (three refinements)
++
++| # | Decision | Value / policy | Why |
++|---|----------|----------------|-----|
++| 1 | Stop-wait timeout | `RETRY_QUEUE_STOP_TIMEOUT_MS = 5_000L` | The OkHttp client sets no `callTimeout` (only 15 s connect + 30 s read), so a hung DELETE could hold the retry ~45 s. 5 s comfortably covers a normal DELETE on mobile data and keeps the retry button responsive. On timeout the retry still proceeds (tolerant by design); the id is **not** excluded in that case, because the old session may genuinely be alive and the actionable "Active session found" dialog is the honest outcome. |
++| 2 | Single-flight | Ignore a new tap while `retryQueueJob?.isActive == true` (log a debug event, return before any state reset) | The guard window is only the stop wait. Cancelling the older job would abort an in-flight DELETE and leave the abandoned session alive server-side — the exact state this fix removes. |
++| 3 | `lastStoppedSessionId` | **Not** used for the conflict check. A scoped `excludeActiveSessionId` parameter is passed from the retry call into `play()` → `activeSessionLaunchConflict()`, set **only when the DELETE returned success** | `lastStoppedSessionId` is a global set by `stopStream()` too and is consumed by `refreshActiveSession()` (`OpenNowViewModel.kt:3923`); widening it would change stop-then-play behavior outside this fix. The retry-scoped value only affects the retry path, and it is `null` when the stop threw, so a session that is genuinely still alive still raises the conflict dialog. |
++
++## Review Focus
++
++- A retry whose stop throws or times out: retry must still start the launch; the stale session still hits the conflict dialog (correct — it is really alive, and the dialog is actionable).
++- Two rapid retry taps: exactly one launch is started, no duplicated state resets.
++- ViewModel cleared mid-stop: `CancellationException` propagates, guard cleared, nothing plays.
++- Stop that succeeds but the server still lists the session briefly: no conflict dialog.
++- Stop that times out at 5 s: retry continues after 5 s instead of waiting on a hung DELETE; if the old session survived, the conflict dialog appears rather than a silent wedge.
++
++---
++
++### Task 1: Exclusion parameter on the pure conflict check
++
++**Files:**
++- Modify: `android/app/src/main/java/com/opencloudgaming/opennow/Models.kt:1584-1597`
++- Test: `android/app/src/test/java/com/opencloudgaming/opennow/StreamResolutionTest.kt`
++
++**Interfaces:**
++- Produces: `internal fun activeSessionLaunchConflict(sessions: List<ActiveSessionInfo>, launchAppId: Int?, settings: StreamSettings, excludeSessionId: String? = null): ActiveSessionInfo?`
++
++- [ ] **Step 1: Write the failing tests** — `activeSessionConflictSkipsSessionJustStoppedByRetry` (single stopped session + `excludeSessionId` → `assertNull`) and `activeSessionConflictFallsBackToOtherSessionWhenStoppedOneIsExcluded` (two active sessions, exclude one → the other's id).
++- [ ] **Step 2: Run them** — `./gradlew testDebugUnitTest --tests "*StreamResolutionTest*"`, expect a compile error (`excludeSessionId` unknown), i.e. RED.
++- [ ] **Step 3: Add the parameter** — filter additionally on `excludeSessionId == null || it.sessionId != excludeSessionId`.
++- [ ] **Step 4: Re-run** — same command, expect PASS.
++- [ ] **Step 5: Commit** — `git commit -m "fix(android): allow launch conflict check to skip a just-stopped session"`.
++
++### Task 2: Single-flight retry job that awaits the stop
++
++**Files:**
++- Modify: `android/app/src/main/java/com/opencloudgaming/opennow/OpenNowViewModel.kt` (constants ~66, fields ~311, `retryQueue()` ~4402-4467, `play()` 1804-1819 + conflict call ~1959)
++
++**Interfaces:**
++- Consumes: `activeSessionLaunchConflict(..., excludeSessionId)` from Task 1.
++- Produces: `retryQueueJob: Job?`, `RETRY_QUEUE_STOP_TIMEOUT_MS: Long`, `play(..., excludeActiveSessionId: String? = null)`.
++
++- [ ] **Step 1:** Add `RETRY_QUEUE_STOP_TIMEOUT_MS = 5_000L` and `private var retryQueueJob: Job? = null`.
++- [ ] **Step 2:** Guard `retryQueue()` at the top (ignore + debug event while a retry is active).
++- [ ] **Step 2b:** On timeout, log and continue with `stoppedSessionId = null`, so a genuinely alive session still raises the conflict dialog.
++- [ ] **Step 3:** Move the stop into `retryQueueJob` with `withTimeoutOrNull`, `catch (e: CancellationException) { throw e }`, plain-failure tolerance, `finally { retryQueueJob = null }`, then `play(..., excludeActiveSessionId = stoppedSessionId)`.
++- [ ] **Step 4:** Thread `excludeActiveSessionId` through `play()` (signature, default-variant recursive call, conflict check).
++- [ ] **Step 5: Verify** — `./gradlew testDebugUnitTest` and `./gradlew :app:assembleDebug`, both exit 0.
++- [ ] **Step 6: Commit + push** — plan, source, test in one commit set; push `fix/retry-race-1.0.105` to origin.
++
++**Testing note:** the repo has no `kotlinx-coroutines-test`/Robolectric, so `retryQueue()`'s coroutine behavior cannot be unit-tested without new dependencies. Task 1's pure-function tests are the runnable coverage; the job behavior is verified by the build plus a reasoning walk-through reported with the change.
+-- 
+2.56.0.windows.2
+

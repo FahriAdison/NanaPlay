@@ -2,6 +2,7 @@ package com.opencloudgaming.opennow
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -743,6 +744,56 @@ class StreamResolutionTest {
         assertEquals(
             "mismatched",
             activeSessionLaunchConflict(listOf(mismatched), launchAppId = 100, settings = settings)?.sessionId,
+        )
+    }
+
+    @Test
+    fun activeSessionConflictSkipsSessionJustStoppedByRetry() {
+        val settings = StreamSettings(resolution = "1680x720", aspectRatio = "21:9", fps = 60)
+        val stopped = activeSession(
+            sessionId = "stopped-by-retry",
+            appId = 100,
+            resolution = "1680x720",
+            fps = 60,
+            settingsSignature = streamSettingsSessionSignature(settings),
+        )
+
+        assertNull(
+            activeSessionLaunchConflict(
+                listOf(stopped),
+                launchAppId = 100,
+                settings = settings,
+                excludeSessionId = "stopped-by-retry",
+            ),
+        )
+    }
+
+    @Test
+    fun activeSessionConflictFallsBackToOtherSessionWhenStoppedOneIsExcluded() {
+        val settings = StreamSettings(resolution = "1680x720", aspectRatio = "21:9", fps = 60)
+        val stopped = activeSession(
+            sessionId = "stopped-by-retry",
+            appId = 100,
+            resolution = "1680x720",
+            fps = 60,
+            settingsSignature = streamSettingsSessionSignature(settings),
+        )
+        val stillActive = activeSession(
+            sessionId = "still-active",
+            appId = 200,
+            resolution = "1680x720",
+            fps = 60,
+            settingsSignature = streamSettingsSessionSignature(settings),
+        )
+
+        assertEquals(
+            "still-active",
+            activeSessionLaunchConflict(
+                listOf(stopped, stillActive),
+                launchAppId = 100,
+                settings = settings,
+                excludeSessionId = "stopped-by-retry",
+            )?.sessionId,
         )
     }
 

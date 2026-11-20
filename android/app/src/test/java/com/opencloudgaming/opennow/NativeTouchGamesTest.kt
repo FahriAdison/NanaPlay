@@ -101,6 +101,54 @@ class NativeTouchGamesTest {
     }
 
     @Test
+    fun honkaiStarRailAutoUsesDesktopIdentity() {
+        val appLaunchMode = appLaunchModeFor(
+            nativeTouchMode = NativeTouchMode.Auto,
+            game = game(title = "Honkai: Star Rail"),
+            androidTvProfile = false,
+        )
+
+        assertEquals(GfnAppLaunchMode.GAMEPAD_FRIENDLY, appLaunchMode)
+        assertFalse(shouldUseBrowserIdentity(appLaunchMode))
+    }
+
+    @Test
+    fun nteAutoUsesBrowserIdentity() {
+        val appLaunchMode = appLaunchModeFor(
+            nativeTouchMode = NativeTouchMode.Auto,
+            game = game(title = "NTE: Neverness to Everness"),
+            androidTvProfile = false,
+        )
+
+        assertEquals(GfnAppLaunchMode.TOUCH_FRIENDLY, appLaunchMode)
+        assertTrue(shouldUseBrowserIdentity(appLaunchMode))
+    }
+
+    @Test
+    fun alwaysUsesBrowserIdentityForAnyGame() {
+        val appLaunchMode = appLaunchModeFor(
+            nativeTouchMode = NativeTouchMode.Always,
+            game = game(title = "Honkai: Star Rail"),
+            androidTvProfile = false,
+        )
+
+        assertEquals(GfnAppLaunchMode.TOUCH_FRIENDLY, appLaunchMode)
+        assertTrue(shouldUseBrowserIdentity(appLaunchMode))
+    }
+
+    @Test
+    fun offUsesDesktopIdentity() {
+        val appLaunchMode = appLaunchModeFor(
+            nativeTouchMode = NativeTouchMode.Off,
+            game = game(title = "NTE: Neverness to Everness"),
+            androidTvProfile = false,
+        )
+
+        assertEquals(GfnAppLaunchMode.GAMEPAD_FRIENDLY, appLaunchMode)
+        assertFalse(shouldUseBrowserIdentity(appLaunchMode))
+    }
+
+    @Test
     fun diagnosticsCarryWhatIsNeededToFillTheList() {
         val line = nativeTouchDiagnostics(
             game(id = "abc123", title = "Genshin Impact", supportedControls = listOf("TOUCHSCREEN", "KEYBOARD")),

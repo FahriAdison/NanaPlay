@@ -3752,6 +3752,7 @@ class NativeStreamClient(
     // Circuit breaker for uncapped persistent-reconnect retries.
     private var persistentStallStartMs = 0L
     private var videoSafeFallbackApplied = false
+    private var selectedProfileRetryApplied = false
     private var catastrophicResolutionCodecFallbacks = 0
     private var firstDecodedResolutionEvaluated = false
     private var transportHasStableMedia = false
@@ -4101,6 +4102,7 @@ class NativeStreamClient(
         reconnectAttempts = 0
         persistentStallStartMs = 0L
         videoSafeFallbackApplied = false
+        selectedProfileRetryApplied = false
         catastrophicResolutionCodecFallbacks = 0
         sessionRecoveryRequested = false
         lastStatsSample = null
@@ -5474,8 +5476,8 @@ class NativeStreamClient(
             offerTimeoutJob = null
             NativeInputDiagnostics.add("video offer timeout codec=${settings.codec} resolution=${settings.resolution} bitrate=${settings.maxBitrateMbps}")
             if (
-                requestSafeVideoFallback(
-                    message = "Timed out waiting for video offer; restarting with safe H264 profile",
+                requestSelectedVideoProfileRetry(
+                    message = "Timed out waiting for video offer; retrying the selected profile",
                     diagnosticReason = "offer timeout",
                 )
             ) {
@@ -6291,6 +6293,31 @@ class NativeStreamClient(
         }
         transportHasStableMedia = true
         reconnectAttempts = 0
+    }
+
+    private fun requestSelectedVideoProfileRetry(
+        message: String,
+        diagnosticReason: String,
+    ): Boolean {
+        val currentSession = session ?: return false
+        if (selectedProfileRetryApplied) return false
+        selectedProfileRetryApplied = true
+        val selected = settings
+        bumpReconnectAttemptsForFallback()
+        NativeInputDiagnostics.add(
+            "$diagnosticReason selected profile retry codec=${selected.codec} resolution=${selected.resolution} fps=${selected.fps} bitrate=${selected.maxBitrateMbps}",
+        )
+        transportGeneration += 1
+        val generation = transportGeneration
+        closeTransport(clearInputState = false)
+        firstVideoFrameWatchdog.reset()
+        recordStreamDiagnostic(
+            "selected profile transport restart generation=$generation session=${streamDiagnosticId(currentSession.sessionId)} codec=${selected.codec} reason=$diagnosticReason",
+        )
+        emitState("Reconnecting stream with selected ${selected.codec} profile")
+        emitVideoTransportFallbackApplied(message, selected)
+        startTransport(currentSession, selected, generation)
+        return true
     }
 
     private fun requestSafeVideoFallback(

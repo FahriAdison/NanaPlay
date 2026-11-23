@@ -36,16 +36,16 @@ class SlideDirectClickGestureTest {
         assertNotNull(moveAction1)
         assertTrue(moveAction1 is SlideDirectClickAction.MouseMove)
         val delta1 = moveAction1 as SlideDirectClickAction.MouseMove
-        assertEquals(15f, delta1.dx)
-        assertEquals(5f, delta1.dy)
+        assertEquals(15f, delta1.dx, 0.001f)
+        assertEquals(5f, delta1.dy, 0.001f)
         assertEquals(2016L, delta1.eventTimeMs)
 
         val moveAction2 = detector.onTouchMove(pointerId = 1, x = 125f, y = 110f, eventTimeMs = 2032L)
         assertNotNull(moveAction2)
         assertTrue(moveAction2 is SlideDirectClickAction.MouseMove)
         val delta2 = moveAction2 as SlideDirectClickAction.MouseMove
-        assertEquals(10f, delta2.dx)
-        assertEquals(5f, delta2.dy)
+        assertEquals(10f, delta2.dx, 0.001f)
+        assertEquals(5f, delta2.dy, 0.001f)
 
         detector.onTouchUp(pointerId = 1, x = 125f, y = 110f, eventTimeMs = 2050L)
     }
@@ -67,8 +67,8 @@ class SlideDirectClickGestureTest {
         assertNotNull(secondDown)
         assertTrue(secondDown is SlideDirectClickAction.DirectClick)
         val directClick = secondDown as SlideDirectClickAction.DirectClick
-        assertEquals(310f, directClick.x)
-        assertEquals(408f, directClick.y)
+        assertEquals(310f, directClick.x, 0.001f)
+        assertEquals(408f, directClick.y, 0.001f)
         assertEquals(3200L, directClick.eventTimeMs)
 
         detector.onTouchUp(pointerId = 0, x = 310f, y = 408f, eventTimeMs = 3280L)

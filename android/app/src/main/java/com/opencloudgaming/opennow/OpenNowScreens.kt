@@ -8353,16 +8353,24 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                         )
                     },
                     onMouseDirectClickToggle = {
+                        val newMouseDirectClick = !state.settings.androidTouch.mouseDirectClick
                         viewModel.updateSettings(
                             state.settings.copy(
-                                androidTouch = state.settings.androidTouch.copy(mouseDirectClick = !state.settings.androidTouch.mouseDirectClick),
+                                androidTouch = state.settings.androidTouch.copy(
+                                    mouseDirectClick = newMouseDirectClick,
+                                    slideDirectClick = if (newMouseDirectClick) false else state.settings.androidTouch.slideDirectClick,
+                                ),
                             ),
                         )
                     },
                     onSlideDirectClickToggle = {
+                        val newSlideDirectClick = !state.settings.androidTouch.slideDirectClick
                         viewModel.updateSettings(
                             state.settings.copy(
-                                androidTouch = state.settings.androidTouch.copy(slideDirectClick = !state.settings.androidTouch.slideDirectClick),
+                                androidTouch = state.settings.androidTouch.copy(
+                                    slideDirectClick = newSlideDirectClick,
+                                    mouseDirectClick = if (newSlideDirectClick) false else state.settings.androidTouch.mouseDirectClick,
+                                ),
                             ),
                         )
                     },

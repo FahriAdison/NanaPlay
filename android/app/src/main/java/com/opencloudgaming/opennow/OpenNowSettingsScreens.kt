@@ -949,8 +949,26 @@ private fun SettingsContent(
                 if (settings.androidTouch.mousePad) {
                     Box(Modifier.padding(start = 24.dp)) {
                         Column {
-                            SettingSwitch(stringResource(R.string.settings_direct_click), settings.androidTouch.mouseDirectClick) { enabled -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(mouseDirectClick = enabled))) }
-                            SettingSwitch("Slide + Direct Click (Experimental)", settings.androidTouch.slideDirectClick) { enabled -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(slideDirectClick = enabled))) }
+                            SettingSwitch(stringResource(R.string.settings_direct_click), settings.androidTouch.mouseDirectClick) { enabled ->
+                                viewModel.updateSettings(
+                                    settings.copy(
+                                        androidTouch = settings.androidTouch.copy(
+                                            mouseDirectClick = enabled,
+                                            slideDirectClick = if (enabled) false else settings.androidTouch.slideDirectClick,
+                                        ),
+                                    ),
+                                )
+                            }
+                            SettingSwitch("Slide + Direct Click (Experimental)", settings.androidTouch.slideDirectClick) { enabled ->
+                                viewModel.updateSettings(
+                                    settings.copy(
+                                        androidTouch = settings.androidTouch.copy(
+                                            slideDirectClick = enabled,
+                                            mouseDirectClick = if (enabled) false else settings.androidTouch.mouseDirectClick,
+                                        ),
+                                    ),
+                                )
+                            }
 
                             val scrollHint = when {
                                 settings.stream.mouseScrollSensitivity <= 20 -> "Very fast"

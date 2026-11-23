@@ -4136,6 +4136,8 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         recordDebugEvent("queue", "Begin polling gen=$currentGeneration ${latest.debugSummary()}")
         val initialIncoming = queueDisplayPosition(latest)
         val initialPosition = if (isPastQueue(latest)) null else initialIncoming
+        var lowestQueuePosition: Int? = initialPosition
+        var lastSessionId: String = latest.sessionId
         // Defense-in-depth, not the primary fix: there is no suspend point between the
         // generation capture above and this first state write, so retryQueue() cannot
         // interleave here on the single-threaded main dispatcher. The real fix is #1
@@ -4241,7 +4243,13 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     if (tokenRefreshAttempts < 2) {
                         tokenRefreshAttempts++
                         recordDebugEvent("queue", "Poll #$pollCount 401/403 received; attempting token refresh ($tokenRefreshAttempts/2)")
-                        val refreshed = runCatching { authRepository.restore(forceRefresh = true) }.getOrNull()
+                        val refreshed = try {
+                            authRepository.restore(forceRefresh = true)
+                        } catch (ce: CancellationException) {
+                            throw ce
+                        } catch (_: Throwable) {
+                            null
+                        }
                         val newToken = refreshed?.tokens?.idToken ?: refreshed?.tokens?.accessToken
                         if (!newToken.isNullOrBlank()) {
                             currentToken = newToken
@@ -4312,11 +4320,18 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             } else {
                 consecutiveInvalidSessionPolls = 0
             }
+            if (latest.sessionId != lastSessionId) {
+                lastSessionId = latest.sessionId
+                lowestQueuePosition = if (isPastQueue(latest)) null else queueDisplayPosition(latest)
+            }
             val rawPosition = queueDisplayPosition(latest)
             val previousPosition = state.value.streamSession
                 ?.takeIf { it.sessionId == latest.sessionId }
                 ?.let { state.value.queuePosition }
-            val currentPosition = if (isPastQueue(latest)) null else lowerOnlyQueuePosition(previousPosition, rawPosition)
+            val currentPosition = if (isPastQueue(latest)) null else lowerOnlyQueuePosition(lowestQueuePosition, rawPosition)
+            if (currentPosition != null) {
+                lowestQueuePosition = currentPosition
+            }
             val nowMs = android.os.SystemClock.elapsedRealtime()
             val currentState = state.value
 

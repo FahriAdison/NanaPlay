@@ -7832,6 +7832,11 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
             state.settings.androidTouch.mouseDirectClick && touchInputEnabled,
         )
     }
+    LaunchedEffect(state.settings.androidTouch.slideDirectClick, touchInputEnabled) {
+        NativeStreamInputRouter.setSlideDirectClick(
+            state.settings.androidTouch.slideDirectClick && touchInputEnabled,
+        )
+    }
     LaunchedEffect(streamReady, touchInputEnabled, state.settings.androidTouch.nativeTouchMode, state.streamGame?.id) {
         val game = state.streamGame
         val wanted = !tvProfile && shouldUseNativeTouch(state.settings.androidTouch.nativeTouchMode, game)
@@ -8351,6 +8356,13 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                         viewModel.updateSettings(
                             state.settings.copy(
                                 androidTouch = state.settings.androidTouch.copy(mouseDirectClick = !state.settings.androidTouch.mouseDirectClick),
+                            ),
+                        )
+                    },
+                    onSlideDirectClickToggle = {
+                        viewModel.updateSettings(
+                            state.settings.copy(
+                                androidTouch = state.settings.androidTouch.copy(slideDirectClick = !state.settings.androidTouch.slideDirectClick),
                             ),
                         )
                     },
@@ -9823,6 +9835,7 @@ private fun StreamControlsPanel(
     onTouchControlsToggle: () -> Unit,
     onMousePadToggle: () -> Unit,
     onMouseDirectClickToggle: () -> Unit,
+    onSlideDirectClickToggle: () -> Unit = {},
     onToggleTouchControllerStyle: () -> Unit,
     onJoystickModeToggle: () -> Unit,
     onJoystickDeadZoneChange: (Float) -> Unit,
@@ -10118,6 +10131,16 @@ private fun StreamControlsPanel(
                                 },
                                 value = onOffLabel(settings.androidTouch.mouseDirectClick),
                                 // Reads as a child of Finger mouse; replaces a hand-written Box.
+                                indentLevel = 1,
+                            )
+                            ControlSwitchRow(
+                                label = "Slide + Direct Click",
+                                checked = settings.androidTouch.slideDirectClick,
+                                onCheckedChange = {
+                                    onButtonTone()
+                                    onSlideDirectClickToggle()
+                                },
+                                value = onOffLabel(settings.androidTouch.slideDirectClick),
                                 indentLevel = 1,
                             )
 

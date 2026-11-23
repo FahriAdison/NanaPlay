@@ -260,6 +260,7 @@ data class AndroidTouchSettings(
     val rightOffsetXDp: Float = 0f,
     val rightOffsetYDp: Float = 0f,
     val mouseDirectClick: Boolean = false,
+    val slideDirectClick: Boolean = false,
     val nativeTouchMode: NativeTouchMode = NativeTouchMode.Auto,
     /**
      * Scales the velocity of touch movement in native touch mode. Values below 1.0 slow down

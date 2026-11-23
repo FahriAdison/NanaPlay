@@ -950,6 +950,7 @@ private fun SettingsContent(
                     Box(Modifier.padding(start = 24.dp)) {
                         Column {
                             SettingSwitch(stringResource(R.string.settings_direct_click), settings.androidTouch.mouseDirectClick) { enabled -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(mouseDirectClick = enabled))) }
+                            SettingSwitch("Slide + Direct Click (Experimental)", settings.androidTouch.slideDirectClick) { enabled -> viewModel.updateSettings(settings.copy(androidTouch = settings.androidTouch.copy(slideDirectClick = enabled))) }
 
                             val scrollHint = when {
                                 settings.stream.mouseScrollSensitivity <= 20 -> "Very fast"

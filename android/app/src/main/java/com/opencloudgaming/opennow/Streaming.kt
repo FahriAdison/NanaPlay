@@ -1213,6 +1213,8 @@ object NativeStreamInputRouter {
     @Volatile
     private var mouseDirectClick = false
     @Volatile
+    private var slideDirectClick = false
+    @Volatile
     private var stretchToFit = false
     @Volatile
     private var renderingAspectRatio = 0f
@@ -1329,6 +1331,11 @@ object NativeStreamInputRouter {
 
     fun setMouseDirectClick(enabled: Boolean) {
         mouseDirectClick = enabled
+        touchMouseState.reset(client)
+    }
+
+    fun setSlideDirectClick(enabled: Boolean) {
+        slideDirectClick = enabled
         touchMouseState.reset(client)
     }
 
@@ -1541,6 +1548,7 @@ object NativeStreamInputRouter {
             client = current,
             ignoredPointerIds = nativeUiTouchPointerIds,
             directClick = mouseDirectClick,
+            slideDirectClick = slideDirectClick,
             width = width,
             height = height,
             stretchToFit = stretchToFit,
@@ -3272,6 +3280,7 @@ private class TouchMouseState {
     private var lastTapX = Float.NaN
     private var lastTapY = Float.NaN
     private val virtualCursor = VirtualCursor()
+    private val slideGestureDetector = SlideDirectClickGestureDetector()
     private var twoFingerTapCandidate = false
     private val motionAccumulator = TouchMouseMotionAccumulator()
     // 2-finger scroll state
@@ -3303,6 +3312,7 @@ private class TouchMouseState {
         isScrollGesture = false
         scrollAccumulator = 0f
         scrollGestureOccurred = false
+        slideGestureDetector.reset()
     }
 
     /** The host cursor is no longer where we think it is — only true across sessions. */
@@ -3315,12 +3325,43 @@ private class TouchMouseState {
         client.sendRawMouseMove(delta.dx, delta.dy)
     }
 
+    private fun triggerHybridDirectClick(
+        client: NativeStreamClient,
+        x: Float,
+        y: Float,
+        width: Int,
+        height: Int,
+        stretchToFit: Boolean,
+        renderingAspectRatio: Float,
+        decodedStreamWidth: Int,
+        decodedStreamHeight: Int,
+    ) {
+        val settingsRes = streamResolutionPixels(client.settings)
+        val streamWidth = if (decodedStreamWidth > 0) decodedStreamWidth else settingsRes.first
+        val streamHeight = if (decodedStreamHeight > 0) decodedStreamHeight else settingsRes.second
+        virtualCursor.onStreamSize(streamWidth, streamHeight)
+        val target = streamPointForTouch(
+            touchX = x,
+            touchY = y,
+            viewWidth = width,
+            viewHeight = height,
+            streamWidth = streamWidth,
+            streamHeight = streamHeight,
+            stretchToFit = stretchToFit,
+            renderingAspectRatio = renderingAspectRatio,
+        )
+        moveVirtualCursorTo(target, client)
+        client.sendTouchMouseClick()
+        NativeInputDiagnostics.add("hybrid direct click at (${x.roundToInt()}, ${y.roundToInt()})")
+    }
+
     fun handle(
         event: MotionEvent,
         enabled: Boolean,
         client: NativeStreamClient,
         ignoredPointerIds: Set<Int>,
         directClick: Boolean = false,
+        slideDirectClick: Boolean = false,
         width: Int = 0,
         height: Int = 0,
         stretchToFit: Boolean = false,
@@ -3434,6 +3475,17 @@ private class TouchMouseState {
                 }
                 beginPointer(event, 0)
                 twoFingerTapCandidate = false
+                if (slideDirectClick) {
+                    val directClickAction = slideGestureDetector.onTouchDown(
+                        pointerId = event.getPointerId(0),
+                        x = event.getX(0),
+                        y = event.getY(0),
+                        eventTimeMs = event.eventTime,
+                    )
+                    if (directClickAction is SlideDirectClickAction.DirectClick) {
+                        triggerHybridDirectClick(client, directClickAction.x, directClickAction.y, width, height, stretchToFit, renderingAspectRatio, decodedStreamWidth, decodedStreamHeight)
+                    }
+                }
                 return true
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
@@ -3441,6 +3493,17 @@ private class TouchMouseState {
                     val index = event.actionIndex
                     if (index in 0 until event.pointerCount && event.getPointerId(index) !in ignoredPointerIds) {
                         beginPointer(event, index)
+                        if (slideDirectClick) {
+                            val directClickAction = slideGestureDetector.onTouchDown(
+                                pointerId = event.getPointerId(index),
+                                x = event.getX(index),
+                                y = event.getY(index),
+                                eventTimeMs = event.eventTime,
+                            )
+                            if (directClickAction is SlideDirectClickAction.DirectClick) {
+                                triggerHybridDirectClick(client, directClickAction.x, directClickAction.y, width, height, stretchToFit, renderingAspectRatio, decodedStreamWidth, decodedStreamHeight)
+                            }
+                        }
                     }
                 } else {
                     val newIndex = event.actionIndex
@@ -3503,6 +3566,20 @@ private class TouchMouseState {
                 val y = event.getY(index)
                 val dx = x - lastX
                 val dy = y - lastY
+                if (slideDirectClick) {
+                    val moveAction = slideGestureDetector.onTouchMove(
+                        pointerId = activePointerId,
+                        x = x,
+                        y = y,
+                        eventTimeMs = event.eventTime,
+                    )
+                    if (moveAction is SlideDirectClickAction.MouseMove) {
+                        sendMouseDelta(moveAction.dx, moveAction.dy, moveAction.eventTimeMs, client)
+                    }
+                    lastX = x
+                    lastY = y
+                    return true
+                }
                 if (
                     doubleTapDragCandidate &&
                     !selecting &&
@@ -3529,7 +3606,7 @@ private class TouchMouseState {
                         scrollAccumulator = 0f
                     }
                     if (upId == activePointerId) {
-                        finishPointer(event, index, client)
+                        finishPointer(event, index, client, slideDirectClick)
                     }
                 }
                 return true
@@ -3537,10 +3614,11 @@ private class TouchMouseState {
             MotionEvent.ACTION_UP -> {
                 val index = event.findPointerIndex(activePointerId).takeIf { it >= 0 } ?: event.firstPointerIndexNotIn(ignoredPointerIds)
                 if (index < 0) return false
-                finishPointer(event, index, client)
+                finishPointer(event, index, client, slideDirectClick)
                 return true
             }
             MotionEvent.ACTION_CANCEL -> {
+                if (slideDirectClick) slideGestureDetector.onTouchCancel()
                 reset(client)
                 return true
             }
@@ -3563,7 +3641,12 @@ private class TouchMouseState {
         }
     }
 
-    private fun finishPointer(event: MotionEvent, index: Int, client: NativeStreamClient) {
+    private fun finishPointer(
+        event: MotionEvent,
+        index: Int,
+        client: NativeStreamClient,
+        slideDirectClick: Boolean = false,
+    ) {
         val x = event.getX(index)
         val y = event.getY(index)
         sendMouseDelta(
@@ -3575,6 +3658,14 @@ private class TouchMouseState {
         )
         lastX = x
         lastY = y
+        if (slideDirectClick) {
+            slideGestureDetector.onTouchUp(activePointerId, x, y, event.eventTime)
+            activePointerId = -1
+            doubleTapDragCandidate = false
+            scrollGestureOccurred = false
+            twoFingerTapCandidate = false
+            return
+        }
         val tapDistanceX = abs(x - downX)
         val tapDistanceY = abs(y - downY)
         val wasTap = activePointerId >= 0 &&

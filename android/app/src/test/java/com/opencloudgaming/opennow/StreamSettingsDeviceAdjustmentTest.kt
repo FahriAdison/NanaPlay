@@ -741,6 +741,41 @@ class StreamSettingsDeviceAdjustmentTest {
     }
 
     @Test
+    fun ultrawide720pResolutionsDoNotWarnOnLowPower() {
+        val report = codecReport(
+            VideoCodec.H264,
+            hardwareDecoder = true,
+            realtimeSafe = true,
+            lowPower = true,
+            constrainedRuntime = false,
+        )
+
+        for (res in listOf("1280x720", "1680x720", "1800x720", "1920x720")) {
+            val settings = StreamSettings(
+                resolution = res,
+                aspectRatio = "custom",
+                fps = 60,
+                maxBitrateMbps = 18,
+            )
+            assertTrue(
+                "Expected no warning for $res",
+                settings.lowPowerPerformanceWarningReasons(report).isEmpty(),
+            )
+        }
+
+        val settings1080p = StreamSettings(
+            resolution = "1920x1080",
+            aspectRatio = "16:9",
+            fps = 60,
+            maxBitrateMbps = 18,
+        )
+        assertEquals(
+            listOf("1920x1080 resolution"),
+            settings1080p.lowPowerPerformanceWarningReasons(report),
+        )
+    }
+
+    @Test
     fun constrainedProfileStillWarnsAbove30Fps() {
         val settings = StreamSettings(
             resolution = "1280x720",

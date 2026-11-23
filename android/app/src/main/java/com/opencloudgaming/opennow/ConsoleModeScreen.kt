@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -343,12 +344,13 @@ internal fun ConsoleModeScreen(
         // when no games match. Previously an empty result replaced the whole
         // column — including the field's clear button — trapping the user in
         // the empty state with no way to clear the query.
-        // 1.0.55: systemBarsPadding keeps content clear of status/nav bars
-        // while the background stays truly full-bleed.
+        // 1.0.55: systemBarsPadding + displayCutoutPadding keeps content clear of status/nav bars
+        // and camera cutouts while the background stays truly full-bleed.
         Column(
             Modifier
                 .fillMaxSize()
                 .systemBarsPadding()
+                .displayCutoutPadding()
         ) {
             // PS5-style top header: time + quick actions (1.0.47)
             ConsoleTopHeader(

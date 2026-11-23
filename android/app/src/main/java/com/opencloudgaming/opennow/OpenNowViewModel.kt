@@ -2014,7 +2014,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 if (readySession == null || !readySession.isReadyForStream()) return@onSuccess
                 markSessionReadyForNativeStream(readySession, settings)
             }.onFailure { error ->
-                if (error is CancellationException) return@onFailure
+                if (error is CancellationException) throw error
                 if (handleQueueAbandonedFailure(error, launchSession, settings)) return@onFailure
                 // Upstream OpenNOW PR 1334: after a discovery fallback, a create-time conflict must
                 // reach the resume/end dialog instead of a plain error, and must never trigger a
@@ -4050,10 +4050,8 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             ?: gameForActiveSession(active)
             ?: run {
                 if (gamesJob?.isActive == true) {
-                    runCatching {
-                        withTimeout(5_000L) {
-                            gamesJob?.join()
-                        }
+                    withTimeoutOrNull(5_000L) {
+                        gamesJob?.join()
                     }
                 }
                 gameForActiveSession(active)

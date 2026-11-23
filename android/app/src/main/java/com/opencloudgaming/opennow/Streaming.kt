@@ -4371,6 +4371,12 @@ class NativeStreamClient(
         // The recorder owns its own EGL child context, so eglBase.release()
         // does not interfere with the background mux. No blocking join here:
         // finishRelease() runs on the main thread (via onDispose).
+        val finalizeJob = recordingFinalizeJob
+        if (finalizeJob == null || finalizeJob.isCompleted) {
+            recordingFinalizeScope.cancel()
+        } else {
+            finalizeJob.invokeOnCompletion { recordingFinalizeScope.cancel() }
+        }
         eglBase.release()
         scope.cancel()
     }

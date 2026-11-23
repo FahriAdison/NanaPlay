@@ -1870,8 +1870,9 @@ internal fun StreamSettings.lowPowerPerformanceWarningReasons(report: RuntimeCod
     }
 
     return buildList {
-        // Toleransi ultrawide: resolusi tier 720p (height <= 720 dan width <= 1680) tidak diperingatkan
-        if (height > LOW_POWER_MAX_SAFE_HEIGHT || (width * height) > LOW_POWER_MAX_SAFE_PIXELS) {
+        // Toleransi ultrawide: resolusi tier 720p (lebar <= 1920 dan tinggi <= 720) tidak diperingatkan
+        val isSafe720pTier = minOf(width, height) <= LOW_POWER_MAX_SAFE_HEIGHT && maxOf(width, height) <= LOW_POWER_MAX_SAFE_WIDTH
+        if (!isSafe720pTier) {
             add("$normalizedResolution resolution")
         }
         if (fps > maxSafeFps) add("$fps FPS")
@@ -1939,7 +1940,7 @@ private const val MAX_STANDARD_STREAM_FPS = 60
 private const val MAX_ULTIMATE_STREAM_FPS = 360
 private const val MIN_STREAM_FPS = 30
 private const val LOW_POWER_MAX_SAFE_HEIGHT = 720
-private const val LOW_POWER_MAX_SAFE_PIXELS = 1680 * 720
+private const val LOW_POWER_MAX_SAFE_WIDTH = 1920
 private const val CONSTRAINED_RECOMMENDED_FPS = 30
 private const val CONSTRAINED_RECOMMENDED_BITRATE_MBPS = 12
 private const val LOW_POWER_RECOMMENDED_FPS = 60

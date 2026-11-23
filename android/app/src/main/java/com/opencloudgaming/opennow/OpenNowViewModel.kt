@@ -4192,7 +4192,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     "Queue ad playback wait exceeded ${QUEUE_AD_WAIT_MAX_DURATION_MS / 1000}s; falling back to 2s polling interval",
                 )
             }
-            val waitMs = if (waitingForAds && !adWaitExceeded) 30_000L else 2_000L
+            val waitMs = if (waitingForAds && !adWaitExceeded) 8_000L else 2_000L
             if (waitMs > 2_000L) {
                 recordDebugEvent(
                     "queue",

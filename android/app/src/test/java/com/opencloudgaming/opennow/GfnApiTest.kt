@@ -323,8 +323,8 @@ class GfnApiTest {
             includeOrigin = true,
         )
 
-        assertEquals("NVIDIA-CLASSIC", headers["nv-client-streamer"])
-        assertEquals("NATIVE", headers["nv-client-type"])
+        assertEquals("WEBRTC", headers["nv-client-streamer"])
+        assertEquals("BROWSER", headers["nv-client-type"])
         assertEquals("ANDROID", headers["nv-device-os"])
         assertEquals("PHONE", headers["nv-device-type"])
         assertTrue(headers["User-Agent"].orEmpty().contains("GFN-PC/22.0"))
@@ -368,8 +368,8 @@ class GfnApiTest {
         )
 
         assertEquals(defaultHeaders, explicitGamepadHeaders)
-        assertEquals("NATIVE", explicitGamepadHeaders["nv-client-type"])
-        assertEquals("NVIDIA-CLASSIC", explicitGamepadHeaders["nv-client-streamer"])
+        assertEquals("BROWSER", explicitGamepadHeaders["nv-client-type"])
+        assertEquals("WEBRTC", explicitGamepadHeaders["nv-client-streamer"])
     }
 
     @Test
@@ -382,8 +382,8 @@ class GfnApiTest {
             isAndroidTv = true,
         )
 
-        assertEquals("NVIDIA-CLASSIC", headers["nv-client-streamer"])
-        assertEquals("NATIVE", headers["nv-client-type"])
+        assertEquals("WEBRTC", headers["nv-client-streamer"])
+        assertEquals("BROWSER", headers["nv-client-type"])
         assertEquals("ANDROID", headers["nv-device-os"])
         assertEquals("DESKTOP", headers["nv-device-type"])
         val userAgent = headers["User-Agent"].orEmpty()
@@ -834,8 +834,8 @@ class GfnApiTest {
             includeOrigin = true,
             appLaunchMode = GfnAppLaunchMode.GAMEPAD_FRIENDLY,
         )
-        assertEquals("NVIDIA-CLASSIC", headers["nv-client-streamer"])
-        assertEquals("NATIVE", headers["nv-client-type"])
+        assertEquals("WEBRTC", headers["nv-client-streamer"])
+        assertEquals("BROWSER", headers["nv-client-type"])
         assertEquals("PHONE", headers["nv-device-type"])
         val userAgent = headers["User-Agent"].orEmpty()
         assertTrue(userAgent.contains("Android"))

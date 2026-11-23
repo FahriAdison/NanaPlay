@@ -107,12 +107,13 @@ private const val PANELS_QUERY_HASH = "f8e26265a5db5c20e1334a6872cf04b6e39705076
 private const val APP_METADATA_QUERY_HASH = "39187e85b6dcf60b7279a5f233288b0a8b69a8b1dbcfb5b25555afdcb988f0d7"
 
 private object CloudMatchDesktopIdentity {
-    // WebRTC is the transport, but CloudMatch uses the desktop/native identity and
-    // monitor descriptor to allocate the full requested resolution and frame rate.
+    // WebRTC is the transport: CloudMatch requires streamer=WEBRTC and clientType=BROWSER
+    // so European server clusters do not allocate an RTSPS-only seat.
+    // Desktop monitor descriptor is preserved in sessionRequestData for full resolution.
     const val PLATFORM_NAME = "windows"
     const val PERSIST_GAME_SETTINGS = true
-    const val STREAMER = "NVIDIA-CLASSIC"
-    const val CLIENT_TYPE = "NATIVE"
+    const val STREAMER = "WEBRTC"
+    const val CLIENT_TYPE = "BROWSER"
     const val DEVICE_OS = "WINDOWS"
     const val DEVICE_TYPE = "DESKTOP"
 }

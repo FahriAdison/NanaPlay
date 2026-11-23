@@ -38,7 +38,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
@@ -567,7 +569,8 @@ internal fun signalingFailureDisposition(
 ): SignalingFailureDisposition = when {
     message.contains("http=410", ignoreCase = true) -> SignalingFailureDisposition.SessionEnded
     message.contains("http=404", ignoreCase = true) ||
-        message.contains("Not Found", ignoreCase = true) -> SignalingFailureDisposition.RecoverSession
+        message.contains("Not Found", ignoreCase = true) ||
+        message.contains("peerRemoved", ignoreCase = true) -> SignalingFailureDisposition.RecoverSession
     // Auth failures must never fall through to silent transport retry:
     // the token is dead, so retrying forever only shows "Reconnecting...".
     message.contains("http=401", ignoreCase = true) ||
@@ -577,6 +580,25 @@ internal fun signalingFailureDisposition(
     normalClosureMeansSessionEnded && message.contains("code=1000", ignoreCase = true) ->
         SignalingFailureDisposition.SessionEnded
     else -> SignalingFailureDisposition.RetryTransport
+}
+
+internal fun signalingHeartbeatReply(message: JsonObject): String? =
+    if (message["hb"] != null) """{"hb":1}""" else null
+
+internal fun buildGfnSignInUrl(
+    signalingUrl: String,
+    signalingServer: String,
+    peerName: String,
+    sessionId: String,
+    reconnect: Boolean = false,
+): String {
+    val base = signalingUrl.ifBlank {
+        val host = if (signalingServer.contains(":")) signalingServer else "$signalingServer:443"
+        "wss://$host/nvst/"
+    }
+    val normalized = base.replace("wss://", "").trimEnd('/')
+    val reconnectParam = if (reconnect) "&reconnect=1" else ""
+    return "wss://$normalized/sign_in?peer_id=$peerName&version=3.0&peer_role=1&pairing_id=$sessionId$reconnectParam"
 }
 
 internal fun parseRemoteIceCandidate(payload: JsonObject): IceCandidate? {
@@ -695,6 +717,7 @@ sealed interface SignalingEvent {
 class GfnSignalingClient(
     private val session: SessionInfo,
     private val settings: StreamSettings,
+    private val reconnect: Boolean = false,
     private val http: OkHttpClient = defaultHttpClient(),
     private val onEvent: (SignalingEvent) -> Unit,
 ) {
@@ -802,14 +825,13 @@ class GfnSignalingClient(
         scope.cancel()
     }
 
-    private fun buildSignInUrl(): String {
-        val base = session.signalingUrl.ifBlank {
-            val host = if (session.signalingServer.contains(":")) session.signalingServer else "${session.signalingServer}:443"
-            "wss://$host/nvst/"
-        }
-        val normalized = base.replace("wss://", "").trimEnd('/')
-        return "wss://$normalized/sign_in?peer_id=$peerName&version=3.0&peer_role=1&pairing_id=${session.sessionId}"
-    }
+    private fun buildSignInUrl(): String = buildGfnSignInUrl(
+        signalingUrl = session.signalingUrl,
+        signalingServer = session.signalingServer,
+        peerName = peerName,
+        sessionId = session.sessionId,
+        reconnect = reconnect,
+    )
 
     private fun handleMessage(text: String) {
         val parsed = runCatching { OpenNowJson.parseToJsonElement(text).jsonObject }.getOrNull()
@@ -826,10 +848,16 @@ class GfnSignalingClient(
             val shouldAck = parsed["peer_info"]?.jsonObject?.get("id")?.jsonPrimitive?.intOrNull != peerId
             if (shouldAck) sendJson("""{"ack":$ack}""")
         }
-        if (parsed["hb"] != null) {
-            // The client already sends its own heartbeat every five seconds.
-            // Treat server heartbeat frames as acknowledgements instead of
-            // creating an unnecessary reply round trip.
+        parsed["error"]?.takeUnless { it is JsonNull }?.let { error ->
+            val errorText = (error as? JsonPrimitive)?.contentOrNull ?: error.toString()
+            onEvent(SignalingEvent.Log("Signaling server rejected request error=$errorText"))
+            if (errorText == "peerRemoved") {
+                onEvent(SignalingEvent.Error("Signaling peerRemoved"))
+                return
+            }
+        }
+        signalingHeartbeatReply(parsed)?.let { reply ->
+            sendJson(reply)
             return
         }
         val peerMsg = parsed["peer_msg"]?.jsonObject ?: return
@@ -5101,11 +5129,11 @@ class NativeStreamClient(
         // (with its own connection pool + dispatcher thread pool) on every reconnect.
         val sharedHttp = (appContext as? OpenNowApplication)?.httpClient
         signaling = if (sharedHttp != null) {
-            GfnSignalingClient(session, settings = settings, http = sharedHttp) { event ->
+            GfnSignalingClient(session, settings = settings, reconnect = reconnectAttempts > 0, http = sharedHttp) { event ->
                 handleSignaling(event, generation)
             }
         } else {
-            GfnSignalingClient(session, settings = settings) { event ->
+            GfnSignalingClient(session, settings = settings, reconnect = reconnectAttempts > 0) { event ->
                 handleSignaling(event, generation)
             }
         }.also { it.connect() }

@@ -2846,6 +2846,34 @@ class GfnSessionRepository(
     }
 
     companion object {
+        internal fun resolveMediaConnectionInfo(connections: List<JsonObject>, serverIp: String): MediaConnectionInfo? {
+            fun extractIp(conn: JsonObject): String? = conn.string("ip")?.let(::usableSessionHost) ?: conn.string("resourcePath")?.let(::extractHostFromUrl)
+            fun extractPort(conn: JsonObject): Int =
+                conn.int("port") ?: conn.string("resourcePath")?.let { path ->
+                    val afterScheme = listOf("rtsps://", "rtsp://", "https://", "http://").firstOrNull { path.startsWith(it) }?.let { path.removePrefix(it) } ?: path
+                    afterScheme.substringBefore("/").substringAfter(":", "").toIntOrNull()
+                } ?: 0
+            // Prefer multiplexed BUNDLE (usage 17) mapping over separate VIDEO (usage 2)
+            listOf(17, 2).forEach { usage ->
+                connections.firstOrNull { it.int("usage") == usage }?.let {
+                    val ip = extractIp(it)
+                    val port = extractPort(it)
+                    if (ip != null && port > 0) return MediaConnectionInfo(ip, port)
+                }
+            }
+            connections.filter { it.int("usage") == 14 }.sortedByDescending { it.int("port") ?: 0 }.forEach {
+                val port = extractPort(it)
+                if (port > 0) return MediaConnectionInfo(extractIp(it) ?: serverIp, port)
+            }
+            return null
+        }
+
+        internal fun extractHostFromUrl(raw: String): String? {
+            val after = listOf("rtsps://", "rtsp://", "wss://", "https://").firstOrNull { raw.startsWith(it) }?.let { raw.removePrefix(it) } ?: return null
+            val host = after.substringBefore(":").substringBefore("/")
+            return usableSessionHost(host)
+        }
+
         internal fun buildSessionRequestBody(
             appId: String,
             internalTitle: String,
@@ -3117,23 +3145,6 @@ class GfnSessionRepository(
         )
     }
 
-    private fun resolveMediaConnectionInfo(connections: List<JsonObject>, serverIp: String): MediaConnectionInfo? {
-        fun extractIp(conn: JsonObject): String? = conn.string("ip")?.let(::usableSessionHost) ?: conn.string("resourcePath")?.let(::extractHostFromUrl)
-        fun extractPort(conn: JsonObject): Int = conn.int("port") ?: conn.string("resourcePath")?.let { Uri.parse(it.replace("rtsps://", "https://").replace("rtsp://", "http://")).port } ?: 0
-        listOf(2, 17).forEach { usage ->
-            connections.firstOrNull { it.int("usage") == usage }?.let {
-                val ip = extractIp(it)
-                val port = extractPort(it)
-                if (ip != null && port > 0) return MediaConnectionInfo(ip, port)
-            }
-        }
-        connections.filter { it.int("usage") == 14 }.sortedByDescending { it.int("port") ?: 0 }.forEach {
-            val port = extractPort(it)
-            if (port > 0) return MediaConnectionInfo(extractIp(it) ?: serverIp, port)
-        }
-        return null
-    }
-
     private fun streamingServerIp(payload: JsonObject): String? {
         val session = payload.obj("session") ?: return null
         return streamingServerIpFromSession(session)
@@ -3156,12 +3167,6 @@ class GfnSessionRepository(
             raw.startsWith("/") -> "wss://$serverIp:443$raw" to null
             else -> "wss://$serverIp:443/nvst/" to null
         }
-
-    private fun extractHostFromUrl(raw: String): String? {
-        val after = listOf("rtsps://", "rtsp://", "wss://", "https://").firstOrNull { raw.startsWith(it) }?.let { raw.removePrefix(it) } ?: return null
-        val host = after.substringBefore(":").substringBefore("/")
-        return usableSessionHost(host)
-    }
 
     private fun isZoneHostname(value: String): Boolean =
         value.contains("cloudmatchbeta.nvidiagrid.net") || value.contains("cloudmatch.nvidiagrid.net")

@@ -808,7 +808,7 @@ class GfnSignalingClient(
             "wss://$host/nvst/"
         }
         val normalized = base.replace("wss://", "").trimEnd('/')
-        return "wss://$normalized/sign_in?peer_id=$peerName&version=2&peer_role=1&pairing_id=${session.sessionId}"
+        return "wss://$normalized/sign_in?peer_id=$peerName&version=3.0&peer_role=1&pairing_id=${session.sessionId}"
     }
 
     private fun handleMessage(text: String) {
@@ -859,7 +859,7 @@ class GfnSignalingClient(
         onEvent(SignalingEvent.Log("Sending peer info resolution=${width}x$height peer=$peerName"))
         sendJson(
             """
-            {"ackid":${nextAckId()},"peer_info":{"browser":"Chrome","browserVersion":"131","connected":true,"id":$peerId,"name":"$peerName","peerRole":0,"resolution":"${width}x$height","version":2}}
+            {"ackid":${nextAckId()},"peer_info":{"browser":"Chrome","browserVersion":"131.0.0.0","connected":true,"id":$peerId,"name":"$peerName","peer_role":1,"resolution":"${width}x$height","signalingVersion":"3.0","version":3}}
             """.trimIndent(),
         )
     }
@@ -8370,7 +8370,7 @@ private const val PERSISTENT_RECONNECT_MAX_DELAY_MS = 30000L
 // media progress instead of retrying forever.
 private const val PERSISTENT_RECONNECT_STALL_LIMIT_MS = 10 * 60 * 1000L
 private const val PERSISTENT_SAFE_FALLBACK_AFTER_ATTEMPTS = 2
-private const val OFFER_TIMEOUT_MS = 12_000L
+private const val OFFER_TIMEOUT_MS = 25_000L
 private const val MEDIA_STALL_KEYFRAME_AFTER_MS = 5_000L
 private const val MEDIA_STALL_KEYFRAME_INTERVAL_MS = 2_500L
 private const val MEDIA_STALL_RESTART_AFTER_MS = 10_000L

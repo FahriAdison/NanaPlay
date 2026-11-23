@@ -76,6 +76,53 @@ class QueueLaunchStatusTest {
         assertEquals(3, QUEUE_INVALID_SESSION_MAX_CONSECUTIVE_POLLS)
     }
 
+    @Test
+    fun lowerOnlyQueuePositionClampsMonotonically() {
+        // Initial snapshot
+        assertEquals(50, lowerOnlyQueuePosition(previous = null, incoming = 50))
+        // Position progresses forward (drops)
+        assertEquals(40, lowerOnlyQueuePosition(previous = 50, incoming = 40))
+        // Backend cluster rebalances / priority user inserts (position jumps backwards) -> clamped to lowest
+        assertEquals(40, lowerOnlyQueuePosition(previous = 40, incoming = 45))
+        assertEquals(35, lowerOnlyQueuePosition(previous = 40, incoming = 35))
+        // Null incoming returns null
+        assertNull(lowerOnlyQueuePosition(previous = 35, incoming = null))
+    }
+
+    @Test
+    fun isPastQueueIdentifiesProgressionBeyondQueue() {
+        assertFalse(isPastQueue(null))
+        // Still queuing for rig
+        assertFalse(isPastQueue(session(queuePosition = 10, seatSetupStep = 1)))
+        // Container / game launch steps
+        assertTrue(isPastQueue(session(queuePosition = 1, seatSetupStep = 3)))
+        assertTrue(isPastQueue(session(queuePosition = null, seatSetupStep = 4)))
+        assertTrue(isPastQueue(session(queuePosition = 1, seatSetupStep = 5)))
+        // Ready status
+        assertTrue(isPastQueue(session(queuePosition = null, seatSetupStep = null).copy(status = 2)))
+        assertTrue(isPastQueue(session(queuePosition = 1, seatSetupStep = 1).copy(status = 3)))
+    }
+
+    @Test
+    fun queueDisplayPositionSuppressedWhenPastQueue() {
+        val pastSession = session(queuePosition = 2, seatSetupStep = 3)
+        assertNull(queueDisplayPosition(pastSession))
+
+        val state = OpenNowUiState(
+            streamStatus = "queue",
+            streamSession = pastSession,
+            queuePosition = 2,
+        )
+        assertNull(queueDisplayPosition(state))
+
+        val connectingState = OpenNowUiState(
+            streamStatus = "connecting",
+            streamSession = session(queuePosition = 2, seatSetupStep = 1),
+            queuePosition = 2,
+        )
+        assertNull(queueDisplayPosition(connectingState))
+    }
+
     private fun session(
         queuePosition: Int?,
         seatSetupStep: Int?,

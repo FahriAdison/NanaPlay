@@ -1,5 +1,23 @@
 package com.opencloudgaming.opennow
 
+/**
+ * Checks whether the session has already progressed past the queue into
+ * rig allocation, container setup, or stream connection.
+ */
+internal fun isPastQueue(session: SessionInfo?): Boolean {
+    if (session == null) return false
+    if (session.isReadyForStream()) return true
+    if (session.status in setOf(2, 3)) return true
+    return (session.seatSetupStep ?: 0) in 3..5
+}
+
+/**
+ * Returns the monotonically decreasing queue position for a session,
+ * ignoring any higher snapshots returned by backend server load rebalancing.
+ */
+internal fun lowerOnlyQueuePosition(previous: Int?, incoming: Int?): Int? =
+    if (incoming == null) null else previous?.coerceAtMost(incoming) ?: incoming
+
 internal fun queueLaunchStatusText(state: OpenNowUiState): String {
     val session = state.streamSession
     val queuePosition = queueDisplayPosition(state)
@@ -45,12 +63,12 @@ internal fun queuePositionText(state: OpenNowUiState, queuePosition: Int): Strin
 
 internal fun queueDisplayPosition(state: OpenNowUiState): Int? {
     val session = state.streamSession
-    if (session?.seatSetupStep == 5) return null
+    if (isPastQueue(session) || state.streamStatus == "connecting" || state.streamStatus == "playing") return null
     return state.queuePosition?.takeIf { it > 0 } ?: queueDisplayPosition(session)
 }
 
 internal fun queueDisplayPosition(session: SessionInfo?): Int? {
-    if (session?.seatSetupStep == 5) return null
+    if (isPastQueue(session)) return null
     return session?.queuePosition?.takeIf { it > 0 }
 }
 

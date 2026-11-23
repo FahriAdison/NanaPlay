@@ -13044,8 +13044,13 @@ private fun rememberStableQueuePosition(queuePosition: Int?): Int? {
     var stableQueuePosition by remember { mutableStateOf(queuePosition) }
     LaunchedEffect(queuePosition) {
         if (queuePosition == stableQueuePosition) return@LaunchedEffect
-        if (queuePosition == null || stableQueuePosition == null) {
+        if (stableQueuePosition == null) {
             stableQueuePosition = queuePosition
+            return@LaunchedEffect
+        }
+        if (queuePosition == null) {
+            delay(QUEUE_POSITION_VISUAL_SETTLE_MS)
+            stableQueuePosition = null
             return@LaunchedEffect
         }
         delay(QUEUE_POSITION_VISUAL_SETTLE_MS)

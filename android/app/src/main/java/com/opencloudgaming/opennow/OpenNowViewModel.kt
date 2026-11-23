@@ -57,8 +57,10 @@ enum class SettingsRouteTarget {
 private const val ANDROID_UPDATE_LAUNCH_CHECK_DELAY_MS = 5_000L
 /** No queue-position improvement for this long → warn the user the queue may be stuck. */
 private const val QUEUE_STUCK_WARNING_MS = 10L * 60L * 1000L
-/** Never poll the queue longer than this — a wedged server must not drain battery/data forever. */
-private const val POLL_MAX_DURATION_MS = 40L * 60L * 1000L
+/** Never poll the queue longer than this (hard ceiling 3 hours) during active queue progression. */
+private const val POLL_MAX_DURATION_MS = 3L * 60L * 60L * 1000L
+/** Max duration to wait for queue ad playback before falling back to normal polling interval. */
+private const val QUEUE_AD_WAIT_MAX_DURATION_MS = 3L * 60L * 1000L
 /** Upper bound for the exponential backoff between failed queue polls. */
 private const val POLL_RETRY_MAX_BACKOFF_MS = 30_000L
 /** Consecutive queue polling failures cap before failing fast. */
@@ -4123,13 +4125,17 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
 
     private suspend fun pollUntilReady(token: String, created: SessionInfo, settings: StreamSettings): SessionInfo? {
         val currentGeneration = pollingGeneration
+        var currentToken = token
         var latest = created
         var pollCount = 0
         val pollStartMs = android.os.SystemClock.elapsedRealtime()
         var consecutivePollFailures = 0
         var consecutiveInvalidSessionPolls = 0
+        var tokenRefreshAttempts = 0
+        var adWaitStartMs = 0L
         recordDebugEvent("queue", "Begin polling gen=$currentGeneration ${latest.debugSummary()}")
-        val initialPosition = queueDisplayPosition(latest)
+        val initialIncoming = queueDisplayPosition(latest)
+        val initialPosition = if (isPastQueue(latest)) null else initialIncoming
         // Defense-in-depth, not the primary fix: there is no suspend point between the
         // generation capture above and this first state write, so retryQueue() cannot
         // interleave here on the single-threaded main dispatcher. The real fix is #1
@@ -4154,7 +4160,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 recordDebugEvent("queue", "Polling cancelled by newer generation (current=$currentGeneration, active=$pollingGeneration)")
                 return null
             }
-            // Circuit breaker: a wedged server must not keep the device polling forever.
+            // Circuit breaker: hard ceiling of 3 hours during active queue progression.
             if (android.os.SystemClock.elapsedRealtime() - pollStartMs >= POLL_MAX_DURATION_MS) {
                 recordDebugEvent("queue", "Polling timed out after ${POLL_MAX_DURATION_MS / 60_000} minutes ${latest.debugSummary()}")
                 error("The queue is taking too long. Please try again later.")
@@ -4170,7 +4176,21 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 }
                 continue
             }
-            val waitMs = if (shouldWaitForQueueAdPlayback(latest.adState)) 30_000L else 2_000L
+            val waitingForAds = shouldWaitForQueueAdPlayback(latest.adState)
+            val nowElapsedMs = android.os.SystemClock.elapsedRealtime()
+            if (waitingForAds) {
+                if (adWaitStartMs == 0L) adWaitStartMs = nowElapsedMs
+            } else {
+                adWaitStartMs = 0L
+            }
+            val adWaitExceeded = adWaitStartMs > 0L && (nowElapsedMs - adWaitStartMs >= QUEUE_AD_WAIT_MAX_DURATION_MS)
+            if (adWaitExceeded) {
+                recordDebugEvent(
+                    "queue",
+                    "Queue ad playback wait exceeded ${QUEUE_AD_WAIT_MAX_DURATION_MS / 1000}s; falling back to 2s polling interval",
+                )
+            }
+            val waitMs = if (waitingForAds && !adWaitExceeded) 30_000L else 2_000L
             if (waitMs > 2_000L) {
                 recordDebugEvent(
                     "queue",
@@ -4200,7 +4220,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             pollCount += 1
             val polled = try {
                 sessionRepository.pollSession(
-                    token = token,
+                    token = currentToken,
                     streamingBaseUrl = latest.streamingBaseUrl ?: effectiveStreamingBaseUrl(),
                     serverIp = latest.serverIp,
                     zone = latest.zone,
@@ -4218,6 +4238,22 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 if (providerStatus == 401 || providerStatus == 403 ||
                     httpCode == 401 || httpCode == 403
                 ) {
+                    if (tokenRefreshAttempts < 2) {
+                        tokenRefreshAttempts++
+                        recordDebugEvent("queue", "Poll #$pollCount 401/403 received; attempting token refresh ($tokenRefreshAttempts/2)")
+                        val refreshed = runCatching { authRepository.restore(forceRefresh = true) }.getOrNull()
+                        val newToken = refreshed?.tokens?.idToken ?: refreshed?.tokens?.accessToken
+                        if (!newToken.isNullOrBlank()) {
+                            currentToken = newToken
+                            _state.update { s ->
+                                s.authSession?.let { currentAuth ->
+                                    s.copy(authSession = currentAuth.copy(tokens = refreshed.tokens))
+                                } ?: s
+                            }
+                            recordDebugEvent("queue", "Token refresh succeeded for queue polling; retrying immediately")
+                            continue
+                        }
+                    }
                     recordDebugEvent("queue", "Poll #$pollCount unauthorized/forbidden (HTTP ${httpCode ?: providerStatus}): ${e.message}")
                     throw e
                 }
@@ -4256,6 +4292,7 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             }
             if (currentGeneration != pollingGeneration) return null
             consecutivePollFailures = 0
+            tokenRefreshAttempts = 0
             latest = mergeQueueSessionState(latest, polled)
             recordDebugEvent("queue", "Poll #$pollCount result ${latest.debugSummary()}")
             // Some provider responses put the terminal code on the session itself
@@ -4275,9 +4312,12 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             } else {
                 consecutiveInvalidSessionPolls = 0
             }
-            val currentPosition = queueDisplayPosition(latest)
+            val rawPosition = queueDisplayPosition(latest)
+            val previousPosition = state.value.streamSession
+                ?.takeIf { it.sessionId == latest.sessionId }
+                ?.let { state.value.queuePosition }
+            val currentPosition = if (isPastQueue(latest)) null else lowerOnlyQueuePosition(previousPosition, rawPosition)
             val nowMs = android.os.SystemClock.elapsedRealtime()
-            val previousPosition = state.value.queuePosition
             val currentState = state.value
 
             val positionChanged = currentPosition != null && previousPosition != null && currentPosition != previousPosition

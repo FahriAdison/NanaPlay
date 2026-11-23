@@ -4243,19 +4243,20 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                     if (tokenRefreshAttempts < 2) {
                         tokenRefreshAttempts++
                         recordDebugEvent("queue", "Poll #$pollCount 401/403 received; attempting token refresh ($tokenRefreshAttempts/2)")
-                        val refreshed = try {
+                        val refreshedSession = try {
                             authRepository.restore(forceRefresh = true)
                         } catch (ce: CancellationException) {
                             throw ce
                         } catch (_: Throwable) {
                             null
                         }
-                        val newToken = refreshed?.tokens?.idToken ?: refreshed?.tokens?.accessToken
-                        if (!newToken.isNullOrBlank()) {
+                        val refreshedTokens = refreshedSession?.tokens
+                        val newToken = refreshedTokens?.idToken ?: refreshedTokens?.accessToken
+                        if (!newToken.isNullOrBlank() && refreshedTokens != null) {
                             currentToken = newToken
                             _state.update { s ->
                                 s.authSession?.let { currentAuth ->
-                                    s.copy(authSession = currentAuth.copy(tokens = refreshed.tokens))
+                                    s.copy(authSession = currentAuth.copy(tokens = refreshedTokens))
                                 } ?: s
                             }
                             recordDebugEvent("queue", "Token refresh succeeded for queue polling; retrying immediately")

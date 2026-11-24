@@ -280,6 +280,36 @@ class AndroidQueueAdsTest {
         assertEquals(false, shouldWaitForQueueAdPlayback(emptyRequired))
     }
 
+    @Test
+    fun mergeQueueAdReportResultRemovesCompletedAdOnTerminalAction() {
+        val previous = session(adState = SessionAdState(sessionAds = listOf(ad("ad-1"), ad("ad-2")), isAdsRequired = true))
+        val updatedFromServer = session(adState = SessionAdState(sessionAds = listOf(ad("ad-1"), ad("ad-2")), isAdsRequired = true))
+
+        val result = mergeQueueAdReportResult(
+            previous = previous,
+            updated = updatedFromServer,
+            adId = "ad-1",
+            terminalAction = true,
+        )
+
+        assertEquals(listOf("ad-2"), sessionAdItems(result.adState).map { it.adId })
+    }
+
+    @Test
+    fun mergeQueueAdReportResultPreservesAdOnNonTerminalAction() {
+        val previous = session(adState = SessionAdState(sessionAds = listOf(ad("ad-1")), isAdsRequired = true))
+        val updatedFromServer = session(adState = SessionAdState(sessionAds = listOf(ad("ad-1")), isAdsRequired = true))
+
+        val result = mergeQueueAdReportResult(
+            previous = previous,
+            updated = updatedFromServer,
+            adId = "ad-1",
+            terminalAction = false,
+        )
+
+        assertEquals(listOf("ad-1"), sessionAdItems(result.adState).map { it.adId })
+    }
+
     private fun ad(id: String): SessionAdInfo =
         SessionAdInfo(adId = id, mediaUrl = "https://example.invalid/$id.mp4")
 

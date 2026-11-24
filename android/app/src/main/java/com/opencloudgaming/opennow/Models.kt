@@ -1508,6 +1508,7 @@ data class SessionInfo(
     val adState: SessionAdState? = null,
     val zone: String = "",
     val streamingBaseUrl: String? = null,
+    val sessionControlBaseUrl: String? = null,
     val serverIp: String,
     val signalingServer: String,
     val signalingUrl: String,

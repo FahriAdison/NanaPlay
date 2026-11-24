@@ -12513,7 +12513,7 @@ private fun QueueLoadingScreen(state: OpenNowUiState, viewModel: OpenNowViewMode
         ?: ad?.adUrl
         ?: ad?.mediaUrl
     val queuePosition = activeQueuePosition(state)
-    val visibleQueuePosition = rememberStableQueuePosition(queuePosition)
+    val visibleQueuePosition = rememberStableQueuePosition(session?.sessionId, queuePosition)
     val queueCopy = queueLaunchStatusText(state, visibleQueuePosition)
     val hasPlayableAd = ad != null && mediaUrl != null
 
@@ -13071,21 +13071,17 @@ private fun activeQueuePosition(state: OpenNowUiState): Int? =
     queueDisplayPosition(state)
 
 @Composable
-private fun rememberStableQueuePosition(queuePosition: Int?): Int? {
-    var stableQueuePosition by remember { mutableStateOf(queuePosition) }
-    LaunchedEffect(queuePosition) {
-        if (queuePosition == stableQueuePosition) return@LaunchedEffect
-        if (stableQueuePosition == null) {
-            stableQueuePosition = queuePosition
-            return@LaunchedEffect
-        }
-        if (queuePosition == null) {
-            delay(QUEUE_POSITION_VISUAL_SETTLE_MS)
-            stableQueuePosition = null
+private fun rememberStableQueuePosition(sessionId: String?, queuePosition: Int?): Int? {
+    var stableQueuePosition by remember(sessionId) { mutableStateOf(queuePosition) }
+    LaunchedEffect(sessionId, queuePosition) {
+        val nextPosition = lowerOnlyQueuePosition(stableQueuePosition, queuePosition)
+        if (nextPosition == stableQueuePosition) return@LaunchedEffect
+        if (nextPosition == null || stableQueuePosition == null) {
+            stableQueuePosition = nextPosition
             return@LaunchedEffect
         }
         delay(QUEUE_POSITION_VISUAL_SETTLE_MS)
-        stableQueuePosition = queuePosition
+        stableQueuePosition = lowerOnlyQueuePosition(stableQueuePosition, nextPosition)
     }
     return stableQueuePosition
 }
@@ -13605,13 +13601,13 @@ private fun QueueAdPlayback(
         onFinished = { watchedTimeInMs ->
             viewModel.reportQueueAd(ad.adId, "finish", watchedTimeInMs = watchedTimeInMs)
         },
-        onError = { watchedTimeInMs ->
+        onError = { watchedTimeInMs, errorInfo ->
             viewModel.reportQueueAd(
                 ad.adId,
                 "cancel",
                 watchedTimeInMs = watchedTimeInMs,
                 cancelReason = "error",
-                errorInfo = "Error loading url",
+                errorInfo = errorInfo,
             )
         },
     )
@@ -13691,7 +13687,7 @@ private fun MinimizedQueueDock(
 ) {
     val abandoned = state.queueAbandoned
     val queuePosition = activeQueuePosition(state)
-    val visibleQueuePosition = rememberStableQueuePosition(queuePosition)
+    val visibleQueuePosition = rememberStableQueuePosition(state.streamSession?.sessionId, queuePosition)
     val queueCopy = queueLaunchStatusText(state, visibleQueuePosition)
     val context = LocalContext.current
     val game = state.streamGame
@@ -13791,6 +13787,11 @@ private fun MinimizedQueueDock(
     }
 }
 
+private const val QUEUE_AD_FORCE_PLAY_TIMEOUT_MS = 10_000L
+private const val QUEUE_AD_START_TIMEOUT_MS = 30_000L
+private const val QUEUE_AD_STUCK_TIMEOUT_MS = 30_000L
+private const val QUEUE_AD_PROGRESS_CHECK_INTERVAL_MS = 1_000L
+
 @Composable
 private fun QueueAdPlayer(
     adId: String,
@@ -13801,7 +13802,7 @@ private fun QueueAdPlayer(
     onPaused: () -> Unit,
     onResumed: () -> Unit,
     onFinished: (watchedTimeInMs: Long) -> Unit,
-    onError: (watchedTimeInMs: Long) -> Unit,
+    onError: (watchedTimeInMs: Long, errorInfo: String) -> Unit,
 ) {
     val context = LocalContext.current
     var muted by remember { mutableStateOf(false) }
@@ -13818,6 +13819,50 @@ private fun QueueAdPlayer(
     var reportedPause by remember(adId, url, playbackKey) { mutableStateOf(false) }
     var playing by remember(adId, url, playbackKey) { mutableStateOf(player.playWhenReady) }
     var controlsVisible by remember(adId, url, playbackKey) { mutableStateOf(false) }
+    LaunchedEffect(player) {
+        val loadStartedAtMs = SystemClock.elapsedRealtime()
+        var forcePlayAttempted = false
+        var playbackObserved = false
+        var lastPositionMs = player.currentPosition.coerceAtLeast(0L)
+        var lastProgressAtMs = loadStartedAtMs
+        while (!reportedFinish) {
+            delay(QUEUE_AD_PROGRESS_CHECK_INTERVAL_MS)
+            val nowMs = SystemClock.elapsedRealtime()
+            if (!reportedStart) {
+                if (!forcePlayAttempted && nowMs - loadStartedAtMs >= QUEUE_AD_FORCE_PLAY_TIMEOUT_MS) {
+                    forcePlayAttempted = true
+                    player.play()
+                }
+                if (nowMs - loadStartedAtMs >= QUEUE_AD_START_TIMEOUT_MS) {
+                    reportedFinish = true
+                    onError(player.currentPosition.coerceAtLeast(0L), "Ad play timeout")
+                    break
+                }
+                continue
+            }
+
+            if (!playbackObserved) {
+                playbackObserved = true
+                lastPositionMs = player.currentPosition.coerceAtLeast(0L)
+                lastProgressAtMs = nowMs
+            }
+            if (!player.playWhenReady || player.playbackState == Player.STATE_ENDED) {
+                lastPositionMs = player.currentPosition.coerceAtLeast(0L)
+                lastProgressAtMs = nowMs
+                continue
+            }
+
+            val positionMs = player.currentPosition.coerceAtLeast(0L)
+            if (positionMs > lastPositionMs) {
+                lastPositionMs = positionMs
+                lastProgressAtMs = nowMs
+            } else if (nowMs - lastProgressAtMs >= QUEUE_AD_STUCK_TIMEOUT_MS) {
+                reportedFinish = true
+                onError(positionMs, "Ad video is stuck")
+                break
+            }
+        }
+    }
     LaunchedEffect(controlsVisible, playing) {
         if (controlsVisible && playing) {
             delay(2400L)
@@ -13829,6 +13874,10 @@ private fun QueueAdPlayer(
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 playing = isPlaying
                 if (!isPlaying) controlsVisible = true
+                if (isPlaying && !reportedStart && !reportedFinish) {
+                    reportedStart = true
+                    onStarted()
+                }
             }
 
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
@@ -13843,10 +13892,6 @@ private fun QueueAdPlayer(
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_READY && player.playWhenReady && !reportedStart) {
-                    reportedStart = true
-                    onStarted()
-                }
                 if (playbackState == Player.STATE_ENDED && !reportedFinish) {
                     reportedFinish = true
                     onFinished(player.currentPosition.coerceAtLeast(0L))
@@ -13856,7 +13901,7 @@ private fun QueueAdPlayer(
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 if (!reportedFinish) {
                     reportedFinish = true
-                    onError(player.currentPosition.coerceAtLeast(0L))
+                    onError(player.currentPosition.coerceAtLeast(0L), error.message ?: "Player error")
                 }
             }
         }

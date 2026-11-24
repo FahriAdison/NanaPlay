@@ -2887,19 +2887,16 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 recordDebugEvent("ad", "Report accepted action=$normalizedAction updated=${updated.debugSummary()}")
                 _state.update { current ->
                     val previous = current.streamSession?.takeIf { it.sessionId == updated.sessionId } ?: session
-                    val merged = mergeQueueSessionState(
-                        previous,
-                        updated,
-                        preserveMissingAdState = !isTerminalAction,
+                    val merged = mergeQueueAdReportResult(
+                        previous = previous,
+                        updated = updated,
+                        adId = adId,
+                        terminalAction = isTerminalAction,
                     )
                     current.copy(
                         streamSession = merged,
                         queuePosition = queueDisplayPosition(merged),
-                        queueAdActiveId = if (isTerminalAction) {
-                            nextSessionAdId(merged.adState, adId) ?: adId
-                        } else {
-                            chooseQueueAdActiveId(current.queueAdActiveId, merged)
-                        },
+                        queueAdActiveId = chooseQueueAdActiveId(current.queueAdActiveId, merged),
                     )
                 }
             }.onFailure { error ->
@@ -4128,6 +4125,8 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
         var currentToken = token
         var latest = created
         var pollCount = 0
+        val launchBase = created.streamingBaseUrl ?: effectiveStreamingBaseUrl()
+        var assignedPollBase = created.sessionControlPollBaseUrl()
         val pollStartMs = android.os.SystemClock.elapsedRealtime()
         var consecutivePollFailures = 0
         var consecutiveInvalidSessionPolls = 0
@@ -4220,11 +4219,12 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
                 break
             }
             pollCount += 1
+            val pollTarget = assignedPollBase ?: launchBase
             val polled = try {
                 sessionRepository.pollSession(
                     token = currentToken,
-                    streamingBaseUrl = latest.streamingBaseUrl ?: effectiveStreamingBaseUrl(),
-                    serverIp = latest.serverIp,
+                    streamingBaseUrl = pollTarget,
+                    serverIp = null,
                     zone = latest.zone,
                     sessionId = latest.sessionId,
                     clientId = latest.clientId,
@@ -4302,6 +4302,12 @@ class OpenNowViewModel(application: Application) : AndroidViewModel(application)
             if (currentGeneration != pollingGeneration) return null
             consecutivePollFailures = 0
             tokenRefreshAttempts = 0
+            polled.sessionControlPollBaseUrl()?.let { nextPollBase ->
+                if (nextPollBase != assignedPollBase) {
+                    recordDebugEvent("queue", "Next queue poll target=${hostForDebug(nextPollBase)} from sessionControlInfo.ip")
+                }
+                assignedPollBase = nextPollBase
+            }
             latest = mergeQueueSessionState(latest, polled)
             recordDebugEvent("queue", "Poll #$pollCount result ${latest.debugSummary()}")
             // Some provider responses put the terminal code on the session itself

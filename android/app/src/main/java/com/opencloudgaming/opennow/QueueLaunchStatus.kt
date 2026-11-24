@@ -1,5 +1,8 @@
 package com.opencloudgaming.opennow
 
+private fun SessionInfo.isInQueueMode(): Boolean =
+    seatSetupStep == 1 || (queuePosition ?: 0) > 1
+
 /**
  * Checks whether the session has already progressed past the queue into
  * rig allocation, container setup, or stream connection.
@@ -8,7 +11,7 @@ internal fun isPastQueue(session: SessionInfo?): Boolean {
     if (session == null) return false
     if (session.isReadyForStream()) return true
     if (session.status in setOf(2, 3)) return true
-    return (session.seatSetupStep ?: 0) in 3..5
+    return (session.seatSetupStep ?: 0) in 3..5 && !session.isInQueueMode()
 }
 
 /**

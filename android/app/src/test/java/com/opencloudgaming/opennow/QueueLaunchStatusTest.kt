@@ -94,7 +94,9 @@ class QueueLaunchStatusTest {
         assertFalse(isPastQueue(null))
         // Still queuing for rig
         assertFalse(isPastQueue(session(queuePosition = 10, seatSetupStep = 1)))
-        // Container / game launch steps
+        // In queue mode: positive position keeps queue visible even if seatSetupStep is 3..5
+        assertFalse(isPastQueue(session(queuePosition = 2, seatSetupStep = 3)))
+        // Beyond queue when queuePosition <= 1 or null during container / rig setup
         assertTrue(isPastQueue(session(queuePosition = 1, seatSetupStep = 3)))
         assertTrue(isPastQueue(session(queuePosition = null, seatSetupStep = 4)))
         assertTrue(isPastQueue(session(queuePosition = 1, seatSetupStep = 5)))
@@ -104,14 +106,29 @@ class QueueLaunchStatusTest {
     }
 
     @Test
+    fun positiveQueuePositionKeepsQueueVisibleIfSetupFieldsDisagree() {
+        val session = session(queuePosition = 2, seatSetupStep = 3)
+        assertFalse(isPastQueue(session))
+        assertEquals(2, queueDisplayPosition(session))
+
+        val state = OpenNowUiState(
+            streamStatus = "queue",
+            streamSession = session,
+            queuePosition = 2,
+        )
+        assertEquals(2, queueDisplayPosition(state))
+        assertEquals("Queue #2", queueLaunchStatusText(state))
+    }
+
+    @Test
     fun queueDisplayPositionSuppressedWhenPastQueue() {
-        val pastSession = session(queuePosition = 2, seatSetupStep = 3)
+        val pastSession = session(queuePosition = 1, seatSetupStep = 3)
         assertNull(queueDisplayPosition(pastSession))
 
         val state = OpenNowUiState(
             streamStatus = "queue",
             streamSession = pastSession,
-            queuePosition = 2,
+            queuePosition = 1,
         )
         assertNull(queueDisplayPosition(state))
 

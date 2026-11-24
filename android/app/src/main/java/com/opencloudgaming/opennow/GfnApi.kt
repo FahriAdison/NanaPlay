@@ -2973,6 +2973,10 @@ class GfnSessionRepository(
             adState = extractAdState(session),
             zone = payload.obj("requestStatus")?.string("serverId")?.takeIf { it.isNotBlank() } ?: zone,
             streamingBaseUrl = base,
+            sessionControlBaseUrl = standardCloudMatchSessionControlBaseUrl(
+                session.obj("sessionControlInfo")?.string("ip"),
+                session.obj("sessionControlInfo")?.int("port"),
+            ),
             serverIp = signaling?.serverIp.orEmpty(),
             signalingServer = signaling?.signalingServer.orEmpty(),
             signalingUrl = signaling?.signalingUrl.orEmpty(),

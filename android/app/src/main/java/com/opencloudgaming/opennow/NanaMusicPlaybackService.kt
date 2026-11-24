@@ -21,6 +21,7 @@ import com.papahchan.nanaplay.R
 class NanaMusicPlaybackService : MediaSessionService() {
 
     private var session: MediaSession? = null
+    private var noisyPlayerListener: Player.Listener? = null
     private var noisyReceiverRegistered = false
     private val noisyReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -60,7 +61,7 @@ class NanaMusicPlaybackService : MediaSessionService() {
         )
         val basePlayer = NanaMusicPlayer.obtainServicePlayer(this)
         val forwardingPlayer = NanaForwardingPlayer(basePlayer, this)
-        forwardingPlayer.addListener(object : Player.Listener {
+        val listener = object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying) {
                     registerNoisyReceiver()
@@ -68,7 +69,9 @@ class NanaMusicPlaybackService : MediaSessionService() {
                     unregisterNoisyReceiver()
                 }
             }
-        })
+        }
+        noisyPlayerListener = listener
+        forwardingPlayer.addListener(listener)
         if (forwardingPlayer.isPlaying) {
             registerNoisyReceiver()
         }
@@ -136,6 +139,8 @@ class NanaMusicPlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         unregisterNoisyReceiver()
+        noisyPlayerListener?.let { session?.player?.removeListener(it) }
+        noisyPlayerListener = null
         // Instrumentasi saja: marker lifecycle persisten untuk hunt "musik berhenti sendiri".
         NanaMusicPlayer.logLifecycleMarker(this, "music.onDestroy playWhenReady=${session?.player?.playWhenReady} state=${session?.player?.playbackState}")
         val isPlaying = session?.player?.isPlaying == true

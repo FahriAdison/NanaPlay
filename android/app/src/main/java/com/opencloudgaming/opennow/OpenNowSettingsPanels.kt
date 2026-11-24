@@ -1,6 +1,7 @@
 package com.opencloudgaming.opennow
 import com.papahchan.nanaplay.BuildConfig
 import com.papahchan.nanaplay.R
+import com.opencloudgaming.opennow.ui.theme.OpenNowPalette
 
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult

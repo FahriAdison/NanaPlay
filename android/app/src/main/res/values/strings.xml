@@ -540,6 +540,7 @@
     <string name="music_err_retrying">Retrying: %1$s…</string>
     <string name="music_err_play_failed_next">Couldn\'t play: %1$s, skipping to next</string>
     <string name="music_err_play_failed_end">Couldn\'t play: %1$s. No more songs to play.</string>
+    <string name="music_err_consecutive_failures">Playback stopped: too many consecutive playback errors.</string>
     <string name="music_err_cannot_play">Can\'t play this song. Try again.</string>
     <string name="music_err_add_tracks">%1$d of %2$d tracks couldn\'t be added</string>
     <string name="music_err_online_unavailable">Online music temporarily unavailable</string>

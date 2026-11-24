@@ -239,6 +239,10 @@ object NanaMusicPlayer {
     /** 1.0.36: saavnId we already auto-retried after an error (prevents retry loops). */
     private var lastRetrySaavnId: String? = null
 
+    /** 1.0.109: consecutive playback error counter to cap skip-loops and prevent disk log flooding. */
+    @Volatile
+    private var consecutiveErrorCount = 0
+
     /** 1.0.36: serializes every "start playing" request so rapid taps can't interleave. */
     private val playMutex = Mutex()
 
@@ -534,7 +538,7 @@ object NanaMusicPlayer {
                 latch.countDown()
             }
         }
-        latch.await(10, java.util.concurrent.TimeUnit.SECONDS)
+        latch.await(3, java.util.concurrent.TimeUnit.SECONDS)
         error[0]?.let { throw it }
         return holder[0] ?: throw IllegalStateException("Music player failed to start")
     }
@@ -569,6 +573,7 @@ object NanaMusicPlayer {
                         _lastError.value = null
                         lastRetrySaavnId = null
                         playRequested = true
+                        consecutiveErrorCount = 0
                     } else {
                         if (!pausedForCall) {
                             playRequested = false
@@ -608,6 +613,9 @@ object NanaMusicPlayer {
                     val posMs = runCatching { exo.currentPosition }.getOrDefault(-1L)
                     logMusicEvent("onPlaybackStateChanged state=$stateName posMs=$posMs")
                     _isBuffering.value = playbackState == Player.STATE_BUFFERING
+                    if (playbackState == Player.STATE_READY) {
+                        consecutiveErrorCount = 0
+                    }
                     if (playbackState == Player.STATE_ENDED) {
                         val appCtx = appContextRef ?: return
                         persistScope.launch {
@@ -880,9 +888,25 @@ object NanaMusicPlayer {
     private suspend fun skipToNextAfterError(appContext: Context, failedTitle: String) {
         playMutex.withLock {
             currentCoroutineContext().ensureActive()
-            val nextIdx = synchronized(this@NanaMusicPlayer) {
+            val (nextIdx, reachedLimit) = synchronized(this@NanaMusicPlayer) {
+                consecutiveErrorCount++
+                val limit = minOf(_tracks.value.size.coerceAtLeast(1), 5)
+                val reached = consecutiveErrorCount >= limit
                 val cand = _currentIndex.value + 1
-                if (cand in _tracks.value.indices) cand else -1
+                (if (cand in _tracks.value.indices) cand else -1) to reached
+            }
+            if (reachedLimit) {
+                consecutiveErrorCount = 0
+                playRequested = false
+                _isPlaying.value = false
+                runCatching { NanaMusicPlaybackService.stop(appContext) }
+                val exo = synchronized(this@NanaMusicPlayer) { player }
+                withContext(Dispatchers.Main) {
+                    runCatching { exo?.stop() }
+                    runCatching { exo?.clearMediaItems() }
+                }
+                _lastError.value = appContext.getString(R.string.music_err_consecutive_failures)
+                return@withLock
             }
             if (nextIdx >= 0) {
                 _lastError.value = appContext.getString(R.string.music_err_play_failed_next, failedTitle)
@@ -893,6 +917,7 @@ object NanaMusicPlayer {
                     runCatching { NanaMusicPlaybackService.stop(appContext) }
                 }
             } else {
+                consecutiveErrorCount = 0
                 playRequested = false
                 _isPlaying.value = false
                 runCatching { NanaMusicPlaybackService.stop(appContext) }

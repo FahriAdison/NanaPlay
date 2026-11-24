@@ -21,6 +21,33 @@ import com.papahchan.nanaplay.R
 class NanaMusicPlaybackService : MediaSessionService() {
 
     private var session: MediaSession? = null
+    private var noisyReceiverRegistered = false
+    private val noisyReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == android.media.AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
+                session?.player?.pause()
+            }
+        }
+    }
+
+    private fun registerNoisyReceiver() {
+        if (!noisyReceiverRegistered) {
+            val filter = android.content.IntentFilter(android.media.AudioManager.ACTION_AUDIO_BECOMING_NOISY)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(noisyReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                registerReceiver(noisyReceiver, filter)
+            }
+            noisyReceiverRegistered = true
+        }
+    }
+
+    private fun unregisterNoisyReceiver() {
+        if (noisyReceiverRegistered) {
+            runCatching { unregisterReceiver(noisyReceiver) }
+            noisyReceiverRegistered = false
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -33,6 +60,18 @@ class NanaMusicPlaybackService : MediaSessionService() {
         )
         val basePlayer = NanaMusicPlayer.obtainServicePlayer(this)
         val forwardingPlayer = NanaForwardingPlayer(basePlayer, this)
+        forwardingPlayer.addListener(object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (isPlaying) {
+                    registerNoisyReceiver()
+                } else {
+                    unregisterNoisyReceiver()
+                }
+            }
+        })
+        if (forwardingPlayer.isPlaying) {
+            registerNoisyReceiver()
+        }
         session = MediaSession.Builder(this, forwardingPlayer)
             .setId("nana-music")
             .build()
@@ -96,10 +135,15 @@ class NanaMusicPlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        unregisterNoisyReceiver()
         // Instrumentasi saja: marker lifecycle persisten untuk hunt "musik berhenti sendiri".
         NanaMusicPlayer.logLifecycleMarker(this, "music.onDestroy playWhenReady=${session?.player?.playWhenReady} state=${session?.player?.playbackState}")
+        val isPlaying = session?.player?.isPlaying == true
         session?.release()
         session = null
+        if (!isPlaying) {
+            NanaMusicPlayer.release()
+        }
         super.onDestroy()
     }
 

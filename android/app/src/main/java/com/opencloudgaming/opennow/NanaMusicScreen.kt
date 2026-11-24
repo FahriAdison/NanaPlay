@@ -70,13 +70,6 @@ import coil3.compose.AsyncImage
 import com.opencloudgaming.opennow.ui.theme.OpenNowPalette
 import kotlinx.coroutines.launch
 
-private fun musicReadPermission(): String =
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        Manifest.permission.READ_MEDIA_AUDIO
-    } else {
-        Manifest.permission.READ_EXTERNAL_STORAGE
-    }
-
 /**
  * 1.0.59 — OpenMultipleDocuments + persistable URI permission.
  *
@@ -131,14 +124,6 @@ fun NanaMusicScreen(modifier: Modifier = Modifier) {
     // 1.0.33: NanaOnlineSearchState is now a singleton — no remember needed,
     // survives navigation to other main tabs.
 
-    var permissionGranted by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(
-                context,
-                musicReadPermission(),
-            ) == PackageManager.PERMISSION_GRANTED,
-        )
-    }
     val filePicker = rememberLauncherForActivityResult(
         OpenMultipleDocumentsPersistable(),
     ) { uris ->
@@ -148,12 +133,17 @@ fun NanaMusicScreen(modifier: Modifier = Modifier) {
             // grant these tracks won't survive a restart.
             var persistFailed = 0
             uris.forEach { uri ->
-                val ok = runCatching {
+                val ok = try {
                     context.contentResolver.takePersistableUriPermission(
                         uri,
                         android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
                     )
-                }.isSuccess
+                    true
+                } catch (e: SecurityException) {
+                    false
+                } catch (t: Throwable) {
+                    false
+                }
                 if (!ok) persistFailed++
             }
             if (persistFailed > 0) {
@@ -162,17 +152,6 @@ fun NanaMusicScreen(modifier: Modifier = Modifier) {
                 )
             }
             NanaMusicPlayer.addTracks(context, uris)
-        }
-    }
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        permissionGranted = granted
-        if (granted) {
-            // 1.0.59: open the picker immediately — don't make the user tap
-            // Add a second time. (filePicker is defined above so the
-            // reference is initialized when this callback can fire.)
-            filePicker.launch(arrayOf("audio/*"))
         }
     }
 
@@ -227,11 +206,7 @@ fun NanaMusicScreen(modifier: Modifier = Modifier) {
                     }
                     OutlinedButton(
                         onClick = {
-                            if (!permissionGranted) {
-                                permissionLauncher.launch(musicReadPermission())
-                            } else {
-                                filePicker.launch(arrayOf("audio/*"))
-                            }
+                            filePicker.launch(arrayOf("audio/*"))
                         },
                     ) {
                         Icon(

@@ -539,6 +539,7 @@
     <string name="music_err_retrying">Mencoba ulang: %1$s…</string>
     <string name="music_err_play_failed_next">Gagal memutar: %1$s, lanjut ke berikutnya</string>
     <string name="music_err_play_failed_end">Gagal memutar: %1$s. Tidak ada lagu lain yang bisa diputar.</string>
+    <string name="music_err_consecutive_failures">Pemutaran dihentikan: terlalu banyak lagu gagal beruntun.</string>
     <string name="music_err_cannot_play">Tidak bisa memutar lagu ini. Coba lagi.</string>
     <string name="music_err_add_tracks">%1$d dari %2$d track gagal ditambahkan</string>
     <string name="music_err_online_unavailable">Musik online tidak tersedia untuk sementara</string>

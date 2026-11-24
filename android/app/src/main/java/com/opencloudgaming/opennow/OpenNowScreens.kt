@@ -88,6 +88,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -98,6 +99,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -12512,6 +12514,7 @@ private fun StreamExitConfirmation(
 
 @Composable
 private fun QueueLoadingScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
+    val context = LocalContext.current
     val session = state.streamSession
     val game = state.streamGame
     val ads = sessionAdItems(session?.adState)
@@ -12523,6 +12526,7 @@ private fun QueueLoadingScreen(state: OpenNowUiState, viewModel: OpenNowViewMode
     val visibleQueuePosition = rememberStableQueuePosition(session?.sessionId, queuePosition)
     val queueCopy = queueLaunchStatusText(state, visibleQueuePosition)
     val hasPlayableAd = ad != null && mediaUrl != null
+    val bannerUrl = remember(game) { gameTvBannerImageUrl(context, game) }
 
     BoxWithConstraints(
         Modifier
@@ -12530,15 +12534,41 @@ private fun QueueLoadingScreen(state: OpenNowUiState, viewModel: OpenNowViewMode
             .clipToBounds(),
         contentAlignment = Alignment.Center,
     ) {
-        QueueAmbientBackdrop(
-            accent = state.settings.uiAccent.color,
-            queuePosition = visibleQueuePosition,
-        )
+        if (!bannerUrl.isNullOrBlank()) {
+            UrlImage(
+                bannerUrl,
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { alpha = 0.32f },
+                contentScale = ContentScale.Crop,
+                thumbnailSize = 1080,
+            )
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(
+                                Color.Black.copy(alpha = 0.65f),
+                                Color.Black.copy(alpha = 0.45f),
+                                Color.Black.copy(alpha = 0.88f),
+                            ),
+                        ),
+                    ),
+            )
+        } else {
+            QueueAmbientBackdrop(
+                accent = state.settings.uiAccent.color,
+                queuePosition = visibleQueuePosition,
+            )
+        }
         val useLandscapeAdLayout = hasPlayableAd && maxWidth > maxHeight
 
         Box(
             Modifier
                 .fillMaxSize()
+                .systemBarsPadding()
+                .displayCutoutPadding()
                 .padding(18.dp),
             contentAlignment = Alignment.Center,
         ) {
@@ -13342,14 +13372,32 @@ private fun QueueStatusPanel(
             LinearProgressIndicator(Modifier.fillMaxWidth(0.9f))
             Spacer(Modifier.height(12.dp))
             Row(
-                Modifier.fillMaxWidth(0.92f),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                Modifier
+                    .fillMaxWidth(0.92f)
+                    .widthIn(max = 380.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                OutlinedButton(onClick = onMinimize, modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.osd_minimize), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                OutlinedButton(
+                    onClick = onMinimize,
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.osd_minimize),
+                        maxLines = 1,
+                        softWrap = false,
+                    )
                 }
-                OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.action_cancel), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                OutlinedButton(
+                    onClick = onCancel,
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.action_cancel),
+                        maxLines = 1,
+                        softWrap = false,
+                    )
                 }
             }
             if (queuePosition != null) {
@@ -13363,32 +13411,10 @@ private fun QueueStatusPanel(
         }
         return
     }
-    // PS5-style full-bleed queue screen: dimmed game art backdrop, giant live
-    // queue number, lively progress bar. Cheap: thumbnail decode + static scrim.
-    val bannerUrl = gameTvBannerImageUrl(context, game)
+    // PS5-style full-bleed queue screen: dimmed game art backdrop rendered at root
+    // level, giant live queue number, lively progress bar.
     val urgencyColor = queueUrgencyColor(queuePosition)
-    Box(modifier.fillMaxSize()) {
-        if (!bannerUrl.isNullOrBlank()) {
-            UrlImage(
-                bannerUrl,
-                Modifier
-                    .fillMaxSize()
-                    .graphicsLayer { alpha = 0.32f },
-                contentScale = ContentScale.Crop,
-                thumbnailSize = 720,
-            )
-        }
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        0f to Color.Black.copy(alpha = 0.55f),
-                        0.5f to Color.Transparent,
-                        1f to Color.Black.copy(alpha = 0.92f),
-                    ),
-                ),
-        )
+    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
             Modifier
                 .fillMaxSize()
@@ -13415,21 +13441,40 @@ private fun QueueStatusPanel(
             Spacer(Modifier.height(16.dp))
             LinearProgressIndicator(
                 modifier = Modifier
-                    .fillMaxWidth(0.72f)
+                    .fillMaxWidth(0.88f)
+                    .widthIn(max = 380.dp)
                     .height(6.dp)
                     .clip(RoundedCornerShape(3.dp)),
                 color = urgencyColor,
             )
             Spacer(Modifier.height(22.dp))
             Row(
-                Modifier.fillMaxWidth(0.72f),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                Modifier
+                    .fillMaxWidth(0.88f)
+                    .widthIn(max = 380.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                OutlinedButton(onClick = onMinimize, modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.osd_minimize), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                OutlinedButton(
+                    onClick = onMinimize,
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.osd_minimize),
+                        maxLines = 1,
+                        softWrap = false,
+                    )
                 }
-                OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.action_cancel), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                OutlinedButton(
+                    onClick = onCancel,
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.action_cancel),
+                        maxLines = 1,
+                        softWrap = false,
+                    )
                 }
             }
             error?.let {
@@ -13662,22 +13707,56 @@ private fun QueueStatusAndActions(
         )
         LinearProgressIndicator(Modifier.fillMaxWidth())
         if (stackActions) {
-            OutlinedButton(onClick = onMinimize, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.osd_minimize), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            OutlinedButton(
+                onClick = onMinimize,
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+            ) {
+                Text(
+                    stringResource(R.string.osd_minimize),
+                    maxLines = 1,
+                    softWrap = false,
+                )
             }
-            OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.action_cancel), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            OutlinedButton(
+                onClick = onCancel,
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+            ) {
+                Text(
+                    stringResource(R.string.action_cancel),
+                    maxLines = 1,
+                    softWrap = false,
+                )
             }
         } else {
             Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 380.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                OutlinedButton(onClick = onMinimize, modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.osd_minimize), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                OutlinedButton(
+                    onClick = onMinimize,
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.osd_minimize),
+                        maxLines = 1,
+                        softWrap = false,
+                    )
                 }
-                OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.action_cancel), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                OutlinedButton(
+                    onClick = onCancel,
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.action_cancel),
+                        maxLines = 1,
+                        softWrap = false,
+                    )
                 }
             }
         }

@@ -1362,8 +1362,9 @@ object NativeStreamInputRouter {
         touchMouseState.reset(client)
     }
 
-    fun setSlideDirectClick(enabled: Boolean) {
+    fun setSlideDirectClick(enabled: Boolean, density: Float = 1f) {
         slideDirectClick = enabled
+        touchMouseState.setDensity(density)
         touchMouseState.reset(client)
     }
 
@@ -3308,7 +3309,15 @@ private class TouchMouseState {
     private var lastTapX = Float.NaN
     private var lastTapY = Float.NaN
     private val virtualCursor = VirtualCursor()
-    private val slideGestureDetector = SlideDirectClickGestureDetector()
+    private var slideGestureDetector = runCatching {
+        android.content.res.Resources.getSystem().displayMetrics.density
+    }.getOrNull()?.let { SlideDirectClickGestureDetector.withDensity(it) } ?: SlideDirectClickGestureDetector()
+
+    fun setDensity(density: Float) {
+        if (density > 0f) {
+            slideGestureDetector = SlideDirectClickGestureDetector.withDensity(density)
+        }
+    }
     private var twoFingerTapCandidate = false
     private val motionAccumulator = TouchMouseMotionAccumulator()
     // 2-finger scroll state
@@ -3677,6 +3686,26 @@ private class TouchMouseState {
     ) {
         val x = event.getX(index)
         val y = event.getY(index)
+        if (slideDirectClick) {
+            val suppressed = slideGestureDetector.isMoveSuppressed()
+            if (!suppressed) {
+                sendMouseDelta(
+                    dx = x - lastX,
+                    dy = y - lastY,
+                    eventTimeMs = event.eventTime,
+                    client = client,
+                    force = true,
+                )
+            }
+            lastX = x
+            lastY = y
+            slideGestureDetector.onTouchUp(activePointerId, x, y, event.eventTime)
+            activePointerId = -1
+            doubleTapDragCandidate = false
+            scrollGestureOccurred = false
+            twoFingerTapCandidate = false
+            return
+        }
         sendMouseDelta(
             dx = x - lastX,
             dy = y - lastY,
@@ -3686,14 +3715,6 @@ private class TouchMouseState {
         )
         lastX = x
         lastY = y
-        if (slideDirectClick) {
-            slideGestureDetector.onTouchUp(activePointerId, x, y, event.eventTime)
-            activePointerId = -1
-            doubleTapDragCandidate = false
-            scrollGestureOccurred = false
-            twoFingerTapCandidate = false
-            return
-        }
         val tapDistanceX = abs(x - downX)
         val tapDistanceY = abs(y - downY)
         val wasTap = activePointerId >= 0 &&

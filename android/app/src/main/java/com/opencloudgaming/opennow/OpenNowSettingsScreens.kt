@@ -488,7 +488,7 @@ private fun SettingsContent(
                     activity?.recreate()
                 }
             }
-    CategorySettingsSection(selectedCategory, SettingsCategory.General, searchQuery, "App updates", "update", "updates", "disable update checking", "checking", "check", "download", "install", "apk") {
+    CategorySettingsSection(selectedCategory, SettingsCategory.General, searchQuery, stringResource(R.string.settings_app_updates), "update", "updates", "disable update checking", "checking", "check", "download", "install", "apk") {
                 if (state.androidUpdate.apkUpdatesAllowed) {
                     SettingSwitch(stringResource(R.string.settings_disable_update_checking), !settings.autoCheckForUpdates) { disabled ->
                         viewModel.updateSettings(settings.copy(autoCheckForUpdates = !disabled))
@@ -959,7 +959,11 @@ private fun SettingsContent(
                                     ),
                                 )
                             }
-                            SettingSwitch("Slide + Direct Click (Experimental)", settings.androidTouch.slideDirectClick) { enabled ->
+                            SettingSwitch(
+                                label = stringResource(R.string.settings_slide_direct_click),
+                                checked = settings.androidTouch.slideDirectClick,
+                                description = stringResource(R.string.settings_slide_direct_click_desc),
+                            ) { enabled ->
                                 viewModel.updateSettings(
                                     settings.copy(
                                         androidTouch = settings.androidTouch.copy(

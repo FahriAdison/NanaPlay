@@ -57,14 +57,18 @@ class SlideDirectClickGestureDetector(
     private var lastX = 0f
     private var lastY = 0f
     private var hasMovedPastSlop = false
+    private var suppressMoveUntilUp = false
 
     private var lastTapTimeMs = Long.MIN_VALUE
     private var lastTapX = Float.NaN
     private var lastTapY = Float.NaN
 
+    fun isMoveSuppressed(): Boolean = suppressMoveUntilUp
+
     fun reset() {
         activePointerId = -1
         hasMovedPastSlop = false
+        suppressMoveUntilUp = false
         lastTapTimeMs = Long.MIN_VALUE
         lastTapX = Float.NaN
         lastTapY = Float.NaN
@@ -83,6 +87,7 @@ class SlideDirectClickGestureDetector(
         lastX = x
         lastY = y
         hasMovedPastSlop = false
+        suppressMoveUntilUp = false
 
         val isQuickDoubleTap = (lastTapTimeMs != Long.MIN_VALUE) &&
             (eventTimeMs - lastTapTimeMs <= doubleTapTimeoutMs) &&
@@ -95,6 +100,7 @@ class SlideDirectClickGestureDetector(
             lastTapTimeMs = Long.MIN_VALUE
             lastTapX = Float.NaN
             lastTapY = Float.NaN
+            suppressMoveUntilUp = true
             return SlideDirectClickAction.DirectClick(x, y, eventTimeMs)
         }
 
@@ -107,6 +113,11 @@ class SlideDirectClickGestureDetector(
      */
     fun onTouchMove(pointerId: Int, x: Float, y: Float, eventTimeMs: Long): SlideDirectClickAction? {
         if (pointerId != activePointerId) return null
+        if (suppressMoveUntilUp) {
+            lastX = x
+            lastY = y
+            return null
+        }
         val dx = x - lastX
         val dy = y - lastY
         lastX = x
@@ -130,8 +141,10 @@ class SlideDirectClickGestureDetector(
      */
     fun onTouchUp(pointerId: Int, x: Float, y: Float, eventTimeMs: Long) {
         if (pointerId != activePointerId) return
+        val wasDirectClick = suppressMoveUntilUp
+        suppressMoveUntilUp = false
         val dist = maxOf(abs(x - downX), abs(y - downY))
-        if (!hasMovedPastSlop && dist <= doubleTapSlopPx) {
+        if (!wasDirectClick && !hasMovedPastSlop && dist <= doubleTapSlopPx) {
             lastTapTimeMs = eventTimeMs
             lastTapX = x
             lastTapY = y

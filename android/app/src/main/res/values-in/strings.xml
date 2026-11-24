@@ -373,16 +373,16 @@
     <!-- Android update panel -->
     <string name="update_button_check">Cek</string>
     <string name="update_button_checking">Mengecek…</string>
-    <string name="update_button_update">Update</string>
-    <string name="update_button_download">Download</string>
-    <string name="update_button_install">Install</string>
-    <string name="update_status_available">Update tersedia</string>
-    <string name="update_status_downloading">Mengunduh update</string>
-    <string name="update_status_downloaded">Siap diinstal</string>
+    <string name="update_button_update">Perbarui</string>
+    <string name="update_button_download">Unduh</string>
+    <string name="update_button_install">Pasang</string>
+    <string name="update_status_available">Pembaruan tersedia</string>
+    <string name="update_status_downloading">Mengunduh pembaruan</string>
+    <string name="update_status_downloaded">Siap dipasang</string>
     <string name="update_status_up_to_date">NanaPlay sudah versi terbaru</string>
-    <string name="update_status_checking">Mengecek update</string>
-    <string name="update_status_error">Gagal mengecek update</string>
-    <string name="update_status_idle">Update aplikasi</string>
+    <string name="update_status_checking">Mengecek pembaruan</string>
+    <string name="update_status_error">Gagal mengecek pembaruan</string>
+    <string name="update_status_idle">Pembaruan aplikasi</string>
     <string name="update_subtitle_version_available">Versi %1$s tersedia.</string>
     <string name="update_subtitle_new_build">Build baru tersedia.</string>
     <string name="update_subtitle_keep_open">Biarkan NanaPlay terbuka selama APK diunduh.</string>
@@ -616,7 +616,7 @@
     <string name="dlg_issue_title">Judul masalah</string>
     <string name="dlg_issue_placeholder">Stream macet setelah reconnect</string>
     <string name="dlg_what_happened">Apa yang terjadi?</string>
-    <string name="dlg_description_placeholder">Lagi ngapain, apa yang salah, dan bisa diulang lagi nggak?</string>
+    <string name="dlg_description_placeholder">Jelaskan apa yang sedang dilakukan, kendala yang dialami, dan apakah bisa diulang?</string>
     <string name="dlg_consent_upload">Saya paham apa yang akan diunggah dan setuju mengirimnya ke PrintedWaste.</string>
     <string name="dlg_uploading_report">Mengunggah laporan…</string>
     <string name="dlg_send_bug_report">Kirim laporan bug</string>
@@ -681,11 +681,11 @@
     <string name="pair_disconnect_phone">Putuskan HP</string>
     <string name="queue_free_tier_routing">Routing antrean tier gratis</string>
     <string name="queue_checking_queues">Memeriksa antrean dan latensi PrintedWaste</string>
-    <string name="queue_stuck_warning">Antrean kayaknya macet — posisimu nggak bergerak cukup lama.</string>
+    <string name="queue_stuck_warning">Antrean tampaknya macet — posisi Anda tidak bergerak cukup lama.</string>
     <string name="queue_abandoned_title">Antrean dibatalkan server</string>
     <string name="queue_abandoned_message">Sesi antrean ini sudah tidak aktif di server. Mulai antrean baru untuk mencoba lagi.</string>
     <string name="queue_high_ping_warning">Ping tinggi (%1$d ms) — server kejauhan, coba server yang lebih dekat (Mumbai/Tokyo).</string>
-    <string name="action_requeue">Antri ulang</string>
+    <string name="action_requeue">Antre ulang</string>
     <string name="queue_title">Antrean</string>
     <string name="queue_live_position">Posisi live</string>
     <string name="queue_other_regions">Region lain</string>
@@ -755,11 +755,11 @@
     <string name="network_adjustment_optimal_quality">Kualitas optimal</string>
     <string name="network_adjustment_optimal_latency">Latensi optimal</string>
     <!-- Status maintenance & patching game -->
-    <string name="game_status_patching_title">Sedang Di-patch</string>
+    <string name="game_status_patching_title">Sedang Diperbarui</string>
     <string name="game_status_maintenance_title">Maintenance</string>
-    <string name="game_status_patching_message">Game ini sedang di-patch. Coba lagi dalam beberapa jam.</string>
-    <string name="game_status_maintenance_message">Game ini sedang offline untuk maintenance. Cek lagi nanti.</string>
-    <string name="game_status_launch_warning_message">Game ini mungkin tidak bisa di-launch dengan benar. Tetap lanjutkan?</string>
+    <string name="game_status_patching_message">Game ini sedang diperbarui server. Coba lagi dalam beberapa jam.</string>
+    <string name="game_status_maintenance_message">Game ini sedang offline untuk maintenance. Cek kembali nanti.</string>
+    <string name="game_status_launch_warning_message">Game ini mungkin tidak dapat berjalan dengan benar. Tetap lanjutkan?</string>
     <string name="action_continue_anyway">Tetap lanjutkan</string>
     <!-- Overlay shortcut button -->
     <string name="settings_overlay_shortcut_button">Tombol shortcut overlay</string>
@@ -773,8 +773,12 @@
     <string name="server_not_responding_title">Server tidak merespons</string>
     <string name="server_not_responding_message">Server tidak mengirim video setelah beberapa percobaan.</string>
     <string name="action_try_another_server">Coba server lain</string>
-    <string name="action_requeue_offer_timeout">Antri ulang</string>
+    <string name="action_requeue_offer_timeout">Antre ulang</string>
     <!-- Thermal throttling warning -->
-    <string name="thermal_warning_pill">HP panas (%1$d°C) — dinginkan HP biar nggak patah-patah.</string>
-    <string name="thermal_warning_pill_no_temp">HP panas — dinginkan HP biar nggak patah-patah.</string>
+    <string name="thermal_warning_pill">Suhu perangkat panas (%1$d°C) — dinginkan perangkat agar tidak patah-patah.</string>
+    <string name="thermal_warning_pill_no_temp">Suhu perangkat panas — dinginkan perangkat agar tidak patah-patah.</string>
+    <!-- Slide & Direct Click & App updates -->
+    <string name="settings_slide_direct_click">Geser &amp; Klik Langsung</string>
+    <string name="settings_slide_direct_click_desc">Geser untuk arahkan kursor, ketuk 2x cepat untuk klik langsung di titik jari</string>
+    <string name="settings_app_updates">Pembaruan aplikasi</string>
 </resources>

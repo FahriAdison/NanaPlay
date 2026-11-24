@@ -107,4 +107,59 @@ class SlideDirectClickGestureTest {
         val secondDown = detector.onTouchDown(pointerId = 0, x = 250f, y = 100f, eventTimeMs = 6150L)
         assertNull(secondDown)
     }
+
+    @Test
+    fun directClickSuppressesMouseMoveUntilTouchUp() {
+        val detector = SlideDirectClickGestureDetector(
+            doubleTapTimeoutMs = 320L,
+            doubleTapSlopPx = 96f,
+        )
+
+        // First tap
+        detector.onTouchDown(pointerId = 0, x = 300f, y = 400f, eventTimeMs = 1000L)
+        detector.onTouchUp(pointerId = 0, x = 300f, y = 400f, eventTimeMs = 1050L)
+
+        // Second tap: direct click triggered
+        val secondDown = detector.onTouchDown(pointerId = 0, x = 305f, y = 402f, eventTimeMs = 1150L)
+        assertNotNull(secondDown)
+        assertTrue(secondDown is SlideDirectClickAction.DirectClick)
+        assertTrue(detector.isMoveSuppressed())
+
+        // Micro-movements during the touch down must be suppressed (return null)
+        val moveAction1 = detector.onTouchMove(pointerId = 0, x = 308f, y = 405f, eventTimeMs = 1170L)
+        assertNull(moveAction1)
+        assertTrue(detector.isMoveSuppressed())
+
+        val moveAction2 = detector.onTouchMove(pointerId = 0, x = 312f, y = 410f, eventTimeMs = 1190L)
+        assertNull(moveAction2)
+        assertTrue(detector.isMoveSuppressed())
+
+        // Lift finger: suppression ends
+        detector.onTouchUp(pointerId = 0, x = 312f, y = 410f, eventTimeMs = 1250L)
+        org.junit.Assert.assertFalse(detector.isMoveSuppressed())
+
+        // Subsequent tap is a new slide gesture: movements should produce MouseMove
+        detector.onTouchDown(pointerId = 0, x = 500f, y = 500f, eventTimeMs = 2000L)
+        val moveAction3 = detector.onTouchMove(pointerId = 0, x = 520f, y = 510f, eventTimeMs = 2020L)
+        assertNotNull(moveAction3)
+        assertTrue(moveAction3 is SlideDirectClickAction.MouseMove)
+    }
+
+    @Test
+    fun withDensityScalesDoubleTapSlopAndDragStartSlop() {
+        val detector = SlideDirectClickGestureDetector.withDensity(density = 2.5f)
+        // 48dp * 2.5 = 120px
+        assertEquals(120f, detector.doubleTapSlopPx, 0.001f)
+        // 4dp * 2.5 = 10px
+        assertEquals(10f, detector.dragStartSlopPx, 0.001f)
+
+        // First tap
+        detector.onTouchDown(pointerId = 0, x = 100f, y = 100f, eventTimeMs = 1000L)
+        detector.onTouchUp(pointerId = 0, x = 100f, y = 100f, eventTimeMs = 1050L)
+
+        // Second tap at 110px offset: passes under 120px slop (would fail under 96px default)
+        val secondDown = detector.onTouchDown(pointerId = 0, x = 210f, y = 100f, eventTimeMs = 1150L)
+        assertNotNull(secondDown)
+        assertTrue(secondDown is SlideDirectClickAction.DirectClick)
+    }
 }

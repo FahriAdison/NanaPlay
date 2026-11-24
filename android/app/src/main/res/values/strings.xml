@@ -778,4 +778,8 @@
     <!-- Thermal throttling warning -->
     <string name="thermal_warning_pill">Phone hot (%1$d°C) — cool it down to stop stuttering.</string>
     <string name="thermal_warning_pill_no_temp">Phone hot — cool it down to stop stuttering.</string>
+    <!-- Slide & Direct Click & App updates -->
+    <string name="settings_slide_direct_click">Slide &amp; Direct Click</string>
+    <string name="settings_slide_direct_click_desc">Slide to guide cursor, quick double-tap to click directly at finger position</string>
+    <string name="settings_app_updates">App updates</string>
 </resources>

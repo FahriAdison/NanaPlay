@@ -410,13 +410,18 @@ private fun UpdateReleaseNotes(notes: String?) {
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.SemiBold,
             )
-            Text(
-                releaseNotes,
-                color = SettingsTextMuted,
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 8,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 220.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Text(
+                    releaseNotes,
+                    color = SettingsTextMuted,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
         }
     }
 }

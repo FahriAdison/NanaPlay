@@ -1096,13 +1096,18 @@ private fun AndroidUpdatePromptDialog(
                     },
                 )
                 update.releaseNotes?.trim()?.takeIf { it.isNotBlank() }?.let { notes ->
-                    Text(
-                        notes,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 8,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 260.dp)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        Text(
+                            notes,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
                 }
             }
         },
@@ -7832,9 +7837,11 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
             state.settings.androidTouch.mouseDirectClick && touchInputEnabled,
         )
     }
-    LaunchedEffect(state.settings.androidTouch.slideDirectClick, touchInputEnabled) {
+    val screenDensity = LocalDensity.current.density
+    LaunchedEffect(state.settings.androidTouch.slideDirectClick, touchInputEnabled, screenDensity) {
         NativeStreamInputRouter.setSlideDirectClick(
             state.settings.androidTouch.slideDirectClick && touchInputEnabled,
+            screenDensity,
         )
     }
     LaunchedEffect(streamReady, touchInputEnabled, state.settings.androidTouch.nativeTouchMode, state.streamGame?.id) {
@@ -10142,7 +10149,7 @@ private fun StreamControlsPanel(
                                 indentLevel = 1,
                             )
                             ControlSwitchRow(
-                                label = "Slide + Direct Click",
+                                label = stringResource(R.string.settings_slide_direct_click),
                                 checked = settings.androidTouch.slideDirectClick,
                                 onCheckedChange = {
                                     onButtonTone()

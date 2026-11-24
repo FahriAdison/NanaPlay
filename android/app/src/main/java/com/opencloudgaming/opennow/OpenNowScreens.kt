@@ -1085,7 +1085,15 @@ private fun AndroidUpdatePromptDialog(
         ?: stringResource(R.string.dlg_update_new_build)
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (update.status == AndroidUpdateStatus.Downloaded) stringResource(R.string.dlg_update_ready) else stringResource(R.string.dlg_update_available)) },
+        shape = RoundedCornerShape(14.dp),
+        containerColor = OpenNowPalette.Panel,
+        title = {
+            Text(
+                if (update.status == AndroidUpdateStatus.Downloaded) stringResource(R.string.dlg_update_ready)
+                else stringResource(R.string.dlg_update_available),
+                color = OpenNowPalette.TextPrimary,
+            )
+        },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
@@ -1096,6 +1104,7 @@ private fun AndroidUpdatePromptDialog(
                     } else {
                         stringResource(R.string.dlg_update_available_desc, version)
                     },
+                    color = OpenNowPalette.TextMuted,
                 )
                 update.releaseNotes?.trim()?.takeIf { it.isNotBlank() }?.let { notes ->
                     Box(
@@ -1104,10 +1113,10 @@ private fun AndroidUpdatePromptDialog(
                             .heightIn(max = 260.dp)
                             .verticalScroll(rememberScrollState()),
                     ) {
-                        Text(
-                            notes,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall,
+                        FormattedReleaseNotes(
+                            notes = notes,
+                            textColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            accentColor = OpenNowPalette.AccentDefault,
                         )
                     }
                 }
@@ -2797,7 +2806,7 @@ private fun TopStatusDetails(
     val stream = state.activeStreamSettings ?: state.settings.stream
     val summary = streamStatusSummary(stream)
     var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(999.dp)
+    val shape = RoundedCornerShape(8.dp)
     Row(
         horizontalArrangement = Arrangement.spacedBy(5.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -2841,7 +2850,7 @@ private fun TopBarMusicButton(control: TopBarMusicControl) {
             .height(TopBarCompactControlHeight)
             .semantics { contentDescription = description }
             .clickable(onClick = control.onToggle),
-        shape = RoundedCornerShape(999.dp),
+        shape = RoundedCornerShape(8.dp),
         color = if (control.muted) OpenNowPalette.ErrorContainer.copy(alpha = 0.92f) else PanelAlt.copy(alpha = 0.78f),
         tonalElevation = 0.dp,
     ) {
@@ -4429,7 +4438,7 @@ private fun NanaPlayHomeHeader(
 @Composable
 private fun NanaPlayHeaderChip(label: String) {
     Surface(
-        shape = RoundedCornerShape(999.dp),
+        shape = RoundedCornerShape(6.dp),
         color = Color.White.copy(alpha = 0.16f),
         tonalElevation = 0.dp,
     ) {
@@ -6388,7 +6397,7 @@ private fun PerGameSettingsSection(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Surface(
-                    shape = RoundedCornerShape(999.dp),
+                    shape = RoundedCornerShape(6.dp),
                     color = accent.copy(alpha = 0.18f),
                     contentColor = accent,
                 ) {
@@ -6446,7 +6455,7 @@ private fun LongPressPlayButton(
     val controllerFocusEnabled = LocalControllerFocusEnabled.current
     var focused by remember { mutableStateOf(false) }
     val controllerFocused = focused && controllerFocusEnabled
-    val shape = RoundedCornerShape(999.dp)
+    val shape = RoundedCornerShape(10.dp)
     val accent = MaterialTheme.colorScheme.primary
     val focusScale by animateFloatAsState(
         targetValue = gameDetailsPlayFocusScale(controllerFocused),
@@ -15527,7 +15536,7 @@ private fun SortPicker(
     val labels = options.ifEmpty { listOf(CatalogSortOption("relevance", "Relevance", "")) }
     val selectedLabel = labels.firstOrNull { it.id == selected }?.label ?: labels.first().label
     var expanded by remember { mutableStateOf(false) }
-    val controlShape = RoundedCornerShape(999.dp)
+    val controlShape = RoundedCornerShape(8.dp)
     val controlColor = Color.White.copy(alpha = 0.1f)
     Box(modifier) {
         OutlinedButton(
@@ -15596,7 +15605,7 @@ private fun FilterMenu(
     compact: Boolean = false,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val filterControlShape = RoundedCornerShape(999.dp)
+    val filterControlShape = RoundedCornerShape(8.dp)
     val filterControlColor = Color.White.copy(alpha = 0.1f)
     Box {
         OutlinedButton(

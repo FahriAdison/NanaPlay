@@ -16,3 +16,17 @@
 -keep class com.opencloudgaming.opennow.NativeCodecProbe {
     native <methods>;
 }
+
+# NewPipeExtractor + Mozilla Rhino JS engine (YouTube stream URL extraction)
+-keep class org.schabi.newpipe.extractor.timeago.patterns.** { *; }
+-keep class org.mozilla.javascript.** { *; }
+-keep class org.mozilla.javascript.engine.** { *; }
+-keep class org.mozilla.classfile.ClassFileWriter
+-keepclassmembers class * extends com.google.protobuf.GeneratedMessageLite {
+    <fields>;
+}
+-dontwarn org.mozilla.javascript.JavaToJSONConverters
+-dontwarn org.mozilla.javascript.tools.**
+-dontwarn javax.script.**
+-dontwarn javax.annotation.**
+-dontwarn jdk.dynalink.**

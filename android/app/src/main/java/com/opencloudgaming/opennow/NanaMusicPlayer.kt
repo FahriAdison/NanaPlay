@@ -79,8 +79,10 @@ data class NanaTrack(
     val artist: String? = null,
     val thumbnailUrl: String? = null,
     val isOnline: Boolean = false,
-    /** 1.0.31: JioSaavn song id for online tracks — used to re-resolve the stream URL on restore. */
+    /** 1.0.31: Online track id (JioSaavn song id or YouTube Music `ytm:<id>`). */
     val saavnId: String? = null,
+    val onlineSource: NanaOnlineMusicSource = NanaOnlineMusicSource.JIOSAAVN,
+    val onlineUrl: String? = null,
 )
 
 object NanaMusicPlayer {
@@ -201,7 +203,7 @@ object NanaMusicPlayer {
     )
 
     /** 1.0.36: scheme marking online tracks whose stream URL isn't resolved yet. Never handed to ExoPlayer. */
-    private const val PLACEHOLDER_SCHEME = "saavn"
+    private const val PLACEHOLDER_SCHEME = "nana-online"
 
     private val persistScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var appContextRef: Context? = null
@@ -317,7 +319,14 @@ object NanaMusicPlayer {
     }
 
     private fun isPlaceholderUri(track: NanaTrack): Boolean =
-        track.isOnline && track.uri.scheme == PLACEHOLDER_SCHEME
+        track.isOnline && (track.uri.scheme == PLACEHOLDER_SCHEME || track.uri.scheme == "saavn")
+
+    private fun needsStreamResolve(track: NanaTrack): Boolean {
+        if (!track.isOnline) return false
+        if (isPlaceholderUri(track)) return true
+        return track.onlineSource == NanaOnlineMusicSource.YOUTUBE_MUSIC &&
+            NanaYtMusicProvider.isStreamUrlNearExpiry(track.uri.toString())
+    }
 
     /** Launch a one-time async restore on first player access per process. */
     private fun ensureRestored(context: Context) {
@@ -360,6 +369,8 @@ object NanaMusicPlayer {
                 if (t.thumbnailUrl != null) o.put("thumbnailUrl", t.thumbnailUrl)
                 if (t.isOnline) {
                     o.put("saavnId", t.saavnId)
+                    o.put("onlineSource", t.onlineSource.name)
+                    if (!t.onlineUrl.isNullOrBlank()) o.put("onlineUrl", t.onlineUrl)
                 } else {
                     o.put("uri", t.uri.toString())
                 }
@@ -420,14 +431,30 @@ object NanaMusicPlayer {
                     val saavnId = o.optString("saavnId").takeIf { it.isNotBlank() }
                         ?: o.optString("videoId").takeIf { it.isNotBlank() }
                         ?: continue
+                    val sourceStr = o.optString("onlineSource").takeIf { it.isNotBlank() }
+                    val onlineSource = sourceStr?.let {
+                        runCatching { NanaOnlineMusicSource.valueOf(it) }.getOrNull()
+                    } ?: if (NanaYtMusicProvider.isYoutubeMusicTrackId(saavnId)) {
+                        NanaOnlineMusicSource.YOUTUBE_MUSIC
+                    } else {
+                        NanaOnlineMusicSource.JIOSAAVN
+                    }
+                    val onlineUrl = o.optString("onlineUrl").takeIf { it.isNotBlank() }
+                        ?: if (onlineSource == NanaOnlineMusicSource.YOUTUBE_MUSIC) {
+                            NanaYtMusicProvider.resolveYoutubeWatchUrl(saavnId)
+                        } else {
+                            null
+                        }
                     rebuilt.add(
                         NanaTrack(
-                            uri = Uri.parse("$PLACEHOLDER_SCHEME://track/$saavnId"),
+                            uri = Uri.parse("$PLACEHOLDER_SCHEME://track/${Uri.encode(saavnId)}"),
                             title = o.optString("title").takeIf { it.isNotBlank() } ?: "Unknown",
                             artist = o.optString("artist").takeIf { it.isNotBlank() },
                             thumbnailUrl = o.optString("thumbnailUrl").takeIf { it.isNotBlank() },
                             isOnline = true,
                             saavnId = saavnId,
+                            onlineSource = onlineSource,
+                            onlineUrl = onlineUrl,
                         ),
                     )
                 } else {
@@ -803,18 +830,20 @@ object NanaMusicPlayer {
             }
 
             // 1.0.36: one automatic retry with a freshly resolved URL.
-            val retrySaavnId = synchronized(this) {
-                currentTrack?.takeIf { it.isOnline }?.saavnId
-            }?.takeIf { it != lastRetrySaavnId }
+            val retryTrack = synchronized(this) {
+                currentTrack?.takeIf { it.isOnline && !it.saavnId.isNullOrBlank() }
+            }?.takeIf { it.saavnId != lastRetrySaavnId }
 
-            if (retrySaavnId != null) {
-                lastRetrySaavnId = retrySaavnId
+            if (retryTrack != null) {
+                val retryId = retryTrack.saavnId!!
+                lastRetrySaavnId = retryId
                 _lastError.value = appContext.getString(R.string.music_err_retrying, failedTitle)
                 persistScope.launch {
                     try {
                         val freshUrl = try {
-                            NanaSaavnApi.resolveAudioUrl(retrySaavnId)
+                            resolveFreshStreamUrl(retryTrack)
                         } catch (e: Exception) {
+                            if (e is CancellationException) throw e
                             logCrashToFile(appContext, "onPlayerError-retry", e)
                             null
                         }
@@ -828,7 +857,10 @@ object NanaMusicPlayer {
                                 val idx = synchronized(this@NanaMusicPlayer) { _currentIndex.value }
                                 val cur = synchronized(this@NanaMusicPlayer) { _tracks.value.getOrNull(idx) }
                                 val retryExo = synchronized(this@NanaMusicPlayer) { player }
-                                if (cur?.saavnId != retrySaavnId || retryExo == null) {
+                                if (cur?.saavnId != retryId ||
+                                    cur.onlineSource != retryTrack.onlineSource ||
+                                    retryExo == null
+                                ) {
                                     // The user moved on, or the player was
                                     // released meanwhile — don't resurrect it.
                                     skipInstead = true
@@ -973,7 +1005,7 @@ object NanaMusicPlayer {
             _lastError.value = appContext.getString(R.string.music_err_online_unavailable)
             return null
         }
-        if (!isPlaceholderUri(track)) return track
+        if (!needsStreamResolve(track)) return track
         // 1.0.59: the resolve below is a network call (up to ~35s on bad
         // networks). Surface it as buffering so the UI doesn't look dead —
         // the online tab already renders _isBuffering.
@@ -985,6 +1017,17 @@ object NanaMusicPlayer {
         }
     }
 
+    private suspend fun resolveFreshStreamUrl(track: NanaTrack): String? = withContext(Dispatchers.IO) {
+        val trackId = track.saavnId?.takeIf { it.isNotBlank() } ?: return@withContext null
+        when (track.onlineSource) {
+            NanaOnlineMusicSource.YOUTUBE_MUSIC -> {
+                val target = track.onlineUrl?.takeIf { it.isNotBlank() } ?: trackId
+                NanaYtMusicProvider.resolveAudioStreamUrl(target)
+            }
+            NanaOnlineMusicSource.JIOSAAVN -> NanaSaavnApi.resolveAudioUrl(trackId)
+        }
+    }
+
     /** 1.0.59: network half of resolvePlayable, extracted for the buffering wrapper above. */
     private suspend fun resolveOnlineUrl(
         appContext: Context,
@@ -992,7 +1035,7 @@ object NanaMusicPlayer {
         saavnId: String,
     ): NanaTrack? {
         val url = try {
-            NanaSaavnApi.resolveAudioUrl(saavnId)
+            resolveFreshStreamUrl(track)
         } catch (t: Throwable) {
             if (t is CancellationException) throw t
             logCrashToFile(appContext, "resolvePlayable", t)
@@ -1060,7 +1103,8 @@ object NanaMusicPlayer {
             // still the same track we resolved.
             val stillMatches = synchronized(this) {
                 val cur = _tracks.value.getOrNull(index) ?: return false
-                val match = (cur.saavnId != null && cur.saavnId == playable.saavnId) || cur.uri == track.uri
+                val match = (cur.saavnId != null && cur.saavnId == playable.saavnId && cur.onlineSource == playable.onlineSource) ||
+                    cur.uri == track.uri
                 if (match && playable.uri != track.uri) {
                     _tracks.value = _tracks.value.toMutableList().also { it[index] = playable }
                 }
@@ -1325,17 +1369,21 @@ object NanaMusicPlayer {
         return playMutex.withLock {
             restoreJob?.join()
             val index = synchronized(this@NanaMusicPlayer) {
-                val existing = _tracks.value.indexOfFirst { it.isOnline && it.saavnId == online.saavnId }
+                val existing = _tracks.value.indexOfFirst {
+                    it.isOnline && it.saavnId == online.saavnId && it.onlineSource == online.source
+                }
                 if (existing >= 0) {
                     existing
                 } else {
                     _tracks.value = _tracks.value + NanaTrack(
-                        uri = Uri.parse("$PLACEHOLDER_SCHEME://track/${online.saavnId}"),
+                        uri = Uri.parse("$PLACEHOLDER_SCHEME://track/${Uri.encode(online.saavnId)}"),
                         title = online.title,
                         artist = online.artist,
                         thumbnailUrl = online.thumbnailUrl,
                         isOnline = true,
                         saavnId = online.saavnId,
+                        onlineSource = online.source,
+                        onlineUrl = online.streamPageUrl,
                     )
                     _tracks.value.size - 1
                 }
@@ -1359,6 +1407,18 @@ object NanaMusicPlayer {
                 exo.pause()
                 return@guarded
             }
+            val curIdx = synchronized(this) { _currentIndex.value.takeIf { it >= 0 } ?: 0 }
+            val curTrack = synchronized(this) { _tracks.value.getOrNull(curIdx) }
+            // Re-resolve online track transparently when stream URL expired while paused.
+            if (curTrack != null && needsStreamResolve(curTrack)) {
+                val resumePos = if (exo.playbackState == Player.STATE_ENDED) 0L else exo.currentPosition.coerceAtLeast(0L)
+                synchronized(this) {
+                    pendingSeekMs = resumePos
+                    pendingSeekIndex = curIdx
+                }
+                serializedPlay(context) { curIdx }
+                return@guarded
+            }
             // 1.0.35: if the track finished, seek back to the start first —
             // play() is a no-op while in STATE_ENDED, which left the play
             // button dead after a track completed.
@@ -1377,8 +1437,7 @@ object NanaMusicPlayer {
                 return@guarded
             }
             // Nothing loaded — start the current (or first) track.
-            val idx = synchronized(this) { _currentIndex.value.takeIf { it >= 0 } ?: 0 }
-            serializedPlay(context) { idx }
+            serializedPlay(context) { curIdx }
         }
     }
 

@@ -460,11 +460,12 @@ private fun NanaMusicOnlineTab(
         error = null
         scope.launch {
             try {
-                results = NanaSaavnApi.searchSongs(trimmed)
+                results = NanaMusicOnlineSearch.searchSongs(trimmed)
                 if (results.isEmpty()) {
                     error = "No results found"
                 }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 results = emptyList()
                 error = "Online music temporarily unavailable"
             } finally {
@@ -574,7 +575,7 @@ private fun NanaMusicOnlineTab(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                itemsIndexed(results, key = { _, t -> t.saavnId }) { _, track ->
+                itemsIndexed(results, key = { idx, t -> "${t.source.name}:${t.saavnId}:$idx" }) { _, track ->
                     val isThisPlaying = playingTrackId == track.saavnId && isPlaying
                     Surface(
                         modifier = Modifier

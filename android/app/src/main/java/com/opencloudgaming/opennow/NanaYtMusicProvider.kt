@@ -225,11 +225,13 @@ object NanaYtMusicProvider {
         limit: Int,
     ): List<NanaOnlineTrack> {
         if (limit <= 0) return emptyList()
+        val songIds = songTracks.mapTo(HashSet()) { it.saavnId }
+        val uniqueVideos = videoTracks.filter { it.saavnId !in songIds }
         val result = ArrayList<NanaOnlineTrack>(limit)
         val seenIds = HashSet<String>()
         var sIdx = 0
         var vIdx = 0
-        while (result.size < limit && (sIdx < songTracks.size || vIdx < videoTracks.size)) {
+        while (result.size < limit && (sIdx < songTracks.size || vIdx < uniqueVideos.size)) {
             while (sIdx < songTracks.size) {
                 val candidate = songTracks[sIdx++]
                 if (seenIds.add(candidate.saavnId)) {
@@ -238,8 +240,8 @@ object NanaYtMusicProvider {
                 }
             }
             if (result.size >= limit) break
-            while (vIdx < videoTracks.size) {
-                val candidate = videoTracks[vIdx++]
+            while (vIdx < uniqueVideos.size) {
+                val candidate = uniqueVideos[vIdx++]
                 if (seenIds.add(candidate.saavnId)) {
                     result.add(candidate)
                     break

@@ -37,6 +37,7 @@ data class NanaOnlineTrack(
     val playCountText: String?,
     val source: NanaOnlineMusicSource = NanaOnlineMusicSource.JIOSAAVN,
     val streamPageUrl: String? = null,
+    val durationSeconds: Long = 0L,
 )
 
 internal fun formatOnlineMusicDuration(totalSeconds: Long): String {
@@ -50,6 +51,9 @@ internal fun formatOnlineMusicDuration(totalSeconds: Long): String {
         "%d:%02d".format(minutes, seconds)
     }
 }
+
+internal fun formatPlaybackDurationMs(totalMs: Long): String =
+    formatOnlineMusicDuration(totalMs.coerceAtLeast(0L) / 1000L).ifEmpty { "0:00" }
 
 internal fun formatOnlineMusicPlayCount(count: Long): String? {
     if (count <= 0L) return null
@@ -169,7 +173,8 @@ object NanaSaavnApi {
             ?.optString("name")
             ?.takeIf { it.isNotBlank() }
             ?: "Unknown artist"
-        val durationText = formatOnlineMusicDuration(song.optInt("duration", 0).toLong())
+        val durationSec = song.optInt("duration", 0).toLong().coerceAtLeast(0L)
+        val durationText = formatOnlineMusicDuration(durationSec)
         val thumbnailUrl = pickThumbnail(song.optJSONArray("image"))
         val playCountText = formatOnlineMusicPlayCount(song.optLong("playCount", 0))
         return NanaOnlineTrack(
@@ -180,6 +185,7 @@ object NanaSaavnApi {
             thumbnailUrl = thumbnailUrl,
             playCountText = playCountText,
             source = NanaOnlineMusicSource.JIOSAAVN,
+            durationSeconds = durationSec,
         )
     }
 

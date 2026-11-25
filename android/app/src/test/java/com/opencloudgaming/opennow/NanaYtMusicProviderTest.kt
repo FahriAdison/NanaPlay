@@ -12,6 +12,8 @@ import org.schabi.newpipe.extractor.MediaFormat
 import org.schabi.newpipe.extractor.stream.AudioStream
 import org.schabi.newpipe.extractor.stream.AudioTrackType
 import org.schabi.newpipe.extractor.stream.DeliveryMethod
+import org.schabi.newpipe.extractor.stream.StreamInfoItem
+import org.schabi.newpipe.extractor.stream.StreamType
 
 class NanaYtMusicProviderTest {
 
@@ -131,7 +133,7 @@ class NanaYtMusicProviderTest {
         var saavnCalled = false
         val result = NanaMusicOnlineSearch.searchWithFallback(
             query = "Night Drive",
-            ytSearch = { _, _ -> listOf(ytTrack) },
+            ytSearch = { _, _, _ -> listOf(ytTrack) },
             saavnSearch = { _, _ ->
                 saavnCalled = true
                 emptyList()
@@ -156,7 +158,7 @@ class NanaYtMusicProviderTest {
         )
         val onError = NanaMusicOnlineSearch.searchWithFallback(
             query = "Night Drive",
-            ytSearch = { _, _ -> throw RuntimeException("HTTP 429") },
+            ytSearch = { _, _, _ -> throw RuntimeException("HTTP 429") },
             saavnSearch = { _, _ -> listOf(saavnTrack) },
         )
         assertTrue(onError.usedFallback)
@@ -165,7 +167,7 @@ class NanaYtMusicProviderTest {
 
         val onEmpty = NanaMusicOnlineSearch.searchWithFallback(
             query = "Night Drive",
-            ytSearch = { _, _ -> emptyList() },
+            ytSearch = { _, _, _ -> emptyList() },
             saavnSearch = { _, _ -> listOf(saavnTrack) },
         )
         assertTrue(onEmpty.usedFallback)
@@ -177,8 +179,138 @@ class NanaYtMusicProviderTest {
     fun searchWithFallback_rethrowsCancellationException(): Unit = runBlocking {
         NanaMusicOnlineSearch.searchWithFallback(
             query = "Night Drive",
-            ytSearch = { _, _ -> throw CancellationException("cancelled") },
+            ytSearch = { _, _, _ -> throw CancellationException("cancelled") },
             saavnSearch = { _, _ -> error("Should not run fallback after cancellation") },
         )
+    }
+
+    @Test
+    fun searchWithFallback_forwardsSelectedFilter(): Unit = runBlocking {
+        var capturedFilter: NanaMusicSearchFilter? = null
+        NanaMusicOnlineSearch.searchWithFallback(
+            query = "lofi study mix",
+            filter = NanaMusicSearchFilter.LONG_MIXES,
+            ytSearch = { _, filter, _ ->
+                capturedFilter = filter
+                listOf(
+                    NanaOnlineTrack(
+                        saavnId = "ytm:mix12345678",
+                        title = "Lofi Mix 1 Hour",
+                        artist = "Chill Beats",
+                        durationText = "1:02:15",
+                        thumbnailUrl = null,
+                        playCountText = null,
+                        source = NanaOnlineMusicSource.YOUTUBE_MUSIC,
+                        durationSeconds = 3735L,
+                    ),
+                )
+            },
+            saavnSearch = { _, _ -> emptyList() },
+        )
+        assertEquals(NanaMusicSearchFilter.LONG_MIXES, capturedFilter)
+    }
+
+    @Test
+    fun formatDurations_supportsHoursMinutesSeconds() {
+        assertEquals("", formatOnlineMusicDuration(0L))
+        assertEquals("0:00", formatPlaybackDurationMs(0L))
+        assertEquals("3:45", formatOnlineMusicDuration(225L))
+        assertEquals("1:22:18", formatOnlineMusicDuration(4938L))
+        assertEquals("1:22:18", formatPlaybackDurationMs(4_938_900L))
+    }
+
+    @Test
+    fun filterVideoTracks_excludesShortsAndZeroDuration() {
+        fun videoTrack(id: String, sec: Long) = NanaOnlineTrack(
+            saavnId = id,
+            title = id,
+            artist = "Uploader",
+            durationText = formatOnlineMusicDuration(sec),
+            thumbnailUrl = null,
+            playCountText = null,
+            source = NanaOnlineMusicSource.YOUTUBE_MUSIC,
+            durationSeconds = sec,
+        )
+        val filtered = NanaYtMusicProvider.filterVideoTracks(
+            listOf(
+                videoTrack("ytm:live0", 0L),
+                videoTrack("ytm:short1", 29L),
+                videoTrack("ytm:short2", 44L),
+                videoTrack("ytm:valid45", 45L),
+                videoTrack("ytm:mix620", 620L),
+            ),
+        )
+        assertEquals(listOf("ytm:valid45", "ytm:mix620"), filtered.map { it.saavnId })
+    }
+
+    @Test
+    fun deduplicateAndInterleaveTracks_and_prioritizeLongMixes_workCleanly() {
+        fun onlineTrack(id: String, sec: Long) = NanaOnlineTrack(
+            saavnId = id,
+            title = id,
+            artist = "Artist",
+            durationText = formatOnlineMusicDuration(sec),
+            thumbnailUrl = null,
+            playCountText = null,
+            source = NanaOnlineMusicSource.YOUTUBE_MUSIC,
+            durationSeconds = sec,
+        )
+        val songs = listOf(onlineTrack("ytm:s1", 200), onlineTrack("ytm:s2", 210), onlineTrack("ytm:s3", 190))
+        val videos = listOf(onlineTrack("ytm:s2", 210), onlineTrack("ytm:v1", 3600), onlineTrack("ytm:v2", 900))
+        val interleaved = NanaYtMusicProvider.deduplicateAndInterleaveTracks(songs, videos, limit = 5)
+        assertEquals(
+            listOf("ytm:s1", "ytm:v1", "ytm:s2", "ytm:v2", "ytm:s3"),
+            interleaved.map { it.saavnId },
+        )
+
+        val prioritized = NanaYtMusicProvider.prioritizeLongMixes(
+            listOf(
+                onlineTrack("ytm:short", 30),
+                onlineTrack("ytm:regular", 240),
+                onlineTrack("ytm:mix30m", 1800),
+                onlineTrack("ytm:mix80m", 4800),
+            ),
+            limit = 5,
+        )
+        assertEquals(
+            listOf("ytm:mix80m", "ytm:mix30m", "ytm:regular"),
+            prioritized.map { it.saavnId },
+        )
+    }
+
+    @Test
+    fun extractRelatedTracks_filtersLiveSelfAndDuplicates() {
+        val selfItem = StreamInfoItem(0, "https://www.youtube.com/watch?v=self1111111", "Self", StreamType.AUDIO_STREAM).apply {
+            duration = 200L
+            uploaderName = "A"
+        }
+        val liveItem = StreamInfoItem(0, "https://www.youtube.com/watch?v=live1111111", "Live", StreamType.LIVE_STREAM).apply {
+            duration = 0L
+            uploaderName = "B"
+        }
+        val mixItem = StreamInfoItem(0, "https://www.youtube.com/watch?v=mixx1111111", "Mix 1h", StreamType.VIDEO_STREAM).apply {
+            duration = 3700L
+            uploaderName = "DJ Test"
+            viewCount = 12_500L
+        }
+        val dupMix = StreamInfoItem(0, "https://www.youtube.com/watch?v=mixx1111111", "Mix 1h dup", StreamType.VIDEO_STREAM).apply {
+            duration = 3700L
+            uploaderName = "DJ Test"
+        }
+        val songItem = StreamInfoItem(0, "https://www.youtube.com/watch?v=song1111111", "Track 2", StreamType.VIDEO_STREAM).apply {
+            duration = 215L
+            uploaderName = "Artist 2"
+        }
+
+        val related = NanaYtMusicProvider.extractRelatedTracks(
+            items = listOf(selfItem, liveItem, mixItem, dupMix, songItem),
+            excludeTrackId = "ytm:self1111111",
+            limit = 5,
+        )
+        assertEquals(2, related.size)
+        assertEquals("ytm:mixx1111111", related[0].saavnId)
+        assertEquals("1:01:40", related[0].durationText)
+        assertEquals(3700L, related[0].durationSeconds)
+        assertEquals("ytm:song1111111", related[1].saavnId)
     }
 }

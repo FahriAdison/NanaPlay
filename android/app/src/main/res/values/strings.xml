@@ -789,4 +789,10 @@
     <string name="music_notif_repeat_all">Repeat all</string>
     <string name="music_notif_repeat_one">Repeat one</string>
     <string name="music_sleep_timer_ended">Sleep timer ended — music paused</string>
+    <string name="music_filter_all">All</string>
+    <string name="music_filter_songs">Songs</string>
+    <string name="music_filter_long_mixes">Mix &amp; Long</string>
+    <string name="music_online_empty">No results found</string>
+    <string name="music_online_unavailable">Online music temporarily unavailable</string>
+    <string name="music_online_unavailable_hint">The music service may be down. Local music still works.</string>
 </resources>

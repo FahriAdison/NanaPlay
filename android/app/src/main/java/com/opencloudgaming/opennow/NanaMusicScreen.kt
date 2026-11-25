@@ -7,6 +7,7 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -38,6 +40,8 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -58,6 +62,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -67,7 +72,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.size.Scale
 import com.opencloudgaming.opennow.ui.theme.OpenNowPalette
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /**
@@ -97,6 +105,7 @@ private class OpenMultipleDocumentsPersistable : ActivityResultContracts.OpenMul
  */
 object NanaOnlineSearchState {
     var query by mutableStateOf("")
+    var filter by mutableStateOf(NanaMusicSearchFilter.ALL)
     var results by mutableStateOf<List<NanaOnlineTrack>>(emptyList())
     var searching by mutableStateOf(false)
     var error by mutableStateOf<String?>(null)
@@ -439,10 +448,12 @@ private fun NanaMusicOnlineTab(
     // 1.0.27: search state is hoisted to NanaMusicScreen so it survives tab
     // switches (previously `remember`ed here and reset on every tab change).
     var query by state::query
+    var filter by state::filter
     var results by state::results
     var searching by state::searching
     var error by state::error
     var playingTrackId by state::playingTrackId
+    var searchJob by remember { mutableStateOf<Job?>(null) }
 
     // Clear the "now playing" highlight when the player moves to a track that
     // isn't this online result (e.g. user picked a local file or pressed next).
@@ -453,25 +464,30 @@ private fun NanaMusicOnlineTab(
         if (!stillThis) playingTrackId = null
     }
 
-    fun doSearch(q: String) {
+    val msgNoResults = stringResource(R.string.music_online_empty)
+    val msgUnavailable = stringResource(R.string.music_online_unavailable)
+
+    fun doSearch(q: String, targetFilter: NanaMusicSearchFilter = filter) {
         val trimmed = q.trim()
-        if (trimmed.isBlank() || searching) return
+        if (trimmed.isBlank()) return
+        searchJob?.cancel()
         searching = true
         error = null
-        scope.launch {
+        val job = scope.launch {
             try {
-                results = NanaMusicOnlineSearch.searchSongs(trimmed)
+                results = NanaMusicOnlineSearch.searchSongs(trimmed, filter = targetFilter)
                 if (results.isEmpty()) {
-                    error = "No results found"
+                    error = msgNoResults
                 }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 results = emptyList()
-                error = "Online music temporarily unavailable"
+                error = msgUnavailable
             } finally {
                 searching = false
             }
         }
+        searchJob = job
     }
 
     Column(modifier.fillMaxSize()) {
@@ -494,10 +510,53 @@ private fun NanaMusicOnlineTab(
                 }
             },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { doSearch(query) }),
+            keyboardActions = KeyboardActions(onSearch = { doSearch(query, filter) }),
         )
 
         Spacer(Modifier.height(8.dp))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val filters = listOf(
+                NanaMusicSearchFilter.ALL to stringResource(R.string.music_filter_all),
+                NanaMusicSearchFilter.SONGS to stringResource(R.string.music_filter_songs),
+                NanaMusicSearchFilter.LONG_MIXES to stringResource(R.string.music_filter_long_mixes),
+            )
+            filters.forEach { (option, label) ->
+                val isSelected = filter == option
+                FilterChip(
+                    selected = isSelected,
+                    onClick = {
+                        if (filter != option) {
+                            filter = option
+                            if (query.isNotBlank()) {
+                                doSearch(query, option)
+                            }
+                        }
+                    },
+                    label = { Text(label, maxLines = 1) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = OpenNowPalette.AccentDefault,
+                        selectedLabelColor = OpenNowPalette.OnAccent,
+                        containerColor = OpenNowPalette.PanelAlt,
+                        labelColor = OpenNowPalette.TextMuted,
+                    ),
+                    border = FilterChipDefaults.filterChipBorder(
+                        enabled = true,
+                        selected = isSelected,
+                        borderColor = OpenNowPalette.TextMuted.copy(alpha = 0.28f),
+                        selectedBorderColor = OpenNowPalette.AccentDefault,
+                    ),
+                )
+            }
+        }
+
+        Spacer(Modifier.height(6.dp))
 
         // 1.0.29: playback status banner — shows a hard error or buffering so
         // the user can tell "still loading" apart from "failed".
@@ -549,7 +608,7 @@ private fun NanaMusicOnlineTab(
                     modifier = Modifier.padding(24.dp),
                 ) {
                     Icon(
-                        imageVector = if (error == "Online music temporarily unavailable")
+                        imageVector = if (error == msgUnavailable)
                             Icons.Filled.Warning else Icons.Filled.Cloud,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.25f),
@@ -561,9 +620,9 @@ private fun NanaMusicOnlineTab(
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                     )
-                    if (error == "Online music temporarily unavailable") {
+                    if (error == msgUnavailable) {
                         Text(
-                            "The music service may be down. Local music still works.",
+                            stringResource(R.string.music_online_unavailable_hint),
                             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
                             style = MaterialTheme.typography.bodyMedium,
                         )
@@ -577,6 +636,15 @@ private fun NanaMusicOnlineTab(
             ) {
                 itemsIndexed(results, key = { idx, t -> "${t.source.name}:${t.saavnId}:$idx" }) { _, track ->
                     val isThisPlaying = playingTrackId == track.saavnId && isPlaying
+                    val thumbRequest = remember(track.thumbnailUrl) {
+                        track.thumbnailUrl?.let { url ->
+                            ImageRequest.Builder(context)
+                                .data(url)
+                                .size(128, 128)
+                                .scale(Scale.FILL)
+                                .build()
+                        }
+                    }
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -590,10 +658,14 @@ private fun NanaMusicOnlineTab(
                                     // another result while this resolve was in
                                     // flight (serialized in the player).
                                     val tappedId = track.saavnId
-                                    val ok = NanaMusicPlayer.playOnlineTrack(context, track)
+                                    val ok = NanaMusicPlayer.playOnlineSearchSelection(
+                                        context = context,
+                                        online = track,
+                                        searchResults = results,
+                                    )
                                     if (!ok && playingTrackId == tappedId) {
                                         playingTrackId = null
-                                        error = "Online music temporarily unavailable"
+                                        error = msgUnavailable
                                     }
                                 }
                             },
@@ -610,9 +682,9 @@ private fun NanaMusicOnlineTab(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            if (track.thumbnailUrl != null) {
+                            if (thumbRequest != null) {
                                 AsyncImage(
-                                    model = track.thumbnailUrl,
+                                    model = thumbRequest,
                                     contentDescription = null,
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier

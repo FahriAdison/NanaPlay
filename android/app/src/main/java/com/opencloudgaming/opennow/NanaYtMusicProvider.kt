@@ -2,7 +2,11 @@ package com.opencloudgaming.opennow
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.schabi.newpipe.extractor.Image
@@ -81,6 +85,12 @@ internal class NanaYtMusicDownloader(
     }
 }
 
+enum class NanaMusicSearchFilter {
+    ALL,
+    SONGS,
+    LONG_MIXES,
+}
+
 data class ResolvedYtAudioStream(
     val streamUrl: String,
     val relatedTracks: List<NanaOnlineTrack> = emptyList(),
@@ -88,12 +98,15 @@ data class ResolvedYtAudioStream(
 
 /**
  * YouTube Music provider powered by NewPipeExtractor.
- * Search stays metadata-only (`music_songs`); stream URLs resolve lazily on play/retry.
+ * Search stays metadata-only (`music_songs` / `videos`); stream URLs resolve lazily on play/retry.
  */
 object NanaYtMusicProvider {
 
     internal const val YT_MUSIC_ID_PREFIX = "ytm:"
     private const val STREAM_URL_EXPIRY_LEEWAY_SECONDS = 90L
+    private const val SEARCH_SOURCE_TIMEOUT_MS = 8_000L
+    internal const val MIN_VIDEO_DURATION_SECONDS = 45L
+    internal const val LONG_MIX_DURATION_SECONDS = 600L
 
     private val initLock = Any()
 
@@ -121,24 +134,137 @@ object NanaYtMusicProvider {
     }
 
     suspend fun searchSongs(query: String, limit: Int = 50): List<NanaOnlineTrack> =
-        withContext(Dispatchers.IO) {
-            val trimmed = query.trim()
-            if (trimmed.isEmpty() || limit <= 0) return@withContext emptyList()
-            ensureInitialized()
-            val service = ServiceList.YouTube
-            val queryHandler = service.searchQHFactory.fromQuery(
-                trimmed,
-                listOf(YoutubeSearchQueryHandlerFactory.MUSIC_SONGS),
-                "",
-            )
-            val info = SearchInfo.getInfo(service, queryHandler)
-            info.relatedItems.orEmpty()
-                .asSequence()
-                .filterIsInstance<StreamInfoItem>()
-                .mapNotNull(::mapSearchItemToOnlineTrack)
-                .take(limit)
-                .toList()
+        searchSongs(query, NanaMusicSearchFilter.ALL, limit)
+
+    suspend fun searchSongs(
+        query: String,
+        filter: NanaMusicSearchFilter,
+        limit: Int = 50,
+    ): List<NanaOnlineTrack> {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty() || limit <= 0) return emptyList()
+        return when (filter) {
+            NanaMusicSearchFilter.SONGS ->
+                searchYoutubeContentFilter(trimmed, YoutubeSearchQueryHandlerFactory.MUSIC_SONGS, limit)
+            NanaMusicSearchFilter.LONG_MIXES -> {
+                val raw = searchYoutubeContentFilter(
+                    trimmed,
+                    YoutubeSearchQueryHandlerFactory.VIDEOS,
+                    maxOf(limit, 50),
+                )
+                prioritizeLongMixes(raw, limit)
+            }
+            NanaMusicSearchFilter.ALL -> coroutineScope {
+                val songsDeferred = async {
+                    fetchSearchBranchSafe(trimmed, YoutubeSearchQueryHandlerFactory.MUSIC_SONGS, limit)
+                }
+                val videosDeferred = async {
+                    fetchSearchBranchSafe(trimmed, YoutubeSearchQueryHandlerFactory.VIDEOS, limit)
+                }
+                val songsResult = songsDeferred.await()
+                val videosResult = videosDeferred.await()
+                if (songsResult.isFailure && videosResult.isFailure) {
+                    throw (songsResult.exceptionOrNull()
+                        ?: videosResult.exceptionOrNull()
+                        ?: IllegalStateException("YouTube search failed"))
+                }
+                val songs = songsResult.getOrDefault(emptyList())
+                val videos = filterVideoTracks(videosResult.getOrDefault(emptyList()))
+                deduplicateAndInterleaveTracks(songs, videos, limit)
+            }
         }
+    }
+
+    private suspend fun fetchSearchBranchSafe(
+        query: String,
+        contentFilter: String,
+        limit: Int,
+    ): Result<List<NanaOnlineTrack>> {
+        return try {
+            val tracks = withTimeoutOrNull(SEARCH_SOURCE_TIMEOUT_MS) {
+                searchYoutubeContentFilter(query, contentFilter, limit)
+            }
+            if (tracks == null) {
+                Result.failure(IllegalStateException("YouTube search timed out for $contentFilter"))
+            } else {
+                Result.success(tracks)
+            }
+        } catch (t: Throwable) {
+            if (t is CancellationException) throw t
+            Result.failure(t)
+        }
+    }
+
+    private suspend fun searchYoutubeContentFilter(
+        query: String,
+        contentFilter: String,
+        limit: Int,
+    ): List<NanaOnlineTrack> = runInterruptible(Dispatchers.IO) {
+        ensureInitialized()
+        val service = ServiceList.YouTube
+        val queryHandler = service.searchQHFactory.fromQuery(
+            query,
+            listOf(contentFilter),
+            "",
+        )
+        val info = SearchInfo.getInfo(service, queryHandler)
+        info.relatedItems.orEmpty()
+            .asSequence()
+            .filterIsInstance<StreamInfoItem>()
+            .mapNotNull(::mapSearchItemToOnlineTrack)
+            .take(limit)
+            .toList()
+    }
+
+    internal fun filterVideoTracks(tracks: List<NanaOnlineTrack>): List<NanaOnlineTrack> =
+        tracks.filter { it.durationSeconds >= MIN_VIDEO_DURATION_SECONDS }
+
+    internal fun deduplicateAndInterleaveTracks(
+        songTracks: List<NanaOnlineTrack>,
+        videoTracks: List<NanaOnlineTrack>,
+        limit: Int,
+    ): List<NanaOnlineTrack> {
+        if (limit <= 0) return emptyList()
+        val result = ArrayList<NanaOnlineTrack>(limit)
+        val seenIds = HashSet<String>()
+        var sIdx = 0
+        var vIdx = 0
+        while (result.size < limit && (sIdx < songTracks.size || vIdx < videoTracks.size)) {
+            while (sIdx < songTracks.size) {
+                val candidate = songTracks[sIdx++]
+                if (seenIds.add(candidate.saavnId)) {
+                    result.add(candidate)
+                    break
+                }
+            }
+            if (result.size >= limit) break
+            while (vIdx < videoTracks.size) {
+                val candidate = videoTracks[vIdx++]
+                if (seenIds.add(candidate.saavnId)) {
+                    result.add(candidate)
+                    break
+                }
+            }
+        }
+        return result
+    }
+
+    internal fun prioritizeLongMixes(
+        videoTracks: List<NanaOnlineTrack>,
+        limit: Int,
+    ): List<NanaOnlineTrack> {
+        if (limit <= 0) return emptyList()
+        return videoTracks
+            .asSequence()
+            .filter { it.durationSeconds >= MIN_VIDEO_DURATION_SECONDS }
+            .distinctBy { it.saavnId }
+            .sortedWith(
+                compareByDescending<NanaOnlineTrack> { it.durationSeconds >= LONG_MIX_DURATION_SECONDS }
+                    .thenByDescending { it.durationSeconds },
+            )
+            .take(limit)
+            .toList()
+    }
 
     suspend fun resolveAudioStreamUrl(urlOrId: String): String? =
         resolveAudioStreamWithRelated(urlOrId, maxRelated = 0)?.streamUrl
@@ -202,15 +328,17 @@ object NanaYtMusicProvider {
         }
         val artist = item.uploaderName?.trim()?.takeIf { it.isNotBlank() } ?: "YouTube Music"
         val watchUrl = resolveYoutubeWatchUrl(videoId ?: rawUrl) ?: rawUrl
+        val durationSec = item.duration.coerceAtLeast(0L)
         return NanaOnlineTrack(
             saavnId = trackId,
             title = title,
             artist = artist,
-            durationText = formatOnlineMusicDuration(item.duration),
+            durationText = formatOnlineMusicDuration(durationSec),
             thumbnailUrl = pickBestThumbnailUrl(item.thumbnails),
             playCountText = formatOnlineMusicPlayCount(item.viewCount),
             source = NanaOnlineMusicSource.YOUTUBE_MUSIC,
             streamPageUrl = watchUrl,
+            durationSeconds = durationSec,
         )
     }
 
@@ -322,14 +450,18 @@ data class NanaOnlineSearchResult(
  */
 object NanaMusicOnlineSearch {
 
-    suspend fun searchSongs(query: String, limit: Int = 50): List<NanaOnlineTrack> =
-        searchWithFallback(query, limit).tracks
+    suspend fun searchSongs(
+        query: String,
+        filter: NanaMusicSearchFilter = NanaMusicSearchFilter.ALL,
+        limit: Int = 50,
+    ): List<NanaOnlineTrack> = searchWithFallback(query, filter = filter, limit = limit).tracks
 
     internal suspend fun searchWithFallback(
         query: String,
+        filter: NanaMusicSearchFilter = NanaMusicSearchFilter.ALL,
         limit: Int = 50,
-        ytSearch: suspend (String, Int) -> List<NanaOnlineTrack> = { q, l ->
-            NanaYtMusicProvider.searchSongs(q, l)
+        ytSearch: suspend (String, NanaMusicSearchFilter, Int) -> List<NanaOnlineTrack> = { q, f, l ->
+            NanaYtMusicProvider.searchSongs(q, f, l)
         },
         saavnSearch: suspend (String, Int) -> List<NanaOnlineTrack> = { q, l ->
             NanaSaavnApi.searchSongs(q, l)
@@ -341,7 +473,7 @@ object NanaMusicOnlineSearch {
         }
         var ytError: Throwable? = null
         val ytTracks = try {
-            ytSearch(trimmed, limit)
+            ytSearch(trimmed, filter, limit)
         } catch (t: Throwable) {
             if (t is CancellationException) throw t
             ytError = t

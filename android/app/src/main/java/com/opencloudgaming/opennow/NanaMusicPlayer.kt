@@ -137,26 +137,56 @@ internal fun computeNextPlaybackAction(
     }
 }
 
-internal fun buildTransientOnlineQueue(
-    currentQueue: List<NanaTrack>,
-    selected: NanaTrack,
-    followingOnlineTracks: List<NanaTrack>,
+internal fun selectOnlineQueueOrder(
+    selected: NanaOnlineTrack,
+    searchResults: List<NanaOnlineTrack>,
     maxTransientOnline: Int = 25,
-): Pair<List<NanaTrack>, Int> {
-    val localTracks = currentQueue.filter { !it.isOnline }
-    val onlineQueue = ArrayList<NanaTrack>()
-    val seenKeys = HashSet<Pair<NanaOnlineMusicSource, String?>>()
-    val selectedKey = selected.onlineSource to (selected.saavnId ?: selected.uri.toString())
-    seenKeys.add(selectedKey)
-    onlineQueue.add(selected)
-    for (item in followingOnlineTracks) {
-        if (onlineQueue.size >= maxTransientOnline) break
-        val key = item.onlineSource to (item.saavnId ?: item.uri.toString())
-        if (seenKeys.add(key)) {
-            onlineQueue.add(item)
+): List<NanaOnlineTrack> {
+    val selectedPos = searchResults.indexOfFirst {
+        it.saavnId == selected.saavnId && it.source == selected.source
+    }
+    val trailing = if (selectedPos >= 0) {
+        searchResults.drop(selectedPos + 1)
+    } else {
+        searchResults
+    }
+    val ordered = ArrayList<NanaOnlineTrack>(maxTransientOnline)
+    val seenKeys = HashSet<Pair<NanaOnlineMusicSource, String>>()
+    seenKeys.add(selected.source to selected.saavnId)
+    ordered.add(selected)
+    for (item in trailing) {
+        if (ordered.size >= maxTransientOnline) break
+        if (seenKeys.add(item.source to item.saavnId)) {
+            ordered.add(item)
         }
     }
-    return (localTracks + onlineQueue) to localTracks.size
+    return ordered
+}
+
+internal fun <T> mergePreservingLocalTracks(
+    currentQueue: List<T>,
+    isOnline: (T) -> Boolean,
+    newOnlineTracks: List<T>,
+): Pair<List<T>, Int> {
+    val localTracks = currentQueue.filterNot(isOnline)
+    return (localTracks + newOnlineTracks) to localTracks.size
+}
+
+internal fun pickNextRelatedTrack(
+    candidates: List<NanaOnlineTrack>,
+    existingOnlineIds: Set<String>,
+    recentAutoPlayIds: Collection<String>,
+    currentTrackId: String?,
+): NanaOnlineTrack? {
+    return candidates.firstOrNull { cand ->
+        cand.saavnId != currentTrackId &&
+            cand.saavnId !in existingOnlineIds &&
+            cand.saavnId !in recentAutoPlayIds
+    } ?: candidates.firstOrNull { cand ->
+        cand.saavnId != currentTrackId && cand.saavnId !in existingOnlineIds
+    } ?: candidates.firstOrNull { cand ->
+        cand.saavnId != currentTrackId
+    }
 }
 
 internal fun pickNextRelatedTrack(
@@ -170,15 +200,7 @@ internal fun pickNextRelatedTrack(
         .filter { it.isOnline }
         .mapNotNull { it.saavnId }
         .toHashSet()
-    return candidates.firstOrNull { cand ->
-        cand.saavnId != currentTrackId &&
-            cand.saavnId !in queueIds &&
-            cand.saavnId !in recentAutoPlayIds
-    } ?: candidates.firstOrNull { cand ->
-        cand.saavnId != currentTrackId && cand.saavnId !in queueIds
-    } ?: candidates.firstOrNull { cand ->
-        cand.saavnId != currentTrackId
-    }
+    return pickNextRelatedTrack(candidates, queueIds, recentAutoPlayIds, currentTrackId)
 }
 
 internal fun shouldClearPlayRequestedOnPause(
@@ -1729,20 +1751,12 @@ object NanaMusicPlayer {
                         _tracks.value.size - 1
                     }
                 } else {
-                    val selectedPos = searchResults.indexOfFirst {
-                        it.saavnId == online.saavnId && it.source == online.source
-                    }
-                    val trailing = if (selectedPos >= 0) {
-                        searchResults.drop(selectedPos + 1).map(::onlineToNanaTrack)
-                    } else {
-                        searchResults.filterNot {
-                            it.saavnId == online.saavnId && it.source == online.source
-                        }.map(::onlineToNanaTrack)
-                    }
-                    val (newQueue, selectedIdx) = buildTransientOnlineQueue(
+                    val orderedOnline = selectOnlineQueueOrder(online, searchResults)
+                        .map(::onlineToNanaTrack)
+                    val (newQueue, selectedIdx) = mergePreservingLocalTracks(
                         currentQueue = _tracks.value,
-                        selected = selectedTrack,
-                        followingOnlineTracks = trailing,
+                        isOnline = { it.isOnline },
+                        newOnlineTracks = orderedOnline,
                     )
                     _tracks.value = newQueue
                     selectedIdx

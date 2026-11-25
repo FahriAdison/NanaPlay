@@ -794,4 +794,26 @@
     <string name="music_online_empty">Tidak ada hasil</string>
     <string name="music_online_unavailable">Musik online sedang tidak tersedia</string>
     <string name="music_online_unavailable_hint">Layanan musik mungkin bermasalah. Musik lokal tetap berjalan.</string>
+    <string name="music_now_playing_header">Sedang Diputar</string>
+    <string name="music_now_playing_online">Musik Online</string>
+    <string name="music_now_playing_local">Musik Saya</string>
+    <string name="music_queue">Antrean</string>
+    <string name="music_queue_empty">Antrean kosong</string>
+    <string name="music_queue_count">%1$d lagu</string>
+    <string name="music_sleep_timer">Timer</string>
+    <string name="music_sleep_timer_off">Mati</string>
+    <string name="music_sleep_timer_minutes">%1$d mnt</string>
+    <string name="music_action_shuffle">Acak</string>
+    <string name="music_action_repeat">Ulang</string>
+    <string name="music_action_more">Lainnya</string>
+    <string name="music_volume_label">Volume musik</string>
+    <string name="music_volume_hint">Seimbangkan dengan audio game GeForce NOW</string>
+    <string name="music_autoplay_label">Putar Otomatis</string>
+    <string name="music_autoplay_desc">Lanjutkan lagu serupa saat antrean habis</string>
+    <string name="music_play_label">Putar</string>
+    <string name="music_pause_label">Jeda</string>
+    <string name="music_previous_label">Sebelumnya</string>
+    <string name="music_next_label">Berikutnya</string>
+    <string name="music_collapse_label">Tutup</string>
+    <string name="music_no_artist">Artis tidak diketahui</string>
 </resources>

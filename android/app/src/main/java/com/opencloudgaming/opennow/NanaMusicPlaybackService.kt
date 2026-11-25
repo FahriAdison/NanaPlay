@@ -1,10 +1,15 @@
 package com.opencloudgaming.opennow
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
+import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.Player
@@ -80,6 +85,20 @@ class NanaMusicPlaybackService : MediaSessionService() {
             .build()
     }
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Promote immediately before super.onStartCommand: Media3's async notification
+        // pipeline (artwork fetch, buffering state) can miss Android 14-16's strict
+        // startForegroundService() deadline and trigger RemoteServiceException.
+        createNotificationChannel()
+        val foregroundType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+        } else {
+            0
+        }
+        ServiceCompat.startForeground(this, NOTIFICATION_ID, buildInitialNotification(), foregroundType)
+        return super.onStartCommand(intent, flags, startId)
+    }
+
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? =
         session
 
@@ -128,11 +147,13 @@ class NanaMusicPlaybackService : MediaSessionService() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         // Swiping the app away must NOT stop the music — background playback
-        // is the entire point of this service. Only stop when idle.
+        // is the entire point of this service. Only stop when genuinely idle/ended.
         val player = session?.player
         // Instrumentasi saja: marker lifecycle persisten untuk hunt "musik berhenti sendiri".
         NanaMusicPlayer.logLifecycleMarker(this, "music.onTaskRemoved playWhenReady=${player?.playWhenReady} state=${player?.playbackState}")
-        if (player == null || !player.playWhenReady || player.playbackState == Player.STATE_IDLE) {
+        if (!NanaMusicPlayer.isPlaybackRequested() &&
+            (player == null || !player.playWhenReady || player.playbackState == Player.STATE_IDLE || player.playbackState == Player.STATE_ENDED)
+        ) {
             stopSelf()
         }
     }
@@ -141,15 +162,48 @@ class NanaMusicPlaybackService : MediaSessionService() {
         unregisterNoisyReceiver()
         noisyPlayerListener?.let { session?.player?.removeListener(it) }
         noisyPlayerListener = null
+        val player = session?.player
         // Instrumentasi saja: marker lifecycle persisten untuk hunt "musik berhenti sendiri".
-        NanaMusicPlayer.logLifecycleMarker(this, "music.onDestroy playWhenReady=${session?.player?.playWhenReady} state=${session?.player?.playbackState}")
-        val isPlaying = session?.player?.isPlaying == true
+        NanaMusicPlayer.logLifecycleMarker(this, "music.onDestroy playWhenReady=${player?.playWhenReady} state=${player?.playbackState}")
+        val playbackActive = NanaMusicPlayer.isPlaybackRequested() || (
+            player != null &&
+                (player.isPlaying || (player.playWhenReady && player.playbackState != Player.STATE_IDLE && player.playbackState != Player.STATE_ENDED))
+            )
         session?.release()
         session = null
-        if (!isPlaying) {
-            NanaMusicPlayer.release()
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        if (!playbackActive) {
+            NanaMusicPlayer.release(stopService = false)
         }
         super.onDestroy()
+    }
+
+    private fun buildInitialNotification(): Notification {
+        val openIntent = Intent(this, MainActivity::class.java).apply {
+            action = Intent.ACTION_MAIN
+            addCategory(Intent.CATEGORY_LAUNCHER)
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val contentIntent = PendingIntent.getActivity(
+            this,
+            NOTIFICATION_ID,
+            openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val track = NanaMusicPlayer.currentTrack
+        val title = track?.title?.takeIf { it.isNotBlank() } ?: getString(R.string.app_name)
+        val artist = track?.artist?.takeIf { it.isNotBlank() } ?: getString(R.string.music_notif_channel)
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_tab_stream)
+            .setContentTitle(title)
+            .setContentText(artist)
+            .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setOngoing(true)
+            .setSilent(true)
+            .setOnlyAlertOnce(true)
+            .setContentIntent(contentIntent)
+            .build()
     }
 
     private fun createNotificationChannel() {
@@ -162,7 +216,10 @@ class NanaMusicPlaybackService : MediaSessionService() {
                 CHANNEL_ID,
                 getString(R.string.music_notif_channel),
                 NotificationManager.IMPORTANCE_LOW,
-            ),
+            ).apply {
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                setShowBadge(false)
+            },
         )
     }
 

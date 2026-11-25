@@ -663,6 +663,9 @@ object NanaMusicPlayer {
                                 } else {
                                     playRequested = false
                                     _isPlaying.value = false
+                                    withContext(Dispatchers.Main) {
+                                        runCatching { player?.playWhenReady = false }
+                                    }
                                     runCatching { NanaMusicPlaybackService.stop(appCtx) }
                                 }
                             }
@@ -687,6 +690,8 @@ object NanaMusicPlayer {
     fun obtainServicePlayer(context: Context): androidx.media3.exoplayer.ExoPlayer =
         ensurePlayer(context.applicationContext)
 
+    fun isPlaybackRequested(): Boolean = playRequested
+
     fun canGoNext(): Boolean = _tracks.value.isNotEmpty()
 
     fun canGoPrevious(): Boolean = _tracks.value.isNotEmpty()
@@ -696,11 +701,14 @@ object NanaMusicPlayer {
             playRequested = false
             pausedForCall = false
             wasPlayingBeforeCall = false
-            appContextRef?.let { runCatching { NanaMusicPlaybackService.stop(it) } }
             val exo = synchronized(this) { player }
             persistScope.launch(Dispatchers.Main) {
-                runCatching { exo?.stop() }
-                runCatching { exo?.clearMediaItems() }
+                runCatching {
+                    exo?.playWhenReady = false
+                    exo?.stop()
+                    exo?.clearMediaItems()
+                }
+                appContextRef?.let { runCatching { NanaMusicPlaybackService.stop(it) } }
             }
             synchronized(this) {
                 _tracks.value = emptyList()
@@ -899,12 +907,15 @@ object NanaMusicPlayer {
                 consecutiveErrorCount = 0
                 playRequested = false
                 _isPlaying.value = false
-                runCatching { NanaMusicPlaybackService.stop(appContext) }
                 val exo = synchronized(this@NanaMusicPlayer) { player }
                 withContext(Dispatchers.Main) {
-                    runCatching { exo?.stop() }
-                    runCatching { exo?.clearMediaItems() }
+                    runCatching {
+                        exo?.playWhenReady = false
+                        exo?.stop()
+                        exo?.clearMediaItems()
+                    }
                 }
+                runCatching { NanaMusicPlaybackService.stop(appContext) }
                 _lastError.value = appContext.getString(R.string.music_err_consecutive_failures)
                 return@withLock
             }
@@ -914,18 +925,29 @@ object NanaMusicPlayer {
                 if (!success) {
                     playRequested = false
                     _isPlaying.value = false
+                    val exo = synchronized(this@NanaMusicPlayer) { player }
+                    withContext(Dispatchers.Main) {
+                        runCatching {
+                            exo?.playWhenReady = false
+                            exo?.stop()
+                            exo?.clearMediaItems()
+                        }
+                    }
                     runCatching { NanaMusicPlaybackService.stop(appContext) }
                 }
             } else {
                 consecutiveErrorCount = 0
                 playRequested = false
                 _isPlaying.value = false
-                runCatching { NanaMusicPlaybackService.stop(appContext) }
                 val exo = synchronized(this@NanaMusicPlayer) { player }
                 withContext(Dispatchers.Main) {
-                    runCatching { exo?.stop() }
-                    runCatching { exo?.clearMediaItems() }
+                    runCatching {
+                        exo?.playWhenReady = false
+                        exo?.stop()
+                        exo?.clearMediaItems()
+                    }
                 }
+                runCatching { NanaMusicPlaybackService.stop(appContext) }
                 _lastError.value =
                     appContext.getString(R.string.music_err_play_failed_end, failedTitle)
             }
@@ -1264,13 +1286,16 @@ object NanaMusicPlayer {
         // Keep the persisted playlist in sync after deletions.
         persistScope.launch { appContextRef?.let { saveState(it) } }
         if (newSize == 0) {
-            // 1.0.59: nothing left to play — drop the foreground service too.
+            // 1.0.59: nothing left to play — stop exo before stopping the foreground service.
             playRequested = false
-            appContextRef?.let { runCatching { NanaMusicPlaybackService.stop(it) } }
             persistScope.launch(Dispatchers.Main) {
                 val exo = synchronized(this@NanaMusicPlayer) { player }
-                runCatching { exo?.stop() }
-                runCatching { exo?.clearMediaItems() }
+                runCatching {
+                    exo?.playWhenReady = false
+                    exo?.stop()
+                    exo?.clearMediaItems()
+                }
+                appContextRef?.let { runCatching { NanaMusicPlaybackService.stop(it) } }
             }
             synchronized(this) { _currentIndex.value = -1 }
         } else if (wasCurrent) {
@@ -1402,11 +1427,14 @@ object NanaMusicPlayer {
         playRequested = false
         pausedForCall = false
         wasPlayingBeforeCall = false
-        appContextRef?.let { runCatching { NanaMusicPlaybackService.stop(it) } }
         persistScope.launch(Dispatchers.Main) {
             val exo = synchronized(this@NanaMusicPlayer) { player }
-            runCatching { exo?.stop() }
-            runCatching { exo?.clearMediaItems() }
+            runCatching {
+                exo?.playWhenReady = false
+                exo?.stop()
+                exo?.clearMediaItems()
+            }
+            appContextRef?.let { runCatching { NanaMusicPlaybackService.stop(it) } }
         }
         _currentIndex.value = -1
         synchronized(this) { pendingSeekMs = 0L; pendingSeekIndex = -1 }
@@ -1415,14 +1443,16 @@ object NanaMusicPlayer {
     // 1.0.67 (F-05): synchronize with playInternal's Guard 3 — a concurrent
     // release() must not null out `player` while playInternal is using it.
     @Synchronized
-    fun release() {
+    fun release(stopService: Boolean = true) {
         // Final save before the player goes away (process death, logout, ...).
         appContextRef?.let { saveState(it) }
         playRequested = false
         pausedForCall = false
         wasPlayingBeforeCall = false
         appContextRef?.let {
-            runCatching { NanaMusicPlaybackService.stop(it) }
+            if (stopService) {
+                runCatching { NanaMusicPlaybackService.stop(it) }
+            }
             NanaCallStateWatcher.unregister(it)
         }
         val exo = player

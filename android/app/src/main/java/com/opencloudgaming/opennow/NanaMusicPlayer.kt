@@ -577,14 +577,18 @@ object NanaMusicPlayer {
     private fun buildMediaItem(playable: NanaTrack): MediaItem {
         val metadata = MediaMetadata.Builder()
             .setTitle(playable.title)
-            .setArtist(playable.artist)
+            .setDisplayTitle(playable.title)
+            .setArtist(playable.artist?.takeIf { it.isNotBlank() } ?: "NanaPlay")
+            .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
             .apply {
                 playable.thumbnailUrl?.takeIf { it.isNotBlank() }?.let { thumb ->
                     runCatching { setArtworkUri(Uri.parse(thumb)) }
                 }
             }
             .build()
+        val mediaId = playable.saavnId ?: playable.uri.toString()
         return MediaItem.Builder()
+            .setMediaId(mediaId)
             .setUri(playable.uri)
             .setMediaMetadata(metadata)
             .build()
@@ -922,6 +926,14 @@ object NanaMusicPlayer {
                         captureProgress(exo)
                         persistScope.launch { saveState(appContext) }
                     }
+                }
+
+                override fun onPositionDiscontinuity(
+                    oldPosition: Player.PositionInfo,
+                    newPosition: Player.PositionInfo,
+                    reason: Int,
+                ) {
+                    captureProgress(exo)
                 }
 
                 override fun onPlayerError(error: PlaybackException) {

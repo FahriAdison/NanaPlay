@@ -817,4 +817,7 @@
     <string name="music_next_label">Next</string>
     <string name="music_collapse_label">Collapse</string>
     <string name="music_no_artist">Unknown artist</string>
+    <string name="music_screen_title">Music</string>
+    <string name="music_subtitle_local">Play your own music from storage</string>
+    <string name="music_subtitle_online">Search and play music online</string>
 </resources>

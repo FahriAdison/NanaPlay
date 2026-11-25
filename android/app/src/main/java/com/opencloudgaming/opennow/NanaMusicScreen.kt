@@ -9,6 +9,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.MarqueeSpacing
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -27,6 +29,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -92,6 +95,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
@@ -142,7 +146,67 @@ object NanaOnlineSearchState {
     var results by mutableStateOf<List<NanaOnlineTrack>>(emptyList())
     var searching by mutableStateOf(false)
     var error by mutableStateOf<String?>(null)
-    var playingTrackId by mutableStateOf<String?>(null)
+}
+
+internal fun isOnlineTrackMatch(
+    searchTrack: NanaOnlineTrack,
+    currentIsOnline: Boolean,
+    currentSource: NanaOnlineMusicSource?,
+    currentId: String?,
+    currentOnlineUrl: String?,
+    currentUriString: String?,
+): Boolean {
+    if (!currentIsOnline) return false
+
+    val searchYoutubeId = NanaYtMusicProvider.canonicalYoutubeVideoId(
+        searchTrack.streamPageUrl ?: searchTrack.saavnId,
+    ) ?: NanaYtMusicProvider.canonicalYoutubeVideoId(searchTrack.saavnId)
+
+    val currentYoutubeId = NanaYtMusicProvider.canonicalYoutubeVideoId(currentOnlineUrl)
+        ?: NanaYtMusicProvider.canonicalYoutubeVideoId(currentId)
+        ?: NanaYtMusicProvider.canonicalYoutubeVideoId(currentUriString)
+
+    if (searchYoutubeId != null && currentYoutubeId != null) {
+        return searchYoutubeId == currentYoutubeId
+    }
+
+    val searchPage = normalizeTrackUrl(searchTrack.streamPageUrl)
+    val currentPage = normalizeTrackUrl(currentOnlineUrl)
+    if (searchPage != null && currentPage != null) {
+        return searchPage == currentPage
+    }
+
+    val resolvedCurrentId = currentId?.takeIf { it.isNotBlank() }
+        ?: extractPlaceholderTrackId(currentUriString)
+    if (resolvedCurrentId != null) {
+        return (currentSource == null || currentSource == searchTrack.source) &&
+            resolvedCurrentId == searchTrack.saavnId
+    }
+    return false
+}
+
+private fun normalizeTrackUrl(raw: String?): String? =
+    raw?.trim()?.trimEnd('/')?.takeIf { it.isNotBlank() }
+
+private fun extractPlaceholderTrackId(uriString: String?): String? {
+    val raw = uriString?.trim()?.takeIf { it.startsWith("nana-online://track/") } ?: return null
+    val encoded = raw.removePrefix("nana-online://track/").substringBefore('?').substringBefore('#')
+    return encoded.takeIf { it.isNotBlank() }?.let { java.net.URLDecoder.decode(it, "UTF-8") }
+}
+
+private fun isCurrentOnlineSearchTrack(
+    searchTrack: NanaOnlineTrack,
+    currentTrack: NanaTrack?,
+): Boolean {
+    currentTrack ?: return false
+    return isOnlineTrackMatch(
+        searchTrack = searchTrack,
+        currentIsOnline = currentTrack.isOnline,
+        currentSource = currentTrack.onlineSource,
+        currentId = currentTrack.saavnId,
+        currentOnlineUrl = currentTrack.onlineUrl,
+        currentUriString = currentTrack.uri.toString(),
+    )
 }
 
 /**
@@ -227,15 +291,17 @@ fun NanaMusicScreen(modifier: Modifier = Modifier) {
             )
             Column(Modifier.weight(1f)) {
                 Text(
-                    "Music",
+                    stringResource(R.string.music_screen_title),
                     color = MaterialTheme.colorScheme.onBackground,
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.ExtraBold,
                     maxLines = 1,
                 )
                 Text(
-                    if (tab == 0) "Play your own music from storage"
-                    else "Search and play music online",
+                    stringResource(
+                        if (tab == 0) R.string.music_subtitle_local
+                        else R.string.music_subtitle_online,
+                    ),
                     color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = 1,
@@ -523,17 +589,10 @@ private fun NanaMusicOnlineTab(
     var results by state::results
     var searching by state::searching
     var error by state::error
-    var playingTrackId by state::playingTrackId
+    var resolvingTrackKey by remember { mutableStateOf<String?>(null) }
     var searchJob by remember { mutableStateOf<Job?>(null) }
 
-    // Clear the "now playing" highlight when the player moves to a track that
-    // isn't this online result (e.g. user picked a local file or pressed next).
-    val currentTrack = tracks.getOrNull(currentIndex)
-    androidx.compose.runtime.LaunchedEffect(currentTrack) {
-        val stillThis = currentTrack?.isOnline == true &&
-            results.any { it.saavnId == playingTrackId && it.title == currentTrack.title }
-        if (!stillThis) playingTrackId = null
-    }
+    val activeTrack = tracks.getOrNull(currentIndex)
 
     val msgNoResults = stringResource(R.string.music_online_empty)
     val msgUnavailable = stringResource(R.string.music_online_unavailable)
@@ -706,7 +765,10 @@ private fun NanaMusicOnlineTab(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 itemsIndexed(results, key = { idx, t -> "${t.source.name}:${t.saavnId}:$idx" }) { _, track ->
-                    val isThisPlaying = playingTrackId == track.saavnId && isPlaying
+                    val trackKey = "${track.source.name}:${track.saavnId}"
+                    val isCurrentTrack = isCurrentOnlineSearchTrack(track, activeTrack)
+                    val isThisPlaying = isCurrentTrack && isPlaying
+                    val isHighlighted = isCurrentTrack || resolvingTrackKey == trackKey
                     val thumbRequest = remember(track.thumbnailUrl) {
                         track.thumbnailUrl?.let { url ->
                             ImageRequest.Builder(context)
@@ -720,28 +782,32 @@ private fun NanaMusicOnlineTab(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                if (playingTrackId == track.saavnId) return@clickable
-                                playingTrackId = track.saavnId
+                                if (isCurrentTrack) {
+                                    NanaMusicPlayer.togglePlayPause(context)
+                                    return@clickable
+                                }
+                                if (resolvingTrackKey == trackKey) return@clickable
+                                resolvingTrackKey = trackKey
                                 error = null
                                 scope.launch {
-                                    // 1.0.36: only clear the highlight/error for
-                                    // THIS tap — the user may have tapped
-                                    // another result while this resolve was in
-                                    // flight (serialized in the player).
-                                    val tappedId = track.saavnId
-                                    val ok = NanaMusicPlayer.playOnlineSearchSelection(
-                                        context = context,
-                                        online = track,
-                                        searchResults = results,
-                                    )
-                                    if (!ok && playingTrackId == tappedId) {
-                                        playingTrackId = null
-                                        error = msgUnavailable
+                                    try {
+                                        val ok = NanaMusicPlayer.playOnlineSearchSelection(
+                                            context = context,
+                                            online = track,
+                                            searchResults = results,
+                                        )
+                                        if (!ok) {
+                                            error = msgUnavailable
+                                        }
+                                    } finally {
+                                        if (resolvingTrackKey == trackKey) {
+                                            resolvingTrackKey = null
+                                        }
                                     }
                                 }
                             },
                         shape = RoundedCornerShape(14.dp),
-                        color = if (playingTrackId == track.saavnId) {
+                        color = if (isHighlighted) {
                             OpenNowPalette.AccentDefault.copy(alpha = 0.16f)
                         } else {
                             MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
@@ -795,7 +861,11 @@ private fun NanaMusicOnlineTab(
                                 Icon(
                                     imageVector = Icons.Filled.PlayArrow,
                                     contentDescription = "Play",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    tint = if (isHighlighted) {
+                                        OpenNowPalette.AccentDefault
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
                                     modifier = Modifier.size(24.dp),
                                 )
                             }
@@ -848,7 +918,12 @@ private fun NanaMusicMiniPlayer(
                     maxLines = 1,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .basicMarquee(iterations = Int.MAX_VALUE),
+                        .padding(horizontal = 2.dp)
+                        .basicMarquee(
+                            iterations = Int.MAX_VALUE,
+                            initialDelayMillis = 1200,
+                            spacing = MarqueeSpacing(32.dp),
+                        ),
                 )
                 Text(
                     text = track.artist?.takeIf { it.isNotBlank() }
@@ -999,16 +1074,19 @@ private fun NanaNowPlayingSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
+        shape = RectangleShape,
         containerColor = OpenNowPalette.Background,
         contentColor = OpenNowPalette.TextPrimary,
+        contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
         dragHandle = null,
     ) {
         Column(
             modifier = Modifier
-                .fillMaxWidth()
+                .fillMaxSize()
+                .background(OpenNowPalette.Background)
+                .statusBarsPadding()
                 .navigationBarsPadding()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 14.dp),
+                .padding(horizontal = 20.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             // Top bar
@@ -1057,82 +1135,93 @@ private fun NanaNowPlayingSheet(
                 }
             }
 
-            Spacer(Modifier.height(14.dp))
-
-            // 1:1 Matte frame preserving 16:9 and 1:1 artwork without cropping
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = Color.Black,
-                border = BorderStroke(1.dp, OpenNowPalette.PanelAlt),
-                tonalElevation = 0.dp,
+            Column(
                 modifier = Modifier
+                    .weight(1f)
                     .fillMaxWidth()
-                    .widthIn(max = 310.dp)
-                    .aspectRatio(1f),
+                    .verticalScroll(rememberScrollState())
+                    .padding(vertical = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
             ) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    if (artRequest != null) {
-                        AsyncImage(
-                            model = artRequest,
-                            contentDescription = track.title,
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    } else {
-                        Box(
-                            Modifier
-                                .fillMaxSize()
-                                .background(OpenNowPalette.Panel),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.MusicNote,
-                                contentDescription = null,
-                                tint = OpenNowPalette.AccentDefault.copy(alpha = 0.6f),
-                                modifier = Modifier.size(72.dp),
+                // 1:1 Matte frame preserving 16:9 and 1:1 artwork without cropping
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color.Black,
+                    border = BorderStroke(1.dp, OpenNowPalette.PanelAlt),
+                    tonalElevation = 0.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 310.dp)
+                        .aspectRatio(1f),
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        if (artRequest != null) {
+                            AsyncImage(
+                                model = artRequest,
+                                contentDescription = track.title,
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier.fillMaxSize(),
                             )
+                        } else {
+                            Box(
+                                Modifier
+                                    .fillMaxSize()
+                                    .background(OpenNowPalette.Panel),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.MusicNote,
+                                    contentDescription = null,
+                                    tint = OpenNowPalette.AccentDefault.copy(alpha = 0.6f),
+                                    modifier = Modifier.size(72.dp),
+                                )
+                            }
                         }
                     }
                 }
-            }
 
-            Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(20.dp))
 
-            // Title & artist metadata
-            Text(
-                text = track.title,
-                color = OpenNowPalette.TextPrimary,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.ExtraBold,
-                maxLines = 1,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .basicMarquee(iterations = Int.MAX_VALUE),
-            )
-            Spacer(Modifier.height(4.dp))
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
+                // Title & artist metadata
                 Text(
-                    text = track.artist?.takeIf { it.isNotBlank() }
-                        ?: stringResource(R.string.music_no_artist),
-                    color = OpenNowPalette.TextMuted,
-                    style = MaterialTheme.typography.bodyMedium,
+                    text = track.title,
+                    color = OpenNowPalette.TextPrimary,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.ExtraBold,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 2.dp)
+                        .basicMarquee(
+                            iterations = Int.MAX_VALUE,
+                            initialDelayMillis = 1200,
+                            spacing = MarqueeSpacing(32.dp),
+                        ),
                 )
-                if (isBuffering) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(14.dp),
-                        strokeWidth = 2.dp,
-                        color = OpenNowPalette.AccentDefault,
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = track.artist?.takeIf { it.isNotBlank() }
+                            ?: stringResource(R.string.music_no_artist),
+                        color = OpenNowPalette.TextMuted,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
+                    if (isBuffering) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp,
+                            color = OpenNowPalette.AccentDefault,
+                        )
+                    }
                 }
             }
-
-            Spacer(Modifier.height(14.dp))
 
             // Isolated seekbar leaf composable collecting 500ms progress StateFlow
             NowPlayingSeekSection(

@@ -403,7 +403,18 @@ object NanaYtMusicProvider {
         return false
     }
 
-    private fun extractYoutubeVideoId(url: String): String? =
+    internal fun canonicalYoutubeVideoId(idOrUrl: String?): String? {
+        val trimmed = idOrUrl?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        if (trimmed.startsWith(YT_MUSIC_ID_PREFIX)) {
+            val bare = trimmed.removePrefix(YT_MUSIC_ID_PREFIX).trim()
+            if (bare.isNotEmpty() && !bare.contains('/') && !bare.contains('?')) {
+                return bare
+            }
+        }
+        return extractYoutubeVideoId(trimmed)
+    }
+
+    internal fun extractYoutubeVideoId(url: String): String? =
         runCatching { YoutubeStreamLinkHandlerFactory.getInstance().getId(url) }
             .getOrNull()
             ?.takeIf { it.isNotBlank() }

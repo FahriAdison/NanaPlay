@@ -816,4 +816,7 @@
     <string name="music_next_label">Berikutnya</string>
     <string name="music_collapse_label">Tutup</string>
     <string name="music_no_artist">Artis tidak diketahui</string>
+    <string name="music_screen_title">Musik</string>
+    <string name="music_subtitle_local">Putar musik dari penyimpanan perangkat</string>
+    <string name="music_subtitle_online">Cari dan putar musik online</string>
 </resources>

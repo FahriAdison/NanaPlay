@@ -16,10 +16,13 @@ import androidx.core.content.ContextCompat
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSourceBitmapLoader
+import androidx.media3.session.CacheBitmapLoader
 import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import androidx.media3.session.MediaStyleNotificationHelper
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.Futures
@@ -43,6 +46,7 @@ class NanaMusicPlaybackService : MediaSessionService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var noisyPlayerListener: Player.Listener? = null
     private var noisyReceiverRegistered = false
+    private var foregroundPromoted = false
     private val noisyReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == android.media.AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
@@ -100,12 +104,23 @@ class NanaMusicPlaybackService : MediaSessionService() {
             shuffleEnabled = NanaMusicPlayer.shuffleEnabled.value,
             repeatMode = NanaMusicPlayer.repeatMode.value,
         )
-        session = MediaSession.Builder(this, forwardingPlayer)
+        val bitmapLoader = CacheBitmapLoader(
+            DataSourceBitmapLoader.Builder(this)
+                .setMaximumOutputDimension(512)
+                .build(),
+        )
+        val createdSession = MediaSession.Builder(this, forwardingPlayer)
             .setId("nana-music")
             .setSessionActivity(buildContentIntent())
             .setCallback(SessionCallback())
+            .setBitmapLoader(bitmapLoader)
             .setMediaButtonPreferences(initialButtons)
             .build()
+        session = createdSession
+        // Register explicitly with MediaSessionService so DefaultMediaNotificationProvider
+        // attaches even when started via ContextCompat.startForegroundService() with no
+        // ACTION_MEDIA_BUTTON action.
+        addSession(createdSession)
         serviceScope.launch {
             combine(
                 NanaMusicPlayer.shuffleEnabled,
@@ -203,16 +218,24 @@ class NanaMusicPlaybackService : MediaSessionService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Promote immediately before super.onStartCommand: Media3's async notification
-        // pipeline (artwork fetch, buffering state) can miss Android 14-16's strict
-        // startForegroundService() deadline and trigger RemoteServiceException.
+        // Promote on initial start before super.onStartCommand so Android 14-16
+        // does not hit RemoteServiceException, then hand notification ownership
+        // over to MediaSessionService + DefaultMediaNotificationProvider.
         createNotificationChannel()
-        val foregroundType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-        } else {
-            0
+        if (!foregroundPromoted) {
+            val foregroundType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+            } else {
+                0
+            }
+            ServiceCompat.startForeground(
+                this,
+                NOTIFICATION_ID,
+                buildInitialNotification(),
+                foregroundType,
+            )
+            foregroundPromoted = true
         }
-        ServiceCompat.startForeground(this, NOTIFICATION_ID, buildInitialNotification(), foregroundType)
         return super.onStartCommand(intent, flags, startId)
     }
 
@@ -227,6 +250,8 @@ class NanaMusicPlaybackService : MediaSessionService() {
         override fun getAvailableCommands(): Player.Commands {
             val base = super.getAvailableCommands()
             return base.buildUpon()
+                .add(Player.COMMAND_PLAY_PAUSE)
+                .add(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
                 .add(Player.COMMAND_SEEK_TO_NEXT)
                 .add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
                 .add(Player.COMMAND_SEEK_TO_PREVIOUS)
@@ -237,7 +262,9 @@ class NanaMusicPlaybackService : MediaSessionService() {
         }
 
         override fun isCommandAvailable(command: Int): Boolean {
-            if (command == Player.COMMAND_SEEK_TO_NEXT ||
+            if (command == Player.COMMAND_PLAY_PAUSE ||
+                command == Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM ||
+                command == Player.COMMAND_SEEK_TO_NEXT ||
                 command == Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM ||
                 command == Player.COMMAND_SEEK_TO_PREVIOUS ||
                 command == Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM ||
@@ -312,6 +339,7 @@ class NanaMusicPlaybackService : MediaSessionService() {
             player != null &&
                 (player.isPlaying || (player.playWhenReady && player.playbackState != Player.STATE_IDLE && player.playbackState != Player.STATE_ENDED))
             )
+        foregroundPromoted = false
         session?.release()
         session = null
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -335,22 +363,25 @@ class NanaMusicPlaybackService : MediaSessionService() {
         )
     }
 
+    @OptIn(UnstableApi::class)
     private fun buildInitialNotification(): Notification {
         val contentIntent = buildContentIntent()
         val track = NanaMusicPlayer.currentTrack
         val title = track?.title?.takeIf { it.isNotBlank() } ?: getString(R.string.app_name)
         val artist = track?.artist?.takeIf { it.isNotBlank() } ?: getString(R.string.music_notif_channel)
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_tab_stream)
             .setContentTitle(title)
             .setContentText(artist)
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOngoing(true)
-            .setSilent(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(contentIntent)
-            .build()
+        session?.let { activeSession ->
+            builder.setStyle(MediaStyleNotificationHelper.MediaStyle(activeSession))
+        }
+        return builder.build()
     }
 
     private fun createNotificationChannel() {

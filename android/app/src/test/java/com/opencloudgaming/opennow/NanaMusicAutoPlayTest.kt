@@ -181,4 +181,69 @@ class NanaMusicAutoPlayTest {
             ),
         )
     }
+
+    @Test
+    fun isOnlineTrackMatch_matchesCanonicalYoutubeIdUrlAndFallbackIdWithoutRawStreamUrl() {
+        val searchTrack = track("ytm:dQw4w9WgXcQ")
+        assertTrue(
+            isOnlineTrackMatch(
+                searchTrack = searchTrack,
+                currentIsOnline = true,
+                currentSource = NanaOnlineMusicSource.YOUTUBE_MUSIC,
+                currentId = "ytm:other",
+                currentOnlineUrl = "https://youtu.be/dQw4w9WgXcQ?si=test",
+                currentUriString = "https://rr1.googlevideo.com/videoplayback?expire=9999999999",
+            ),
+        )
+        assertTrue(
+            isOnlineTrackMatch(
+                searchTrack = searchTrack,
+                currentIsOnline = true,
+                currentSource = NanaOnlineMusicSource.YOUTUBE_MUSIC,
+                currentId = "ytm:dQw4w9WgXcQ",
+                currentOnlineUrl = null,
+                currentUriString = "https://rr2.googlevideo.com/videoplayback?expire=1234",
+            ),
+        )
+        assertFalse(
+            isOnlineTrackMatch(
+                searchTrack = searchTrack,
+                currentIsOnline = false,
+                currentSource = NanaOnlineMusicSource.YOUTUBE_MUSIC,
+                currentId = "ytm:dQw4w9WgXcQ",
+                currentOnlineUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                currentUriString = "content://media/external/audio/1",
+            ),
+        )
+
+        val saavnSearch = NanaOnlineTrack(
+            saavnId = "saavn99",
+            title = "Test",
+            artist = "Artist",
+            durationText = "3:00",
+            thumbnailUrl = null,
+            playCountText = null,
+            source = NanaOnlineMusicSource.JIOSAAVN,
+        )
+        assertTrue(
+            isOnlineTrackMatch(
+                searchTrack = saavnSearch,
+                currentIsOnline = true,
+                currentSource = NanaOnlineMusicSource.JIOSAAVN,
+                currentId = null,
+                currentOnlineUrl = null,
+                currentUriString = "nana-online://track/saavn99",
+            ),
+        )
+        assertFalse(
+            isOnlineTrackMatch(
+                searchTrack = saavnSearch,
+                currentIsOnline = true,
+                currentSource = NanaOnlineMusicSource.JIOSAAVN,
+                currentId = "saavn100",
+                currentOnlineUrl = null,
+                currentUriString = "https://aac.saavncdn.com/song.mp4",
+            ),
+        )
+    }
 }

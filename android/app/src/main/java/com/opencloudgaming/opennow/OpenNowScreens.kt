@@ -8571,6 +8571,9 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                     onToggleBrowser = { browserOpen = !browserOpen },
                 )
             }
+            LaunchedEffect(musicMiniPlayerOpen, browserOpen) {
+                (activity as? MainActivity)?.enforceStreamSystemUiFromInput(bypassDebounce = true)
+            }
             // NanaPlay 1.0.25: in-stream music mini player, bottom-center above the keyboard bar.
             if (musicMiniPlayerOpen) {
                 AnimatedLaunchOverlay(Modifier.align(Alignment.BottomCenter)) {
@@ -8619,6 +8622,7 @@ private fun StreamMusicMiniPlayer(
     val currentIndex by NanaMusicPlayer.currentIndex.collectAsState()
     Box(
         modifier
+            .widthIn(max = 460.dp)
             .fillMaxWidth()
             .padding(horizontal = 12.dp)
             .streamTouchPassthrough(PASSTHROUGH_ID_MUSIC_MINI),
@@ -8637,7 +8641,7 @@ private fun StreamMusicMiniPlayer(
             Surface(
                 onClick = onClose,
                 shape = RoundedCornerShape(999.dp),
-                color = PanelAlt.copy(alpha = 0.95f),
+                color = PanelAlt,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .offset(x = 6.dp, y = (-10).dp)
@@ -8972,6 +8976,8 @@ private fun StreamVideoSurface(
     val configuration = LocalConfiguration.current
     val pointerRootView = externalMouseRoot ?: rootView
     val currentOnMouseCaptureInput by rememberUpdatedState(onMouseCaptureInput)
+    val currentHideExternalMousePointer by rememberUpdatedState(hideExternalMousePointer)
+    val currentPointerRootView by rememberUpdatedState(pointerRootView)
     var zoomScale by remember { mutableFloatStateOf(1f) }
     var zoomOffset by remember { mutableStateOf(Offset.Zero) }
     var viewportSize by remember { mutableStateOf(IntSize.Zero) }
@@ -9093,6 +9099,9 @@ private fun StreamVideoSurface(
             // AndroidView resizes the SurfaceView in place. Re-keying it as the viewport
             // settles creates overlapping renderer surfaces during stream startup.
             key(settings.streamSharpeningEnabled) {
+                var appliedSettings by remember { mutableStateOf<AppSettings?>(null) }
+                var appliedPointerHidden by remember { mutableStateOf<Boolean?>(null) }
+                var appliedPointerRoot by remember { mutableStateOf<android.view.View?>(null) }
                 AndroidView(
                     modifier = rendererModifier,
                     factory = { ctx ->
@@ -9102,31 +9111,42 @@ private fun StreamVideoSurface(
                             hideAndroidPointerTree()
                             scaleX = stretchScale.first
                             scaleY = stretchScale.second
+                            setOnKeyListener(null)
+                            setOnGenericMotionListener { _, event ->
+                                if (currentHideExternalMousePointer && !KeymapMapper.isAltBypassActive()) {
+                                    currentPointerRootView.hideAndroidPointerTree()
+                                }
+                                client.dispatchMotion(event)
+                            }
+                            setOnTouchListener { view, event ->
+                                NativeStreamInputRouter.dispatchTouch(event, view.width, view.height)
+                            }
                         }
                     },
                     update = { renderer ->
-                        client.updateRendererSettings(settings)
-                        renderer.scaleX = stretchScale.first
-                        renderer.scaleY = stretchScale.second
-                        renderer.isFocusable = false
-                        renderer.isFocusableInTouchMode = false
-                        pointerRootView.configureAndroidMousePointerCapture(hideExternalMousePointer, { currentOnMouseCaptureInput() }) { event ->
-                            client.dispatchMotion(event)
+                        if (appliedSettings != settings) {
+                            client.updateRendererSettings(settings)
+                            appliedSettings = settings
                         }
-                        if (hideExternalMousePointer) {
-                            pointerRootView.hideAndroidPointerTree()
-                            renderer.hideAndroidPointerTree()
-                        } else {
-                            pointerRootView.showAndroidPointerTree()
-                            renderer.showAndroidPointerTree()
+                        if (renderer.scaleX != stretchScale.first) {
+                            renderer.scaleX = stretchScale.first
                         }
-                        renderer.setOnKeyListener(null)
-                        renderer.setOnGenericMotionListener { _, event ->
-                            if (hideExternalMousePointer && !KeymapMapper.isAltBypassActive()) pointerRootView.hideAndroidPointerTree()
-                            client.dispatchMotion(event)
+                        if (renderer.scaleY != stretchScale.second) {
+                            renderer.scaleY = stretchScale.second
                         }
-                        renderer.setOnTouchListener { view, event ->
-                            NativeStreamInputRouter.dispatchTouch(event, view.width, view.height)
+                        if (appliedPointerHidden != hideExternalMousePointer || appliedPointerRoot !== pointerRootView) {
+                            pointerRootView.configureAndroidMousePointerCapture(hideExternalMousePointer, { currentOnMouseCaptureInput() }) { event ->
+                                client.dispatchMotion(event)
+                            }
+                            if (hideExternalMousePointer) {
+                                pointerRootView.hideAndroidPointerTree()
+                                renderer.hideAndroidPointerTree()
+                            } else {
+                                pointerRootView.showAndroidPointerTree()
+                                renderer.showAndroidPointerTree()
+                            }
+                            appliedPointerHidden = hideExternalMousePointer
+                            appliedPointerRoot = pointerRootView
                         }
                     },
                     onRelease = client::releaseRenderer,

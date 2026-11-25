@@ -337,10 +337,10 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    fun enforceStreamSystemUiFromInput() {
+    fun enforceStreamSystemUiFromInput(bypassDebounce: Boolean = false) {
         if (!streamSystemUiActive) return
         val now = SystemClock.uptimeMillis()
-        if (now - lastStreamSystemUiInputReapplyMs < STREAM_SYSTEM_UI_INPUT_REAPPLY_MS) return
+        if (!bypassDebounce && now - lastStreamSystemUiInputReapplyMs < STREAM_SYSTEM_UI_INPUT_REAPPLY_MS) return
         lastStreamSystemUiInputReapplyMs = now
         applyStreamSystemUi(true, force = true)
     }
@@ -358,10 +358,24 @@ class MainActivity : ComponentActivity() {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             WindowCompat.setDecorFitsSystemWindows(window, false)
+        }
+        applyStreamSystemBarsVisibility(active = active, hideNavigationBars = true)
+    }
+
+    private fun applyStreamSystemBarsVisibility(
+        active: Boolean,
+        hideNavigationBars: Boolean = true,
+    ) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             window.insetsController?.let { controller ->
                 if (active) {
                     controller.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                    controller.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
+                    val barTypes = if (hideNavigationBars) {
+                        WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars()
+                    } else {
+                        WindowInsets.Type.statusBars()
+                    }
+                    controller.hide(barTypes)
                 } else {
                     controller.show(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
                 }
@@ -369,12 +383,15 @@ class MainActivity : ComponentActivity() {
         } else {
             @Suppress("DEPRECATION")
             window.decorView.systemUiVisibility = if (active) {
-                View.SYSTEM_UI_FLAG_FULLSCREEN or
-                    View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                var flags = View.SYSTEM_UI_FLAG_FULLSCREEN or
                     View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
                     View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
                     View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
                     View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                if (hideNavigationBars) {
+                    flags = flags or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                }
+                flags
             } else {
                 0
             }
@@ -508,13 +525,28 @@ class MainActivity : ComponentActivity() {
         streamSystemUiEnforcerJob = lifecycleScope.launch {
             while (streamSystemUiActive) {
                 delay(STREAM_SYSTEM_UI_ENFORCE_INTERVAL_MS)
+                val insets = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    window.decorView.rootWindowInsets
+                } else {
+                    null
+                }
                 val navigationBarsVisible = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    window.decorView.rootWindowInsets?.isVisible(WindowInsets.Type.navigationBars()) == true
+                    insets?.isVisible(WindowInsets.Type.navigationBars()) == true
                 } else {
                     false
                 }
-                if (shouldPeriodicallyEnforceStreamSystemUi(streamSystemUiActive, navigationBarsVisible)) {
-                    applyStreamSystemUi(true, force = true)
+                val statusBarsVisible = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    insets?.isVisible(WindowInsets.Type.statusBars()) == true
+                } else {
+                    false
+                }
+                if (shouldRehideStreamStatusBars(streamSystemUiActive, statusBarsVisible)) {
+                    applyStreamSystemBarsVisibility(
+                        active = true,
+                        hideNavigationBars = !navigationBarsVisible,
+                    )
+                } else if (shouldPeriodicallyEnforceStreamSystemUi(streamSystemUiActive, navigationBarsVisible)) {
+                    applyStreamSystemBarsVisibility(active = true, hideNavigationBars = true)
                 }
             }
         }
@@ -752,3 +784,8 @@ internal fun shouldPeriodicallyEnforceStreamSystemUi(
     streamActive: Boolean,
     navigationBarsVisible: Boolean,
 ): Boolean = streamActive && !navigationBarsVisible
+
+internal fun shouldRehideStreamStatusBars(
+    streamActive: Boolean,
+    statusBarsVisible: Boolean,
+): Boolean = streamActive && statusBarsVisible

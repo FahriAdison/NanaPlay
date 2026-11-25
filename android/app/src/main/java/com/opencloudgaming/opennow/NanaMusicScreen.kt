@@ -1750,7 +1750,7 @@ fun NanaMusicControlBar(
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
-        color = OpenNowPalette.PanelAlt.copy(alpha = 0.95f),
+        color = OpenNowPalette.PanelAlt,
         tonalElevation = 0.dp,
     ) {
         Row(

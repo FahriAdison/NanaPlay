@@ -441,6 +441,12 @@ object NanaMusicPlayer {
     private const val MAX_CONSECUTIVE_PLAYBACK_ERRORS = 3
     private const val MAX_RELATED_CACHE_ENTRIES = 20
     private const val MAX_RECENT_AUTOPLAY_IDS = 40
+    // Cap streaming HTTP pre-buffering (vs ExoPlayer's 50s default) so online music
+    // doesn't saturate LTE and cause bufferbloat spikes alongside active WebRTC streams.
+    internal const val STREAM_MIN_BUFFER_MS = 12_000
+    internal const val STREAM_MAX_BUFFER_MS = 20_000
+    internal const val STREAM_BUFFER_FOR_PLAYBACK_MS = 1_500
+    internal const val STREAM_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS = 3_000
     private val relatedTracksCache = LinkedHashMap<String, List<NanaOnlineTrack>>()
     private val recentAutoPlayIds = ArrayDeque<String>()
 
@@ -892,7 +898,18 @@ object NanaMusicPlayer {
         // NOT request Android audio focus, so enabling handleAudioFocus=true lets
         // music auto-pause for calls / other media apps while mixing cleanly
         // with active GFN game audio.
+        val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+            .setBufferDurationsMsForStreaming(
+                STREAM_MIN_BUFFER_MS,
+                STREAM_MAX_BUFFER_MS,
+                STREAM_BUFFER_FOR_PLAYBACK_MS,
+                STREAM_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS,
+            )
+            .setPrioritizeTimeOverSizeThresholds(false)
+            .setBackBuffer(0, false)
+            .build()
         val exo = androidx.media3.exoplayer.ExoPlayer.Builder(appContext)
+            .setLoadControl(loadControl)
             .setAudioAttributes(audioAttributes, true)
             .setHandleAudioBecomingNoisy(true)
             .build()
@@ -1389,9 +1406,12 @@ object NanaMusicPlayer {
         when (track.onlineSource) {
             NanaOnlineMusicSource.YOUTUBE_MUSIC -> {
                 val target = track.onlineUrl?.takeIf { it.isNotBlank() } ?: trackId
-                val resolved = NanaYtMusicProvider.resolveAudioStreamWithRelated(target, maxRelated = 5)
+                val maxRelated = if (NativeStreamInputRouter.getClient() != null) 0 else 5
+                val resolved = NanaYtMusicProvider.resolveAudioStreamWithRelated(target, maxRelated = maxRelated)
                     ?: return@withContext null
-                cacheRelatedTracks(trackId, resolved.relatedTracks)
+                if (resolved.relatedTracks.isNotEmpty()) {
+                    cacheRelatedTracks(trackId, resolved.relatedTracks)
+                }
                 resolved.streamUrl
             }
             NanaOnlineMusicSource.JIOSAAVN -> NanaSaavnApi.resolveAudioUrl(trackId)

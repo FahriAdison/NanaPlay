@@ -246,4 +246,13 @@ class NanaMusicAutoPlayTest {
             ),
         )
     }
+
+    @Test
+    fun streamFriendlyBufferConstantsStayWithinExoPlayerInvariants() {
+        assertTrue(NanaMusicPlayer.STREAM_BUFFER_FOR_PLAYBACK_MS >= 0)
+        assertTrue(NanaMusicPlayer.STREAM_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS >= 0)
+        assertTrue(NanaMusicPlayer.STREAM_MIN_BUFFER_MS >= NanaMusicPlayer.STREAM_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS)
+        assertTrue(NanaMusicPlayer.STREAM_MAX_BUFFER_MS >= NanaMusicPlayer.STREAM_MIN_BUFFER_MS)
+        assertTrue(NanaMusicPlayer.STREAM_MAX_BUFFER_MS < 50_000)
+    }
 }

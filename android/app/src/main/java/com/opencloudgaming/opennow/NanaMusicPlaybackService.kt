@@ -8,15 +8,29 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.Bundle
+import androidx.annotation.OptIn
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
 import com.papahchan.nanaplay.R
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.launch
 
 /**
  * NanaPlay 1.0.59 — foreground service hosting the music MediaSession.
@@ -26,6 +40,7 @@ import com.papahchan.nanaplay.R
 class NanaMusicPlaybackService : MediaSessionService() {
 
     private var session: MediaSession? = null
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var noisyPlayerListener: Player.Listener? = null
     private var noisyReceiverRegistered = false
     private val noisyReceiver = object : android.content.BroadcastReceiver() {
@@ -55,6 +70,7 @@ class NanaMusicPlaybackService : MediaSessionService() {
         }
     }
 
+    @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
@@ -80,9 +96,110 @@ class NanaMusicPlaybackService : MediaSessionService() {
         if (forwardingPlayer.isPlaying) {
             registerNoisyReceiver()
         }
+        val initialButtons = buildMediaButtonPreferences(
+            shuffleEnabled = NanaMusicPlayer.shuffleEnabled.value,
+            repeatMode = NanaMusicPlayer.repeatMode.value,
+        )
         session = MediaSession.Builder(this, forwardingPlayer)
             .setId("nana-music")
+            .setSessionActivity(buildContentIntent())
+            .setCallback(SessionCallback())
+            .setMediaButtonPreferences(initialButtons)
             .build()
+        serviceScope.launch {
+            combine(
+                NanaMusicPlayer.shuffleEnabled,
+                NanaMusicPlayer.repeatMode,
+            ) { shuffle, repeat ->
+                shuffle to repeat
+            }.collect { (shuffle, repeat) ->
+                session?.setMediaButtonPreferences(
+                    buildMediaButtonPreferences(shuffle, repeat),
+                )
+            }
+        }
+    }
+
+    @OptIn(UnstableApi::class)
+    private fun buildMediaButtonPreferences(
+        shuffleEnabled: Boolean,
+        repeatMode: NanaRepeatMode,
+    ): List<CommandButton> {
+        val shuffleIcon = if (shuffleEnabled) {
+            CommandButton.ICON_SHUFFLE_ON
+        } else {
+            CommandButton.ICON_SHUFFLE_OFF
+        }
+        val shuffleLabel = getString(
+            if (shuffleEnabled) R.string.music_notif_shuffle_on else R.string.music_notif_shuffle_off,
+        )
+        val shuffleButton = CommandButton.Builder(shuffleIcon)
+            .setDisplayName(shuffleLabel)
+            .setSessionCommand(COMMAND_TOGGLE_SHUFFLE)
+            .setSlots(CommandButton.SLOT_OVERFLOW)
+            .build()
+
+        val (repeatIcon, repeatLabelRes) = when (repeatMode) {
+            NanaRepeatMode.OFF -> CommandButton.ICON_REPEAT_OFF to R.string.music_notif_repeat_off
+            NanaRepeatMode.ALL -> CommandButton.ICON_REPEAT_ALL to R.string.music_notif_repeat_all
+            NanaRepeatMode.ONE -> CommandButton.ICON_REPEAT_ONE to R.string.music_notif_repeat_one
+        }
+        val repeatButton = CommandButton.Builder(repeatIcon)
+            .setDisplayName(getString(repeatLabelRes))
+            .setSessionCommand(COMMAND_CYCLE_REPEAT)
+            .setSlots(CommandButton.SLOT_OVERFLOW)
+            .build()
+
+        return listOf(shuffleButton, repeatButton)
+    }
+
+    @OptIn(UnstableApi::class)
+    private inner class SessionCallback : MediaSession.Callback {
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ): MediaSession.ConnectionResult {
+            val availableCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS
+                .buildUpon()
+                .add(COMMAND_TOGGLE_SHUFFLE)
+                .add(COMMAND_CYCLE_REPEAT)
+                .build()
+            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                .setAvailableSessionCommands(availableCommands)
+                .build()
+        }
+
+        override fun onPostConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ) {
+            session.setMediaButtonPreferences(
+                controller,
+                buildMediaButtonPreferences(
+                    shuffleEnabled = NanaMusicPlayer.shuffleEnabled.value,
+                    repeatMode = NanaMusicPlayer.repeatMode.value,
+                ),
+            )
+        }
+
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            customCommand: SessionCommand,
+            args: Bundle,
+        ): ListenableFuture<SessionResult> {
+            return when (customCommand.customAction) {
+                ACTION_TOGGLE_SHUFFLE -> {
+                    NanaMusicPlayer.toggleShuffle()
+                    Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
+                ACTION_CYCLE_REPEAT -> {
+                    NanaMusicPlayer.toggleRepeatMode()
+                    Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
+                else -> super.onCustomCommand(session, controller, customCommand, args)
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -114,6 +231,8 @@ class NanaMusicPlaybackService : MediaSessionService() {
                 .add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
                 .add(Player.COMMAND_SEEK_TO_PREVIOUS)
                 .add(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+                .add(Player.COMMAND_SET_SHUFFLE_MODE)
+                .add(Player.COMMAND_SET_REPEAT_MODE)
                 .build()
         }
 
@@ -121,11 +240,34 @@ class NanaMusicPlaybackService : MediaSessionService() {
             if (command == Player.COMMAND_SEEK_TO_NEXT ||
                 command == Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM ||
                 command == Player.COMMAND_SEEK_TO_PREVIOUS ||
-                command == Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM
+                command == Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM ||
+                command == Player.COMMAND_SET_SHUFFLE_MODE ||
+                command == Player.COMMAND_SET_REPEAT_MODE
             ) {
                 return true
             }
             return super.isCommandAvailable(command)
+        }
+
+        override fun getShuffleModeEnabled(): Boolean = NanaMusicPlayer.shuffleEnabled.value
+
+        override fun setShuffleModeEnabled(shuffleModeEnabled: Boolean) {
+            NanaMusicPlayer.setShuffleEnabled(shuffleModeEnabled)
+        }
+
+        override fun getRepeatMode(): Int = when (NanaMusicPlayer.repeatMode.value) {
+            NanaRepeatMode.OFF -> Player.REPEAT_MODE_OFF
+            NanaRepeatMode.ALL -> Player.REPEAT_MODE_ALL
+            NanaRepeatMode.ONE -> Player.REPEAT_MODE_ONE
+        }
+
+        override fun setRepeatMode(repeatMode: Int) {
+            val mapped = when (repeatMode) {
+                Player.REPEAT_MODE_ALL -> NanaRepeatMode.ALL
+                Player.REPEAT_MODE_ONE -> NanaRepeatMode.ONE
+                else -> NanaRepeatMode.OFF
+            }
+            NanaMusicPlayer.setRepeatMode(mapped)
         }
 
         override fun seekToNext() {
@@ -159,6 +301,7 @@ class NanaMusicPlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        serviceScope.cancel()
         unregisterNoisyReceiver()
         noisyPlayerListener?.let { session?.player?.removeListener(it) }
         noisyPlayerListener = null
@@ -178,18 +321,22 @@ class NanaMusicPlaybackService : MediaSessionService() {
         super.onDestroy()
     }
 
-    private fun buildInitialNotification(): Notification {
+    private fun buildContentIntent(): PendingIntent {
         val openIntent = Intent(this, MainActivity::class.java).apply {
             action = Intent.ACTION_MAIN
             addCategory(Intent.CATEGORY_LAUNCHER)
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
-        val contentIntent = PendingIntent.getActivity(
+        return PendingIntent.getActivity(
             this,
             NOTIFICATION_ID,
             openIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+    }
+
+    private fun buildInitialNotification(): Notification {
+        val contentIntent = buildContentIntent()
         val track = NanaMusicPlayer.currentTrack
         val title = track?.title?.takeIf { it.isNotBlank() } ?: getString(R.string.app_name)
         val artist = track?.artist?.takeIf { it.isNotBlank() } ?: getString(R.string.music_notif_channel)
@@ -226,6 +373,10 @@ class NanaMusicPlaybackService : MediaSessionService() {
     companion object {
         private const val CHANNEL_ID = "nana_music_playback"
         private const val NOTIFICATION_ID = 1001
+        private const val ACTION_TOGGLE_SHUFFLE = "com.papahchan.nanaplay.music.TOGGLE_SHUFFLE"
+        private const val ACTION_CYCLE_REPEAT = "com.papahchan.nanaplay.music.CYCLE_REPEAT"
+        private val COMMAND_TOGGLE_SHUFFLE = SessionCommand(ACTION_TOGGLE_SHUFFLE, Bundle.EMPTY)
+        private val COMMAND_CYCLE_REPEAT = SessionCommand(ACTION_CYCLE_REPEAT, Bundle.EMPTY)
 
         /** Start the service. Call only when playback is actually active. */
         fun start(context: Context) {

@@ -6,6 +6,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.schabi.newpipe.extractor.Image
+import org.schabi.newpipe.extractor.InfoItem
 import org.schabi.newpipe.extractor.MediaFormat
 import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.ServiceList
@@ -80,6 +81,11 @@ internal class NanaYtMusicDownloader(
     }
 }
 
+data class ResolvedYtAudioStream(
+    val streamUrl: String,
+    val relatedTracks: List<NanaOnlineTrack> = emptyList(),
+)
+
 /**
  * YouTube Music provider powered by NewPipeExtractor.
  * Search stays metadata-only (`music_songs`); stream URLs resolve lazily on play/retry.
@@ -135,12 +141,52 @@ object NanaYtMusicProvider {
         }
 
     suspend fun resolveAudioStreamUrl(urlOrId: String): String? =
+        resolveAudioStreamWithRelated(urlOrId, maxRelated = 0)?.streamUrl
+
+    suspend fun resolveAudioStreamWithRelated(
+        urlOrId: String,
+        maxRelated: Int = 5,
+    ): ResolvedYtAudioStream? =
         withContext(Dispatchers.IO) {
             val pageUrl = resolveYoutubeWatchUrl(urlOrId) ?: return@withContext null
             ensureInitialized()
             val streamInfo = StreamInfo.getInfo(ServiceList.YouTube, pageUrl)
-            selectBestAudioStreamUrl(streamInfo.audioStreams.orEmpty())
+            val streamUrl = selectBestAudioStreamUrl(streamInfo.audioStreams.orEmpty())
+                ?: return@withContext null
+            val selfId = extractYoutubeVideoId(pageUrl)?.let { "$YT_MUSIC_ID_PREFIX$it" }
+            val related = if (maxRelated > 0) {
+                extractRelatedTracks(streamInfo.relatedItems.orEmpty(), selfId, maxRelated)
+            } else {
+                emptyList()
+            }
+            ResolvedYtAudioStream(streamUrl = streamUrl, relatedTracks = related)
         }
+
+    suspend fun fetchRelatedSongs(urlOrId: String, limit: Int = 5): List<NanaOnlineTrack> =
+        withContext(Dispatchers.IO) {
+            if (limit <= 0) return@withContext emptyList()
+            val pageUrl = resolveYoutubeWatchUrl(urlOrId) ?: return@withContext emptyList()
+            ensureInitialized()
+            val streamInfo = StreamInfo.getInfo(ServiceList.YouTube, pageUrl)
+            val selfId = extractYoutubeVideoId(pageUrl)?.let { "$YT_MUSIC_ID_PREFIX$it" }
+            extractRelatedTracks(streamInfo.relatedItems.orEmpty(), selfId, limit)
+        }
+
+    internal fun extractRelatedTracks(
+        items: List<InfoItem>,
+        excludeTrackId: String?,
+        limit: Int,
+    ): List<NanaOnlineTrack> {
+        if (limit <= 0) return emptyList()
+        return items
+            .asSequence()
+            .filterIsInstance<StreamInfoItem>()
+            .mapNotNull(::mapSearchItemToOnlineTrack)
+            .filter { it.saavnId != excludeTrackId }
+            .distinctBy { it.saavnId }
+            .take(limit)
+            .toList()
+    }
 
     internal fun mapSearchItemToOnlineTrack(item: StreamInfoItem): NanaOnlineTrack? {
         val rawUrl = item.url?.trim()?.takeIf { it.isNotBlank() } ?: return null

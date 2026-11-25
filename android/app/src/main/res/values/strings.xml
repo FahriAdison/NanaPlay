@@ -783,4 +783,10 @@
     <string name="settings_slide_direct_click">Slide &amp; Direct Click</string>
     <string name="settings_slide_direct_click_desc">Slide to guide cursor, quick double-tap to click directly at finger position</string>
     <string name="settings_app_updates">App updates</string>
+    <string name="music_notif_shuffle_on">Shuffle on</string>
+    <string name="music_notif_shuffle_off">Shuffle off</string>
+    <string name="music_notif_repeat_off">Repeat off</string>
+    <string name="music_notif_repeat_all">Repeat all</string>
+    <string name="music_notif_repeat_one">Repeat one</string>
+    <string name="music_sleep_timer_ended">Sleep timer ended — music paused</string>
 </resources>

@@ -782,4 +782,10 @@
     <string name="settings_slide_direct_click">Geser &amp; Klik Langsung</string>
     <string name="settings_slide_direct_click_desc">Geser untuk arahkan kursor, ketuk 2x cepat untuk klik langsung di titik jari</string>
     <string name="settings_app_updates">Pembaruan aplikasi</string>
+    <string name="music_notif_shuffle_on">Acak aktif</string>
+    <string name="music_notif_shuffle_off">Acak mati</string>
+    <string name="music_notif_repeat_off">Ulang mati</string>
+    <string name="music_notif_repeat_all">Ulang semua</string>
+    <string name="music_notif_repeat_one">Ulang satu</string>
+    <string name="music_sleep_timer_ended">Timer tidur selesai — musik dijeda</string>
 </resources>

@@ -9099,7 +9099,7 @@ private fun StreamVideoSurface(
             // AndroidView resizes the SurfaceView in place. Re-keying it as the viewport
             // settles creates overlapping renderer surfaces during stream startup.
             key(settings.streamSharpeningEnabled) {
-                var appliedSettings by remember { mutableStateOf<AppSettings?>(null) }
+                var appliedSettings by remember { mutableStateOf<StreamSettings?>(null) }
                 var appliedPointerHidden by remember { mutableStateOf<Boolean?>(null) }
                 var appliedPointerRoot by remember { mutableStateOf<android.view.View?>(null) }
                 AndroidView(

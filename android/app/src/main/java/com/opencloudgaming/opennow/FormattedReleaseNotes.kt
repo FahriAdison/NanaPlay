@@ -1,5 +1,6 @@
 package com.opencloudgaming.opennow
 
+import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -17,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.opencloudgaming.opennow.ui.theme.OpenNowPalette
+import java.util.Locale
 
 /**
  * 1.0.109: Clean Compose renderer for release notes markdown without raw symbols.
@@ -30,8 +33,26 @@ fun FormattedReleaseNotes(
     textColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
     accentColor: Color = OpenNowPalette.AccentDefault,
 ) {
-    val lines = remember(notes) {
-        notes.lines().map { it.trim() }.filter { it.isNotEmpty() }
+    val configuration = LocalConfiguration.current
+    val activeLanguage = remember(configuration) {
+        val locale = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            configuration.locales.takeIf { !it.isEmpty }?.get(0)
+        } else {
+            @Suppress("DEPRECATION")
+            configuration.locale
+        } ?: Locale.getDefault()
+        locale.language.lowercase(Locale.US)
+    }
+    val lines = remember(notes, activeLanguage) {
+        selectLocalizedReleaseNotes(notes, activeLanguage)
+            .lines()
+            .map { it.trim() }
+            .filter { line ->
+                line.isNotEmpty() &&
+                    !(line.startsWith("<!--") && line.endsWith("-->")) &&
+                    line != "---" &&
+                    line != "***"
+            }
     }
 
     Column(
@@ -135,4 +156,39 @@ internal fun parseMarkdownInline(text: String): AnnotatedString {
             i++
         }
     }
+}
+
+/**
+ * Selects a locale-specific section from release notes when bilingual markers
+ * (`<!-- lang:id -->` / `<!-- lang:en -->` or `## Bahasa Indonesia` / `## English`)
+ * are present. Falls back to the full notes when only one language is provided.
+ */
+internal fun selectLocalizedReleaseNotes(notes: String, languageCode: String): String {
+    val wantsIndonesian = languageCode.lowercase(Locale.US) in setOf("id", "in")
+    val targetKey = if (wantsIndonesian) "id" else "en"
+    val sections = linkedMapOf<String, MutableList<String>>()
+    var currentLang: String? = null
+
+    for (rawLine in notes.lines()) {
+        val trimmed = rawLine.trim().lowercase(Locale.US)
+        val detected = when {
+            trimmed == "<!-- lang:id -->" || trimmed == "## bahasa indonesia" || trimmed == "# bahasa indonesia" -> "id"
+            trimmed == "<!-- lang:en -->" || trimmed == "## english" || trimmed == "# english" -> "en"
+            else -> null
+        }
+        if (detected != null) {
+            currentLang = detected
+            sections.getOrPut(detected) { mutableListOf() }
+            continue
+        }
+        currentLang?.let { lang ->
+            sections.getOrPut(lang) { mutableListOf() }.add(rawLine)
+        }
+    }
+
+    if (!sections.containsKey("id") || !sections.containsKey("en")) {
+        return notes
+    }
+    val chosen = sections[targetKey]?.joinToString("\n")?.trim()
+    return if (chosen.isNullOrEmpty()) notes else chosen
 }

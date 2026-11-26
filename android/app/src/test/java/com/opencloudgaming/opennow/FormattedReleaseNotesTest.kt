@@ -25,4 +25,36 @@ class FormattedReleaseNotesTest {
         val result = parseMarkdownInline(input)
         assertEquals("Single * asterisk and single ` backtick.", result.text)
     }
+
+    @Test
+    fun selectLocalizedReleaseNotes_picksIndonesianOrEnglishSection() {
+        val bilingual = """
+            ## Bahasa Indonesia
+            ### Perbaikan Stream
+            - Koneksi lebih stabil.
+
+            ## English
+            ### Stream Fixes
+            - More stable connection.
+        """.trimIndent()
+
+        assertEquals(
+            "### Perbaikan Stream\n- Koneksi lebih stabil.",
+            selectLocalizedReleaseNotes(bilingual, "in"),
+        )
+        assertEquals(
+            "### Perbaikan Stream\n- Koneksi lebih stabil.",
+            selectLocalizedReleaseNotes(bilingual, "id"),
+        )
+        assertEquals(
+            "### Stream Fixes\n- More stable connection.",
+            selectLocalizedReleaseNotes(bilingual, "en"),
+        )
+    }
+
+    @Test
+    fun selectLocalizedReleaseNotes_returnsOriginalWhenSingleLanguage() {
+        val englishOnly = "## What's New\n- Faster startup."
+        assertEquals(englishOnly, selectLocalizedReleaseNotes(englishOnly, "in"))
+    }
 }

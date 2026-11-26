@@ -1,10 +1,12 @@
 package com.opencloudgaming.opennow
 import com.papahchan.nanaplay.BuildConfig
 import com.papahchan.nanaplay.R
+import com.opencloudgaming.opennow.ui.theme.OpenNowPalette
 
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
@@ -161,12 +163,13 @@ internal fun AndroidUpdatePanel(state: OpenNowUiState, viewModel: OpenNowViewMod
     }
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
+        shape = RoundedCornerShape(14.dp),
         color = if (update.status in updateAvailableStatuses) {
-            MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+            OpenNowPalette.PanelAlt
         } else {
-            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f)
+            OpenNowPalette.Panel
         },
+        border = BorderStroke(1.dp, if (update.status in updateAvailableStatuses) OpenNowPalette.AccentDefault.copy(alpha = 0.4f) else OpenNowPalette.PanelHairline),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(
@@ -259,8 +262,9 @@ internal fun AndroidUpdatePanel(state: OpenNowUiState, viewModel: OpenNowViewMod
 private fun AndroidUpdateUnavailablePanel(update: AndroidUpdateState) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
+        shape = RoundedCornerShape(14.dp),
+        color = OpenNowPalette.Panel,
+        border = BorderStroke(1.dp, OpenNowPalette.PanelHairline),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(
@@ -289,7 +293,7 @@ private fun AndroidUpdateUnavailablePanel(update: AndroidUpdateState) {
                     )
                 }
                 Surface(
-                    shape = RoundedCornerShape(999.dp),
+                    shape = RoundedCornerShape(4.dp),
                     color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.16f),
                 ) {
                     Text(
@@ -308,8 +312,8 @@ private fun AndroidUpdateUnavailablePanel(update: AndroidUpdateState) {
             }
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.52f),
+                shape = RoundedCornerShape(8.dp),
+                color = OpenNowPalette.PanelAlt,
             ) {
                 Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     UpdateInfoValue(stringResource(R.string.update_info_current), formatCurrentUpdateVersion(update), Modifier.weight(1f))
@@ -323,7 +327,7 @@ private fun AndroidUpdateUnavailablePanel(update: AndroidUpdateState) {
 @Composable
 private fun UpdateStatusBadge(status: AndroidUpdateStatus) {
     Surface(
-        shape = RoundedCornerShape(999.dp),
+        shape = RoundedCornerShape(4.dp),
         color = updateMessageColor(status).copy(alpha = 0.16f),
     ) {
         Text(
@@ -351,8 +355,8 @@ private fun UpdateVersionSummary(update: AndroidUpdateState) {
     val availableVersion = formatAvailableUpdateVersion(update)
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.52f),
+        shape = RoundedCornerShape(8.dp),
+        color = OpenNowPalette.PanelAlt,
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
@@ -400,8 +404,8 @@ private fun UpdateReleaseNotes(notes: String?) {
     val releaseNotes = notes?.trim()?.takeIf { it.isNotBlank() } ?: return
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.52f),
+        shape = RoundedCornerShape(8.dp),
+        color = OpenNowPalette.PanelAlt,
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
@@ -416,10 +420,10 @@ private fun UpdateReleaseNotes(notes: String?) {
                     .heightIn(max = 220.dp)
                     .verticalScroll(rememberScrollState()),
             ) {
-                Text(
-                    releaseNotes,
-                    color = SettingsTextMuted,
-                    style = MaterialTheme.typography.bodySmall,
+                FormattedReleaseNotes(
+                    notes = releaseNotes,
+                    textColor = SettingsTextMuted,
+                    accentColor = OpenNowPalette.AccentDefault,
                 )
             }
         }

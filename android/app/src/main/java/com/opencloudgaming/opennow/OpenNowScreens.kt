@@ -88,6 +88,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -98,6 +99,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -1083,7 +1085,15 @@ private fun AndroidUpdatePromptDialog(
         ?: stringResource(R.string.dlg_update_new_build)
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (update.status == AndroidUpdateStatus.Downloaded) stringResource(R.string.dlg_update_ready) else stringResource(R.string.dlg_update_available)) },
+        shape = RoundedCornerShape(14.dp),
+        containerColor = OpenNowPalette.Panel,
+        title = {
+            Text(
+                if (update.status == AndroidUpdateStatus.Downloaded) stringResource(R.string.dlg_update_ready)
+                else stringResource(R.string.dlg_update_available),
+                color = OpenNowPalette.TextPrimary,
+            )
+        },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
@@ -1094,6 +1104,7 @@ private fun AndroidUpdatePromptDialog(
                     } else {
                         stringResource(R.string.dlg_update_available_desc, version)
                     },
+                    color = OpenNowPalette.TextMuted,
                 )
                 update.releaseNotes?.trim()?.takeIf { it.isNotBlank() }?.let { notes ->
                     Box(
@@ -1102,10 +1113,10 @@ private fun AndroidUpdatePromptDialog(
                             .heightIn(max = 260.dp)
                             .verticalScroll(rememberScrollState()),
                     ) {
-                        Text(
-                            notes,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall,
+                        FormattedReleaseNotes(
+                            notes = notes,
+                            textColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            accentColor = OpenNowPalette.AccentDefault,
                         )
                     }
                 }
@@ -2795,7 +2806,7 @@ private fun TopStatusDetails(
     val stream = state.activeStreamSettings ?: state.settings.stream
     val summary = streamStatusSummary(stream)
     var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(999.dp)
+    val shape = RoundedCornerShape(8.dp)
     Row(
         horizontalArrangement = Arrangement.spacedBy(5.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -2839,7 +2850,7 @@ private fun TopBarMusicButton(control: TopBarMusicControl) {
             .height(TopBarCompactControlHeight)
             .semantics { contentDescription = description }
             .clickable(onClick = control.onToggle),
-        shape = RoundedCornerShape(999.dp),
+        shape = RoundedCornerShape(8.dp),
         color = if (control.muted) OpenNowPalette.ErrorContainer.copy(alpha = 0.92f) else PanelAlt.copy(alpha = 0.78f),
         tonalElevation = 0.dp,
     ) {
@@ -4427,7 +4438,7 @@ private fun NanaPlayHomeHeader(
 @Composable
 private fun NanaPlayHeaderChip(label: String) {
     Surface(
-        shape = RoundedCornerShape(999.dp),
+        shape = RoundedCornerShape(6.dp),
         color = Color.White.copy(alpha = 0.16f),
         tonalElevation = 0.dp,
     ) {
@@ -6386,7 +6397,7 @@ private fun PerGameSettingsSection(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Surface(
-                    shape = RoundedCornerShape(999.dp),
+                    shape = RoundedCornerShape(6.dp),
                     color = accent.copy(alpha = 0.18f),
                     contentColor = accent,
                 ) {
@@ -6444,7 +6455,7 @@ private fun LongPressPlayButton(
     val controllerFocusEnabled = LocalControllerFocusEnabled.current
     var focused by remember { mutableStateOf(false) }
     val controllerFocused = focused && controllerFocusEnabled
-    val shape = RoundedCornerShape(999.dp)
+    val shape = RoundedCornerShape(10.dp)
     val accent = MaterialTheme.colorScheme.primary
     val focusScale by animateFloatAsState(
         targetValue = gameDetailsPlayFocusScale(controllerFocused),
@@ -8560,6 +8571,9 @@ private fun StreamScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
                     onToggleBrowser = { browserOpen = !browserOpen },
                 )
             }
+            LaunchedEffect(musicMiniPlayerOpen, browserOpen) {
+                (activity as? MainActivity)?.enforceStreamSystemUiFromInput(bypassDebounce = true)
+            }
             // NanaPlay 1.0.25: in-stream music mini player, bottom-center above the keyboard bar.
             if (musicMiniPlayerOpen) {
                 AnimatedLaunchOverlay(Modifier.align(Alignment.BottomCenter)) {
@@ -8608,6 +8622,7 @@ private fun StreamMusicMiniPlayer(
     val currentIndex by NanaMusicPlayer.currentIndex.collectAsState()
     Box(
         modifier
+            .widthIn(max = 460.dp)
             .fillMaxWidth()
             .padding(horizontal = 12.dp)
             .streamTouchPassthrough(PASSTHROUGH_ID_MUSIC_MINI),
@@ -8626,7 +8641,7 @@ private fun StreamMusicMiniPlayer(
             Surface(
                 onClick = onClose,
                 shape = RoundedCornerShape(999.dp),
-                color = PanelAlt.copy(alpha = 0.95f),
+                color = PanelAlt,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .offset(x = 6.dp, y = (-10).dp)
@@ -8961,6 +8976,8 @@ private fun StreamVideoSurface(
     val configuration = LocalConfiguration.current
     val pointerRootView = externalMouseRoot ?: rootView
     val currentOnMouseCaptureInput by rememberUpdatedState(onMouseCaptureInput)
+    val currentHideExternalMousePointer by rememberUpdatedState(hideExternalMousePointer)
+    val currentPointerRootView by rememberUpdatedState(pointerRootView)
     var zoomScale by remember { mutableFloatStateOf(1f) }
     var zoomOffset by remember { mutableStateOf(Offset.Zero) }
     var viewportSize by remember { mutableStateOf(IntSize.Zero) }
@@ -9082,6 +9099,9 @@ private fun StreamVideoSurface(
             // AndroidView resizes the SurfaceView in place. Re-keying it as the viewport
             // settles creates overlapping renderer surfaces during stream startup.
             key(settings.streamSharpeningEnabled) {
+                var appliedSettings by remember { mutableStateOf<StreamSettings?>(null) }
+                var appliedPointerHidden by remember { mutableStateOf<Boolean?>(null) }
+                var appliedPointerRoot by remember { mutableStateOf<android.view.View?>(null) }
                 AndroidView(
                     modifier = rendererModifier,
                     factory = { ctx ->
@@ -9091,31 +9111,42 @@ private fun StreamVideoSurface(
                             hideAndroidPointerTree()
                             scaleX = stretchScale.first
                             scaleY = stretchScale.second
+                            setOnKeyListener(null)
+                            setOnGenericMotionListener { _, event ->
+                                if (currentHideExternalMousePointer && !KeymapMapper.isAltBypassActive()) {
+                                    currentPointerRootView.hideAndroidPointerTree()
+                                }
+                                client.dispatchMotion(event)
+                            }
+                            setOnTouchListener { view, event ->
+                                NativeStreamInputRouter.dispatchTouch(event, view.width, view.height)
+                            }
                         }
                     },
                     update = { renderer ->
-                        client.updateRendererSettings(settings)
-                        renderer.scaleX = stretchScale.first
-                        renderer.scaleY = stretchScale.second
-                        renderer.isFocusable = false
-                        renderer.isFocusableInTouchMode = false
-                        pointerRootView.configureAndroidMousePointerCapture(hideExternalMousePointer, { currentOnMouseCaptureInput() }) { event ->
-                            client.dispatchMotion(event)
+                        if (appliedSettings != settings) {
+                            client.updateRendererSettings(settings)
+                            appliedSettings = settings
                         }
-                        if (hideExternalMousePointer) {
-                            pointerRootView.hideAndroidPointerTree()
-                            renderer.hideAndroidPointerTree()
-                        } else {
-                            pointerRootView.showAndroidPointerTree()
-                            renderer.showAndroidPointerTree()
+                        if (renderer.scaleX != stretchScale.first) {
+                            renderer.scaleX = stretchScale.first
                         }
-                        renderer.setOnKeyListener(null)
-                        renderer.setOnGenericMotionListener { _, event ->
-                            if (hideExternalMousePointer && !KeymapMapper.isAltBypassActive()) pointerRootView.hideAndroidPointerTree()
-                            client.dispatchMotion(event)
+                        if (renderer.scaleY != stretchScale.second) {
+                            renderer.scaleY = stretchScale.second
                         }
-                        renderer.setOnTouchListener { view, event ->
-                            NativeStreamInputRouter.dispatchTouch(event, view.width, view.height)
+                        if (appliedPointerHidden != hideExternalMousePointer || appliedPointerRoot !== pointerRootView) {
+                            pointerRootView.configureAndroidMousePointerCapture(hideExternalMousePointer, { currentOnMouseCaptureInput() }) { event ->
+                                client.dispatchMotion(event)
+                            }
+                            if (hideExternalMousePointer) {
+                                pointerRootView.hideAndroidPointerTree()
+                                renderer.hideAndroidPointerTree()
+                            } else {
+                                pointerRootView.showAndroidPointerTree()
+                                renderer.showAndroidPointerTree()
+                            }
+                            appliedPointerHidden = hideExternalMousePointer
+                            appliedPointerRoot = pointerRootView
                         }
                     },
                     onRelease = client::releaseRenderer,
@@ -12512,6 +12543,7 @@ private fun StreamExitConfirmation(
 
 @Composable
 private fun QueueLoadingScreen(state: OpenNowUiState, viewModel: OpenNowViewModel) {
+    val context = LocalContext.current
     val session = state.streamSession
     val game = state.streamGame
     val ads = sessionAdItems(session?.adState)
@@ -12523,6 +12555,7 @@ private fun QueueLoadingScreen(state: OpenNowUiState, viewModel: OpenNowViewMode
     val visibleQueuePosition = rememberStableQueuePosition(session?.sessionId, queuePosition)
     val queueCopy = queueLaunchStatusText(state, visibleQueuePosition)
     val hasPlayableAd = ad != null && mediaUrl != null
+    val bannerUrl = remember(game) { gameTvBannerImageUrl(context, game) }
 
     BoxWithConstraints(
         Modifier
@@ -12530,15 +12563,41 @@ private fun QueueLoadingScreen(state: OpenNowUiState, viewModel: OpenNowViewMode
             .clipToBounds(),
         contentAlignment = Alignment.Center,
     ) {
-        QueueAmbientBackdrop(
-            accent = state.settings.uiAccent.color,
-            queuePosition = visibleQueuePosition,
-        )
+        if (!bannerUrl.isNullOrBlank()) {
+            UrlImage(
+                bannerUrl,
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { alpha = 0.32f },
+                contentScale = ContentScale.Crop,
+                thumbnailSize = 1080,
+            )
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(
+                                Color.Black.copy(alpha = 0.65f),
+                                Color.Black.copy(alpha = 0.45f),
+                                Color.Black.copy(alpha = 0.88f),
+                            ),
+                        ),
+                    ),
+            )
+        } else {
+            QueueAmbientBackdrop(
+                accent = state.settings.uiAccent.color,
+                queuePosition = visibleQueuePosition,
+            )
+        }
         val useLandscapeAdLayout = hasPlayableAd && maxWidth > maxHeight
 
         Box(
             Modifier
                 .fillMaxSize()
+                .systemBarsPadding()
+                .displayCutoutPadding()
                 .padding(18.dp),
             contentAlignment = Alignment.Center,
         ) {
@@ -13342,14 +13401,32 @@ private fun QueueStatusPanel(
             LinearProgressIndicator(Modifier.fillMaxWidth(0.9f))
             Spacer(Modifier.height(12.dp))
             Row(
-                Modifier.fillMaxWidth(0.92f),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                Modifier
+                    .fillMaxWidth(0.92f)
+                    .widthIn(max = 380.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                OutlinedButton(onClick = onMinimize, modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.osd_minimize), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                OutlinedButton(
+                    onClick = onMinimize,
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.osd_minimize),
+                        maxLines = 1,
+                        softWrap = false,
+                    )
                 }
-                OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.action_cancel), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                OutlinedButton(
+                    onClick = onCancel,
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.action_cancel),
+                        maxLines = 1,
+                        softWrap = false,
+                    )
                 }
             }
             if (queuePosition != null) {
@@ -13363,32 +13440,10 @@ private fun QueueStatusPanel(
         }
         return
     }
-    // PS5-style full-bleed queue screen: dimmed game art backdrop, giant live
-    // queue number, lively progress bar. Cheap: thumbnail decode + static scrim.
-    val bannerUrl = gameTvBannerImageUrl(context, game)
+    // PS5-style full-bleed queue screen: dimmed game art backdrop rendered at root
+    // level, giant live queue number, lively progress bar.
     val urgencyColor = queueUrgencyColor(queuePosition)
-    Box(modifier.fillMaxSize()) {
-        if (!bannerUrl.isNullOrBlank()) {
-            UrlImage(
-                bannerUrl,
-                Modifier
-                    .fillMaxSize()
-                    .graphicsLayer { alpha = 0.32f },
-                contentScale = ContentScale.Crop,
-                thumbnailSize = 720,
-            )
-        }
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        0f to Color.Black.copy(alpha = 0.55f),
-                        0.5f to Color.Transparent,
-                        1f to Color.Black.copy(alpha = 0.92f),
-                    ),
-                ),
-        )
+    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
             Modifier
                 .fillMaxSize()
@@ -13415,21 +13470,40 @@ private fun QueueStatusPanel(
             Spacer(Modifier.height(16.dp))
             LinearProgressIndicator(
                 modifier = Modifier
-                    .fillMaxWidth(0.72f)
+                    .fillMaxWidth(0.88f)
+                    .widthIn(max = 380.dp)
                     .height(6.dp)
                     .clip(RoundedCornerShape(3.dp)),
                 color = urgencyColor,
             )
             Spacer(Modifier.height(22.dp))
             Row(
-                Modifier.fillMaxWidth(0.72f),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                Modifier
+                    .fillMaxWidth(0.88f)
+                    .widthIn(max = 380.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                OutlinedButton(onClick = onMinimize, modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.osd_minimize), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                OutlinedButton(
+                    onClick = onMinimize,
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.osd_minimize),
+                        maxLines = 1,
+                        softWrap = false,
+                    )
                 }
-                OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.action_cancel), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                OutlinedButton(
+                    onClick = onCancel,
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.action_cancel),
+                        maxLines = 1,
+                        softWrap = false,
+                    )
                 }
             }
             error?.let {
@@ -13662,22 +13736,56 @@ private fun QueueStatusAndActions(
         )
         LinearProgressIndicator(Modifier.fillMaxWidth())
         if (stackActions) {
-            OutlinedButton(onClick = onMinimize, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.osd_minimize), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            OutlinedButton(
+                onClick = onMinimize,
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+            ) {
+                Text(
+                    stringResource(R.string.osd_minimize),
+                    maxLines = 1,
+                    softWrap = false,
+                )
             }
-            OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.action_cancel), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            OutlinedButton(
+                onClick = onCancel,
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+            ) {
+                Text(
+                    stringResource(R.string.action_cancel),
+                    maxLines = 1,
+                    softWrap = false,
+                )
             }
         } else {
             Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 380.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                OutlinedButton(onClick = onMinimize, modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.osd_minimize), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                OutlinedButton(
+                    onClick = onMinimize,
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.osd_minimize),
+                        maxLines = 1,
+                        softWrap = false,
+                    )
                 }
-                OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.action_cancel), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                OutlinedButton(
+                    onClick = onCancel,
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.action_cancel),
+                        maxLines = 1,
+                        softWrap = false,
+                    )
                 }
             }
         }
@@ -15448,7 +15556,7 @@ private fun SortPicker(
     val labels = options.ifEmpty { listOf(CatalogSortOption("relevance", "Relevance", "")) }
     val selectedLabel = labels.firstOrNull { it.id == selected }?.label ?: labels.first().label
     var expanded by remember { mutableStateOf(false) }
-    val controlShape = RoundedCornerShape(999.dp)
+    val controlShape = RoundedCornerShape(8.dp)
     val controlColor = Color.White.copy(alpha = 0.1f)
     Box(modifier) {
         OutlinedButton(
@@ -15517,7 +15625,7 @@ private fun FilterMenu(
     compact: Boolean = false,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val filterControlShape = RoundedCornerShape(999.dp)
+    val filterControlShape = RoundedCornerShape(8.dp)
     val filterControlColor = Color.White.copy(alpha = 0.1f)
     Box {
         OutlinedButton(

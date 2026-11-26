@@ -23,6 +23,11 @@ import java.util.concurrent.TimeUnit
  * Unofficial — treat every call as fallible; the UI shows
  * "Online music temporarily unavailable" instead of crashing.
  */
+enum class NanaOnlineMusicSource {
+    YOUTUBE_MUSIC,
+    JIOSAAVN,
+}
+
 data class NanaOnlineTrack(
     val saavnId: String,
     val title: String,
@@ -30,7 +35,34 @@ data class NanaOnlineTrack(
     val durationText: String,
     val thumbnailUrl: String?,
     val playCountText: String?,
+    val source: NanaOnlineMusicSource = NanaOnlineMusicSource.JIOSAAVN,
+    val streamPageUrl: String? = null,
+    val durationSeconds: Long = 0L,
 )
+
+internal fun formatOnlineMusicDuration(totalSeconds: Long): String {
+    if (totalSeconds <= 0L) return ""
+    val hours = totalSeconds / 3600L
+    val minutes = (totalSeconds % 3600L) / 60L
+    val seconds = totalSeconds % 60L
+    return if (hours > 0L) {
+        "%d:%02d:%02d".format(hours, minutes, seconds)
+    } else {
+        "%d:%02d".format(minutes, seconds)
+    }
+}
+
+internal fun formatPlaybackDurationMs(totalMs: Long): String =
+    formatOnlineMusicDuration(totalMs.coerceAtLeast(0L) / 1000L).ifEmpty { "0:00" }
+
+internal fun formatOnlineMusicPlayCount(count: Long): String? {
+    if (count <= 0L) return null
+    return when {
+        count >= 1_000_000L -> "${count / 1_000_000L}M plays"
+        count >= 1_000L -> "${count / 1_000L}K plays"
+        else -> "$count plays"
+    }
+}
 
 class NanaSaavnException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
@@ -141,9 +173,10 @@ object NanaSaavnApi {
             ?.optString("name")
             ?.takeIf { it.isNotBlank() }
             ?: "Unknown artist"
-        val durationText = formatDuration(song.optInt("duration", 0))
+        val durationSec = song.optInt("duration", 0).toLong().coerceAtLeast(0L)
+        val durationText = formatOnlineMusicDuration(durationSec)
         val thumbnailUrl = pickThumbnail(song.optJSONArray("image"))
-        val playCountText = formatPlayCount(song.optLong("playCount", 0))
+        val playCountText = formatOnlineMusicPlayCount(song.optLong("playCount", 0))
         return NanaOnlineTrack(
             saavnId = id,
             title = title,
@@ -151,6 +184,8 @@ object NanaSaavnApi {
             durationText = durationText,
             thumbnailUrl = thumbnailUrl,
             playCountText = playCountText,
+            source = NanaOnlineMusicSource.JIOSAAVN,
+            durationSeconds = durationSec,
         )
     }
 
@@ -165,22 +200,6 @@ object NanaSaavnApi {
         }
         return images.optJSONObject(images.length() - 1)
             ?.optString("url")?.takeIf { it.isNotBlank() }
-    }
-
-    private fun formatDuration(totalSeconds: Int): String {
-        if (totalSeconds <= 0) return ""
-        val m = totalSeconds / 60
-        val s = totalSeconds % 60
-        return "%d:%02d".format(m, s)
-    }
-
-    private fun formatPlayCount(count: Long): String? {
-        if (count <= 0) return null
-        return when {
-            count >= 1_000_000 -> "${count / 1_000_000}M plays"
-            count >= 1_000 -> "${count / 1_000}K plays"
-            else -> "$count plays"
-        }
     }
 
     /**

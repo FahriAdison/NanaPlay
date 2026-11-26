@@ -30,4 +30,26 @@ class StreamSystemUiTest {
             ),
         )
     }
+
+    @Test
+    fun rehidesVisibleStatusBarWhileStreamIsActive() {
+        assertTrue(
+            shouldRehideStreamStatusBars(
+                streamActive = true,
+                statusBarsVisible = true,
+            ),
+        )
+        assertFalse(
+            shouldRehideStreamStatusBars(
+                streamActive = true,
+                statusBarsVisible = false,
+            ),
+        )
+        assertFalse(
+            shouldRehideStreamStatusBars(
+                streamActive = false,
+                statusBarsVisible = true,
+            ),
+        )
+    }
 }

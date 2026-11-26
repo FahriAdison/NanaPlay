@@ -16,6 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -26,6 +27,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * NanaPlay 1.0.25 — local music player ("play your own music from storage").
@@ -79,9 +81,134 @@ data class NanaTrack(
     val artist: String? = null,
     val thumbnailUrl: String? = null,
     val isOnline: Boolean = false,
-    /** 1.0.31: JioSaavn song id for online tracks — used to re-resolve the stream URL on restore. */
+    /** 1.0.31: Online track id (JioSaavn song id or YouTube Music `ytm:<id>`). */
     val saavnId: String? = null,
+    val onlineSource: NanaOnlineMusicSource = NanaOnlineMusicSource.JIOSAAVN,
+    val onlineUrl: String? = null,
 )
+
+data class NanaPlaybackProgress(
+    val positionMs: Long = 0L,
+    val durationMs: Long = 0L,
+)
+
+internal sealed class NanaAutoNextAction {
+    data object LoopCurrent : NanaAutoNextAction()
+    data class PlayQueueIndex(val index: Int) : NanaAutoNextAction()
+    data object FetchRelated : NanaAutoNextAction()
+    data object Stop : NanaAutoNextAction()
+}
+
+internal fun computeNextPlaybackAction(
+    tracksSize: Int,
+    currentIndex: Int,
+    repeatMode: NanaRepeatMode,
+    shuffleEnabled: Boolean,
+    autoPlayEnabled: Boolean,
+    canFetchRelated: Boolean,
+    randomIndexProvider: (Int) -> Int = { bound -> kotlin.random.Random.nextInt(bound) },
+): NanaAutoNextAction {
+    if (tracksSize <= 0) return NanaAutoNextAction.Stop
+    return when (repeatMode) {
+        NanaRepeatMode.ONE -> NanaAutoNextAction.LoopCurrent
+        NanaRepeatMode.ALL -> {
+            val next = if (shuffleEnabled && tracksSize > 1) {
+                val cand = randomIndexProvider(tracksSize).coerceIn(0, tracksSize - 1)
+                if (cand == currentIndex) (currentIndex + 1) % tracksSize else cand
+            } else {
+                (currentIndex + 1) % tracksSize
+            }
+            NanaAutoNextAction.PlayQueueIndex(next)
+        }
+        NanaRepeatMode.OFF -> {
+            if (shuffleEnabled && tracksSize > 1) {
+                val cand = randomIndexProvider(tracksSize).coerceIn(0, tracksSize - 1)
+                val next = if (cand == currentIndex) (currentIndex + 1) % tracksSize else cand
+                NanaAutoNextAction.PlayQueueIndex(next)
+            } else {
+                val next = currentIndex + 1
+                when {
+                    next in 0 until tracksSize -> NanaAutoNextAction.PlayQueueIndex(next)
+                    autoPlayEnabled && canFetchRelated -> NanaAutoNextAction.FetchRelated
+                    else -> NanaAutoNextAction.Stop
+                }
+            }
+        }
+    }
+}
+
+internal fun selectOnlineQueueOrder(
+    selected: NanaOnlineTrack,
+    searchResults: List<NanaOnlineTrack>,
+    maxTransientOnline: Int = 25,
+): List<NanaOnlineTrack> {
+    val selectedPos = searchResults.indexOfFirst {
+        it.saavnId == selected.saavnId && it.source == selected.source
+    }
+    val trailing = if (selectedPos >= 0) {
+        searchResults.drop(selectedPos + 1)
+    } else {
+        searchResults
+    }
+    val ordered = ArrayList<NanaOnlineTrack>(maxTransientOnline)
+    val seenKeys = HashSet<Pair<NanaOnlineMusicSource, String>>()
+    seenKeys.add(selected.source to selected.saavnId)
+    ordered.add(selected)
+    for (item in trailing) {
+        if (ordered.size >= maxTransientOnline) break
+        if (seenKeys.add(item.source to item.saavnId)) {
+            ordered.add(item)
+        }
+    }
+    return ordered
+}
+
+internal fun <T> mergePreservingLocalTracks(
+    currentQueue: List<T>,
+    isOnline: (T) -> Boolean,
+    newOnlineTracks: List<T>,
+): Pair<List<T>, Int> {
+    val localTracks = currentQueue.filterNot(isOnline)
+    return (localTracks + newOnlineTracks) to localTracks.size
+}
+
+internal fun pickNextRelatedTrack(
+    candidates: List<NanaOnlineTrack>,
+    existingOnlineIds: Set<String>,
+    recentAutoPlayIds: Collection<String>,
+    currentTrackId: String?,
+): NanaOnlineTrack? {
+    return candidates.firstOrNull { cand ->
+        cand.saavnId != currentTrackId &&
+            cand.saavnId !in existingOnlineIds &&
+            cand.saavnId !in recentAutoPlayIds
+    } ?: candidates.firstOrNull { cand ->
+        cand.saavnId != currentTrackId && cand.saavnId !in existingOnlineIds
+    } ?: candidates.firstOrNull { cand ->
+        cand.saavnId != currentTrackId
+    }
+}
+
+internal fun pickNextRelatedTrack(
+    candidates: List<NanaOnlineTrack>,
+    currentQueue: List<NanaTrack>,
+    recentAutoPlayIds: Collection<String>,
+    currentTrackId: String?,
+): NanaOnlineTrack? {
+    val queueIds = currentQueue
+        .asSequence()
+        .filter { it.isOnline }
+        .mapNotNull { it.saavnId }
+        .toHashSet()
+    return pickNextRelatedTrack(candidates, queueIds, recentAutoPlayIds, currentTrackId)
+}
+
+internal fun shouldClearPlayRequestedOnPause(
+    pausedForCall: Boolean,
+    playbackSuppressionReason: Int,
+): Boolean =
+    !pausedForCall &&
+        playbackSuppressionReason != Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS
 
 object NanaMusicPlayer {
 
@@ -103,19 +230,117 @@ object NanaMusicPlayer {
     private val _shuffleEnabled = MutableStateFlow(false)
     val shuffleEnabled: StateFlow<Boolean> = _shuffleEnabled.asStateFlow()
 
+    private val _autoPlayEnabled = MutableStateFlow(true)
+    val autoPlayEnabled: StateFlow<Boolean> = _autoPlayEnabled.asStateFlow()
+
+    private val _playerVolume = MutableStateFlow(1.0f)
+    val playerVolume: StateFlow<Float> = _playerVolume.asStateFlow()
+
+    private val _progress = MutableStateFlow(NanaPlaybackProgress())
+    val progress: StateFlow<NanaPlaybackProgress> = _progress.asStateFlow()
+
+    private val _sleepTimerRemainingMs = MutableStateFlow<Long?>(null)
+    val sleepTimerRemainingMs: StateFlow<Long?> = _sleepTimerRemainingMs.asStateFlow()
+
     fun toggleRepeatMode() {
         val next = when (_repeatMode.value) {
             NanaRepeatMode.OFF -> NanaRepeatMode.ALL
             NanaRepeatMode.ALL -> NanaRepeatMode.ONE
             NanaRepeatMode.ONE -> NanaRepeatMode.OFF
         }
-        _repeatMode.value = next
+        setRepeatMode(next)
+    }
+
+    fun setRepeatMode(mode: NanaRepeatMode) {
+        _repeatMode.value = mode
         persistScope.launch { appContextRef?.let { saveState(it) } }
     }
 
     fun toggleShuffle() {
-        _shuffleEnabled.value = !_shuffleEnabled.value
+        setShuffleEnabled(!_shuffleEnabled.value)
+    }
+
+    fun setShuffleEnabled(enabled: Boolean) {
+        _shuffleEnabled.value = enabled
         persistScope.launch { appContextRef?.let { saveState(it) } }
+    }
+
+    fun toggleAutoPlay() {
+        setAutoPlayEnabled(!_autoPlayEnabled.value)
+    }
+
+    fun setAutoPlayEnabled(enabled: Boolean) {
+        _autoPlayEnabled.value = enabled
+        persistScope.launch { appContextRef?.let { saveState(it) } }
+    }
+
+    fun setPlayerVolume(volume: Float) {
+        val clamped = volume.coerceIn(0f, 1f)
+        _playerVolume.value = clamped
+        val exo = synchronized(this) { player }
+        if (exo != null) {
+            mainScope.launch {
+                runCatching { exo.volume = clamped }
+            }
+        }
+        volumeSaveJob?.cancel()
+        volumeSaveJob = persistScope.launch {
+            delay(400L)
+            appContextRef?.let { saveState(it) }
+        }
+    }
+
+    fun seekTo(positionMs: Long) {
+        val clamped = positionMs.coerceAtLeast(0L)
+        synchronized(this) {
+            pendingSeekMs = clamped
+            pendingSeekIndex = _currentIndex.value
+        }
+        val curDur = _progress.value.durationMs
+        _progress.value = NanaPlaybackProgress(
+            positionMs = if (curDur > 0L) clamped.coerceAtMost(curDur) else clamped,
+            durationMs = curDur,
+        )
+        val exo = synchronized(this) { player } ?: return
+        mainScope.launch {
+            runCatching {
+                if (exo.currentMediaItem != null) {
+                    exo.seekTo(clamped)
+                    captureProgress(exo)
+                }
+            }
+        }
+    }
+
+    fun setSleepTimer(minutes: Int) {
+        sleepTimerJob?.cancel()
+        if (minutes <= 0) {
+            sleepTimerJob = null
+            _sleepTimerRemainingMs.value = null
+            return
+        }
+        var remaining = minutes * 60_000L
+        _sleepTimerRemainingMs.value = remaining
+        sleepTimerJob = persistScope.launch {
+            while (remaining > 0L) {
+                delay(1_000L)
+                remaining -= 1_000L
+                _sleepTimerRemainingMs.value = remaining.coerceAtLeast(0L)
+            }
+            _sleepTimerRemainingMs.value = null
+            sleepTimerJob = null
+            playbackGeneration.incrementAndGet()
+            playRequested = false
+            pausedForCall = false
+            wasPlayingBeforeCall = false
+            val exo = synchronized(this@NanaMusicPlayer) { player }
+            withContext(Dispatchers.Main) {
+                runCatching { exo?.pause() }
+            }
+            appContextRef?.let { ctx ->
+                _lastError.value = ctx.getString(R.string.music_sleep_timer_ended)
+            }
+        }
     }
 
     /** 1.0.28: last ExoPlayer error message, if any — surfaced so playback failures are visible instead of silent. */
@@ -201,12 +426,29 @@ object NanaMusicPlayer {
     )
 
     /** 1.0.36: scheme marking online tracks whose stream URL isn't resolved yet. Never handed to ExoPlayer. */
-    private const val PLACEHOLDER_SCHEME = "saavn"
+    private const val PLACEHOLDER_SCHEME = "nana-online"
 
     private val persistScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val mainScope by lazy { CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate) }
     private var appContextRef: Context? = null
     private var restored = false
     private var restoreJob: Job? = null
+    private var progressTickerJob: Job? = null
+    private var sleepTimerJob: Job? = null
+    private var volumeSaveJob: Job? = null
+    private val playbackGeneration = AtomicInteger(0)
+
+    private const val MAX_CONSECUTIVE_PLAYBACK_ERRORS = 3
+    private const val MAX_RELATED_CACHE_ENTRIES = 20
+    private const val MAX_RECENT_AUTOPLAY_IDS = 40
+    // Cap streaming HTTP pre-buffering (vs ExoPlayer's 50s default) so online music
+    // doesn't saturate LTE and cause bufferbloat spikes alongside active WebRTC streams.
+    internal const val STREAM_MIN_BUFFER_MS = 12_000
+    internal const val STREAM_MAX_BUFFER_MS = 20_000
+    internal const val STREAM_BUFFER_FOR_PLAYBACK_MS = 1_500
+    internal const val STREAM_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS = 3_000
+    private val relatedTracksCache = LinkedHashMap<String, List<NanaOnlineTrack>>()
+    private val recentAutoPlayIds = ArrayDeque<String>()
 
     /**
      * 1.0.59 — true while the user wants playback. togglePlayPause/next/play
@@ -238,6 +480,10 @@ object NanaMusicPlayer {
 
     /** 1.0.36: saavnId we already auto-retried after an error (prevents retry loops). */
     private var lastRetrySaavnId: String? = null
+
+    /** 1.0.109: consecutive playback error counter to cap skip-loops and prevent disk log flooding. */
+    @Volatile
+    private var consecutiveErrorCount = 0
 
     /** 1.0.36: serializes every "start playing" request so rapid taps can't interleave. */
     private val playMutex = Mutex()
@@ -313,7 +559,14 @@ object NanaMusicPlayer {
     }
 
     private fun isPlaceholderUri(track: NanaTrack): Boolean =
-        track.isOnline && track.uri.scheme == PLACEHOLDER_SCHEME
+        track.isOnline && (track.uri.scheme == PLACEHOLDER_SCHEME || track.uri.scheme == "saavn")
+
+    private fun needsStreamResolve(track: NanaTrack): Boolean {
+        if (!track.isOnline) return false
+        if (isPlaceholderUri(track)) return true
+        return track.onlineSource == NanaOnlineMusicSource.YOUTUBE_MUSIC &&
+            NanaYtMusicProvider.isStreamUrlNearExpiry(track.uri.toString())
+    }
 
     /** Launch a one-time async restore on first player access per process. */
     private fun ensureRestored(context: Context) {
@@ -330,14 +583,18 @@ object NanaMusicPlayer {
     private fun buildMediaItem(playable: NanaTrack): MediaItem {
         val metadata = MediaMetadata.Builder()
             .setTitle(playable.title)
-            .setArtist(playable.artist)
+            .setDisplayTitle(playable.title)
+            .setArtist(playable.artist?.takeIf { it.isNotBlank() } ?: "NanaPlay")
+            .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
             .apply {
                 playable.thumbnailUrl?.takeIf { it.isNotBlank() }?.let { thumb ->
                     runCatching { setArtworkUri(Uri.parse(thumb)) }
                 }
             }
             .build()
+        val mediaId = playable.saavnId ?: playable.uri.toString()
         return MediaItem.Builder()
+            .setMediaId(mediaId)
             .setUri(playable.uri)
             .setMediaMetadata(metadata)
             .build()
@@ -356,6 +613,8 @@ object NanaMusicPlayer {
                 if (t.thumbnailUrl != null) o.put("thumbnailUrl", t.thumbnailUrl)
                 if (t.isOnline) {
                     o.put("saavnId", t.saavnId)
+                    o.put("onlineSource", t.onlineSource.name)
+                    if (!t.onlineUrl.isNullOrBlank()) o.put("onlineUrl", t.onlineUrl)
                 } else {
                     o.put("uri", t.uri.toString())
                 }
@@ -369,6 +628,8 @@ object NanaMusicPlayer {
                 .put("currentSaavnId", if (current?.isOnline == true) current.saavnId else null)
                 .put("repeatMode", _repeatMode.value.name)
                 .put("shuffleEnabled", _shuffleEnabled.value)
+                .put("autoPlayEnabled", _autoPlayEnabled.value)
+                .put("playerVolume", _playerVolume.value.toDouble())
             context.getSharedPreferences(MUSIC_PREFS, Context.MODE_PRIVATE)
                 .edit()
                 .putString(KEY_STATE_JSON, state.toString())
@@ -403,6 +664,22 @@ object NanaMusicPlayer {
             return
         }
         try {
+            val repeatStr = state.optString("repeatMode", "OFF")
+            val restoredRepeat = runCatching { NanaRepeatMode.valueOf(repeatStr) }.getOrDefault(NanaRepeatMode.OFF)
+            val restoredShuffle = state.optBoolean("shuffleEnabled", false)
+            val restoredAutoPlay = state.optBoolean("autoPlayEnabled", true)
+            val restoredVolume = state.optDouble("playerVolume", 1.0).toFloat().coerceIn(0f, 1f)
+            synchronized(this) {
+                _repeatMode.value = restoredRepeat
+                _shuffleEnabled.value = restoredShuffle
+                _autoPlayEnabled.value = restoredAutoPlay
+                _playerVolume.value = restoredVolume
+            }
+            val liveExo = synchronized(this) { player }
+            if (liveExo != null) {
+                mainScope.launch { runCatching { liveExo.volume = restoredVolume } }
+            }
+
             val arr = state.optJSONArray("tracks")
             if (arr == null || arr.length() == 0) return
 
@@ -416,14 +693,30 @@ object NanaMusicPlayer {
                     val saavnId = o.optString("saavnId").takeIf { it.isNotBlank() }
                         ?: o.optString("videoId").takeIf { it.isNotBlank() }
                         ?: continue
+                    val sourceStr = o.optString("onlineSource").takeIf { it.isNotBlank() }
+                    val onlineSource = sourceStr?.let {
+                        runCatching { NanaOnlineMusicSource.valueOf(it) }.getOrNull()
+                    } ?: if (NanaYtMusicProvider.isYoutubeMusicTrackId(saavnId)) {
+                        NanaOnlineMusicSource.YOUTUBE_MUSIC
+                    } else {
+                        NanaOnlineMusicSource.JIOSAAVN
+                    }
+                    val onlineUrl = o.optString("onlineUrl").takeIf { it.isNotBlank() }
+                        ?: if (onlineSource == NanaOnlineMusicSource.YOUTUBE_MUSIC) {
+                            NanaYtMusicProvider.resolveYoutubeWatchUrl(saavnId)
+                        } else {
+                            null
+                        }
                     rebuilt.add(
                         NanaTrack(
-                            uri = Uri.parse("$PLACEHOLDER_SCHEME://track/$saavnId"),
+                            uri = Uri.parse("$PLACEHOLDER_SCHEME://track/${Uri.encode(saavnId)}"),
                             title = o.optString("title").takeIf { it.isNotBlank() } ?: "Unknown",
                             artist = o.optString("artist").takeIf { it.isNotBlank() },
                             thumbnailUrl = o.optString("thumbnailUrl").takeIf { it.isNotBlank() },
                             isOnline = true,
                             saavnId = saavnId,
+                            onlineSource = onlineSource,
+                            onlineUrl = onlineUrl,
                         ),
                     )
                 } else {
@@ -446,12 +739,7 @@ object NanaMusicPlayer {
             val currentUri = state.optString("currentUri").takeIf { it.isNotBlank() }
             val currentSaavnId = state.optString("currentSaavnId").takeIf { it.isNotBlank() }
                 ?: state.optString("currentVideoId").takeIf { it.isNotBlank() }
-            val repeatStr = state.optString("repeatMode", "OFF")
-            val restoredRepeat = runCatching { NanaRepeatMode.valueOf(repeatStr) }.getOrDefault(NanaRepeatMode.OFF)
-            val restoredShuffle = state.optBoolean("shuffleEnabled", false)
             synchronized(this) {
-                _repeatMode.value = restoredRepeat
-                _shuffleEnabled.value = restoredShuffle
                 // Don't clobber a playlist the user already built this session
                 // (e.g. they added tracks while restore was in flight).
                 if (_tracks.value.isNotEmpty()) return
@@ -469,6 +757,7 @@ object NanaMusicPlayer {
                 _currentIndex.value = idx
                 pendingSeekMs = positionMs
                 pendingSeekIndex = idx
+                _progress.value = NanaPlaybackProgress(positionMs = positionMs, durationMs = 0L)
             }
         } catch (t: Throwable) {
             logCrashToFile(context, "restoreState", t)
@@ -534,10 +823,67 @@ object NanaMusicPlayer {
                 latch.countDown()
             }
         }
-        latch.await(10, java.util.concurrent.TimeUnit.SECONDS)
+        latch.await(3, java.util.concurrent.TimeUnit.SECONDS)
         error[0]?.let { throw it }
         return holder[0] ?: throw IllegalStateException("Music player failed to start")
     }
+
+    private fun captureProgress(exo: androidx.media3.exoplayer.ExoPlayer) {
+        val pos = runCatching { exo.currentPosition }.getOrDefault(0L).coerceAtLeast(0L)
+        val rawDur = runCatching { exo.duration }.getOrDefault(C.TIME_UNSET)
+        val dur = if (rawDur != C.TIME_UNSET && rawDur > 0L) rawDur else 0L
+        _progress.value = NanaPlaybackProgress(positionMs = pos, durationMs = dur)
+    }
+
+    private fun startProgressTicker() {
+        progressTickerJob?.cancel()
+        progressTickerJob = mainScope.launch {
+            while (true) {
+                val exo = synchronized(this@NanaMusicPlayer) { player }
+                if (exo == null || !_isPlaying.value) break
+                captureProgress(exo)
+                delay(500L)
+            }
+        }
+    }
+
+    private fun stopProgressTicker() {
+        progressTickerJob?.cancel()
+        progressTickerJob = null
+    }
+
+    private fun cacheRelatedTracks(trackId: String, related: List<NanaOnlineTrack>) {
+        if (trackId.isBlank() || related.isEmpty()) return
+        synchronized(this) {
+            relatedTracksCache.remove(trackId)
+            relatedTracksCache[trackId] = related
+            while (relatedTracksCache.size > MAX_RELATED_CACHE_ENTRIES) {
+                val oldestKey = relatedTracksCache.keys.firstOrNull() ?: break
+                relatedTracksCache.remove(oldestKey)
+            }
+        }
+    }
+
+    private fun recordRecentAutoPlayId(trackId: String?) {
+        val id = trackId?.takeIf { it.isNotBlank() } ?: return
+        synchronized(this) {
+            recentAutoPlayIds.addLast(id)
+            while (recentAutoPlayIds.size > MAX_RECENT_AUTOPLAY_IDS) {
+                recentAutoPlayIds.removeFirst()
+            }
+        }
+    }
+
+    private fun onlineToNanaTrack(online: NanaOnlineTrack): NanaTrack = NanaTrack(
+        uri = Uri.parse("$PLACEHOLDER_SCHEME://track/${Uri.encode(online.saavnId)}"),
+        title = online.title,
+        artist = online.artist,
+        thumbnailUrl = online.thumbnailUrl,
+        isOnline = true,
+        saavnId = online.saavnId,
+        onlineSource = online.source,
+        onlineUrl = online.streamPageUrl,
+    )
 
     @Synchronized
     private fun buildPlayer(context: Context): androidx.media3.exoplayer.ExoPlayer {
@@ -548,16 +894,26 @@ object NanaMusicPlayer {
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
             .build()
-        // 1.0.31: plain default media source factory. The YouTube-specific
-        // Range-forcing DataSource and UA spoofing (1.0.28/1.0.29) are gone —
-        // JioSaavn serves direct CDN URLs that stream fine with a normal
-        // request (no throttling, no IP binding).
+        // GFN's WebRTC audio module (Streaming.kt / JavaAudioDeviceModule) does
+        // NOT request Android audio focus, so enabling handleAudioFocus=true lets
+        // music auto-pause for calls / other media apps while mixing cleanly
+        // with active GFN game audio.
+        val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+            .setBufferDurationsMsForStreaming(
+                STREAM_MIN_BUFFER_MS,
+                STREAM_MAX_BUFFER_MS,
+                STREAM_BUFFER_FOR_PLAYBACK_MS,
+                STREAM_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS,
+            )
+            .setPrioritizeTimeOverSizeThresholds(false)
+            .setBackBuffer(0, false)
+            .build()
         val exo = androidx.media3.exoplayer.ExoPlayer.Builder(appContext)
-            // Do NOT request audio focus: music must mix with the stream's game
-            // audio, not pause/duck it (or be paused by it).
-            .setAudioAttributes(audioAttributes, false)
+            .setLoadControl(loadControl)
+            .setAudioAttributes(audioAttributes, true)
             .setHandleAudioBecomingNoisy(true)
             .build()
+        exo.volume = _playerVolume.value
         exo.addListener(
             object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -569,8 +925,12 @@ object NanaMusicPlayer {
                         _lastError.value = null
                         lastRetrySaavnId = null
                         playRequested = true
+                        consecutiveErrorCount = 0
+                        captureProgress(exo)
+                        startProgressTicker()
                     } else {
-                        if (!pausedForCall) {
+                        stopProgressTicker()
+                        if (shouldClearPlayRequestedOnPause(pausedForCall, exo.playbackSuppressionReason)) {
                             playRequested = false
                         }
                         // Persist position on every pause — cheap and exact.
@@ -580,8 +940,17 @@ object NanaMusicPlayer {
                         // the position is only restored for the same track.
                         pendingSeekMs = runCatching { exo.currentPosition }.getOrDefault(0L).coerceAtLeast(0L)
                         pendingSeekIndex = _currentIndex.value
+                        captureProgress(exo)
                         persistScope.launch { saveState(appContext) }
                     }
+                }
+
+                override fun onPositionDiscontinuity(
+                    oldPosition: Player.PositionInfo,
+                    newPosition: Player.PositionInfo,
+                    reason: Int,
+                ) {
+                    captureProgress(exo)
                 }
 
                 override fun onPlayerError(error: PlaybackException) {
@@ -608,54 +977,58 @@ object NanaMusicPlayer {
                     val posMs = runCatching { exo.currentPosition }.getOrDefault(-1L)
                     logMusicEvent("onPlaybackStateChanged state=$stateName posMs=$posMs")
                     _isBuffering.value = playbackState == Player.STATE_BUFFERING
+                    if (playbackState == Player.STATE_READY) {
+                        consecutiveErrorCount = 0
+                        captureProgress(exo)
+                    }
                     if (playbackState == Player.STATE_ENDED) {
+                        stopProgressTicker()
                         val appCtx = appContextRef ?: return
+                        val endedGen = playbackGeneration.get()
                         persistScope.launch {
                             playMutex.withLock {
                                 currentCoroutineContext().ensureActive()
-                                val (nextIdx, shouldLoopCurrent) = synchronized(this@NanaMusicPlayer) {
-                                    val size = _tracks.value.size
-                                    if (size == 0) {
-                                        -1 to false
-                                    } else when (_repeatMode.value) {
-                                        NanaRepeatMode.ONE -> _currentIndex.value to true
-                                        NanaRepeatMode.ALL -> {
-                                            if (_shuffleEnabled.value && size > 1) {
-                                                val cur = _currentIndex.value
-                                                var rand = kotlin.random.Random.nextInt(size)
-                                                if (rand == cur) rand = (cur + 1) % size
-                                                rand to false
-                                            } else {
-                                                ((_currentIndex.value + 1) % size) to false
-                                            }
-                                        }
-                                        NanaRepeatMode.OFF -> {
-                                            if (_shuffleEnabled.value && size > 1) {
-                                                val cur = _currentIndex.value
-                                                var rand = kotlin.random.Random.nextInt(size)
-                                                if (rand == cur) rand = (cur + 1) % size
-                                                rand to false
-                                            } else {
-                                                val cand = _currentIndex.value + 1
-                                                (if (cand < size) cand else -1) to false
-                                            }
-                                        }
-                                    }
+                                if (playbackGeneration.get() != endedGen) return@withLock
+                                val (action, curTrack) = synchronized(this@NanaMusicPlayer) {
+                                    val tracks = _tracks.value
+                                    val curIdx = _currentIndex.value
+                                    val cur = tracks.getOrNull(curIdx)
+                                    val act = computeNextPlaybackAction(
+                                        tracksSize = tracks.size,
+                                        currentIndex = curIdx,
+                                        repeatMode = _repeatMode.value,
+                                        shuffleEnabled = _shuffleEnabled.value,
+                                        autoPlayEnabled = _autoPlayEnabled.value,
+                                        canFetchRelated = cur?.isOnline == true &&
+                                            cur.onlineSource == NanaOnlineMusicSource.YOUTUBE_MUSIC,
+                                    )
+                                    act to cur
                                 }
-                                if (shouldLoopCurrent) {
-                                    playRequested = true
-                                    withContext(Dispatchers.Main) {
-                                        val curExo = player
-                                        curExo?.seekTo(0)
-                                        curExo?.play()
+                                when (action) {
+                                    NanaAutoNextAction.LoopCurrent -> {
+                                        playRequested = true
+                                        withContext(Dispatchers.Main) {
+                                            val curExo = player
+                                            curExo?.seekTo(0)
+                                            curExo?.play()
+                                        }
                                     }
-                                } else if (nextIdx >= 0) {
-                                    playRequested = true
-                                    playInternal(appCtx, nextIdx)
-                                } else {
-                                    playRequested = false
-                                    _isPlaying.value = false
-                                    runCatching { NanaMusicPlaybackService.stop(appCtx) }
+                                    is NanaAutoNextAction.PlayQueueIndex -> {
+                                        playRequested = true
+                                        playInternal(appCtx, action.index)
+                                    }
+                                    NanaAutoNextAction.FetchRelated -> {
+                                        val nextIndex = resolveAndAppendRelatedTrack(curTrack, endedGen)
+                                        if (nextIndex >= 0 && playbackGeneration.get() == endedGen) {
+                                            playRequested = true
+                                            playInternal(appCtx, nextIndex)
+                                        } else {
+                                            stopAfterPlaybackEnded(appCtx)
+                                        }
+                                    }
+                                    NanaAutoNextAction.Stop -> {
+                                        stopAfterPlaybackEnded(appCtx)
+                                    }
                                 }
                             }
                         }
@@ -672,6 +1045,49 @@ object NanaMusicPlayer {
         return exo
     }
 
+    private suspend fun stopAfterPlaybackEnded(appCtx: Context) {
+        playRequested = false
+        _isPlaying.value = false
+        withContext(Dispatchers.Main) {
+            runCatching { player?.playWhenReady = false }
+        }
+        runCatching { NanaMusicPlaybackService.stop(appCtx) }
+    }
+
+    private suspend fun resolveAndAppendRelatedTrack(
+        curTrack: NanaTrack?,
+        endedGen: Int,
+    ): Int {
+        val currentId = curTrack?.saavnId?.takeIf { it.isNotBlank() } ?: return -1
+        val target = curTrack.onlineUrl?.takeIf { it.isNotBlank() } ?: currentId
+        val cached = synchronized(this) { relatedTracksCache[currentId] }
+        val candidates = if (!cached.isNullOrEmpty()) {
+            cached
+        } else {
+            try {
+                NanaYtMusicProvider.fetchRelatedSongs(target, limit = 5).also {
+                    cacheRelatedTracks(currentId, it)
+                }
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                emptyList()
+            }
+        }
+        if (candidates.isEmpty() || playbackGeneration.get() != endedGen) return -1
+        return synchronized(this) {
+            val next = pickNextRelatedTrack(
+                candidates = candidates,
+                currentQueue = _tracks.value,
+                recentAutoPlayIds = recentAutoPlayIds,
+                currentTrackId = currentId,
+            ) ?: return@synchronized -1
+            recordRecentAutoPlayId(next.saavnId)
+            val updatedQueue = _tracks.value + onlineToNanaTrack(next)
+            _tracks.value = updatedQueue
+            updatedQueue.size - 1
+        }
+    }
+
     /**
      * 1.0.59: player accessor for NanaMusicPlaybackService. The service wraps
      * this player in a MediaSession; ownership stays with this singleton.
@@ -679,20 +1095,30 @@ object NanaMusicPlayer {
     fun obtainServicePlayer(context: Context): androidx.media3.exoplayer.ExoPlayer =
         ensurePlayer(context.applicationContext)
 
+    fun isPlaybackRequested(): Boolean = playRequested
+
     fun canGoNext(): Boolean = _tracks.value.isNotEmpty()
 
     fun canGoPrevious(): Boolean = _tracks.value.isNotEmpty()
 
     fun clearQueue(context: Context) {
         guarded(context, "clearQueue") {
+            playbackGeneration.incrementAndGet()
             playRequested = false
             pausedForCall = false
             wasPlayingBeforeCall = false
-            appContextRef?.let { runCatching { NanaMusicPlaybackService.stop(it) } }
+            stopProgressTicker()
+            sleepTimerJob?.cancel()
+            sleepTimerJob = null
+            _sleepTimerRemainingMs.value = null
             val exo = synchronized(this) { player }
             persistScope.launch(Dispatchers.Main) {
-                runCatching { exo?.stop() }
-                runCatching { exo?.clearMediaItems() }
+                runCatching {
+                    exo?.playWhenReady = false
+                    exo?.stop()
+                    exo?.clearMediaItems()
+                }
+                appContextRef?.let { runCatching { NanaMusicPlaybackService.stop(it) } }
             }
             synchronized(this) {
                 _tracks.value = emptyList()
@@ -700,6 +1126,7 @@ object NanaMusicPlayer {
                 pendingSeekMs = 0L
                 pendingSeekIndex = -1
                 _isPlaying.value = false
+                _progress.value = NanaPlaybackProgress()
             }
             resetToEmptyState(context)
         }
@@ -787,18 +1214,20 @@ object NanaMusicPlayer {
             }
 
             // 1.0.36: one automatic retry with a freshly resolved URL.
-            val retrySaavnId = synchronized(this) {
-                currentTrack?.takeIf { it.isOnline }?.saavnId
-            }?.takeIf { it != lastRetrySaavnId }
+            val retryTrack = synchronized(this) {
+                currentTrack?.takeIf { it.isOnline && !it.saavnId.isNullOrBlank() }
+            }?.takeIf { it.saavnId != lastRetrySaavnId }
 
-            if (retrySaavnId != null) {
-                lastRetrySaavnId = retrySaavnId
+            if (retryTrack != null) {
+                val retryId = retryTrack.saavnId!!
+                lastRetrySaavnId = retryId
                 _lastError.value = appContext.getString(R.string.music_err_retrying, failedTitle)
                 persistScope.launch {
                     try {
                         val freshUrl = try {
-                            NanaSaavnApi.resolveAudioUrl(retrySaavnId)
+                            resolveFreshStreamUrl(retryTrack)
                         } catch (e: Exception) {
+                            if (e is CancellationException) throw e
                             logCrashToFile(appContext, "onPlayerError-retry", e)
                             null
                         }
@@ -812,7 +1241,10 @@ object NanaMusicPlayer {
                                 val idx = synchronized(this@NanaMusicPlayer) { _currentIndex.value }
                                 val cur = synchronized(this@NanaMusicPlayer) { _tracks.value.getOrNull(idx) }
                                 val retryExo = synchronized(this@NanaMusicPlayer) { player }
-                                if (cur?.saavnId != retrySaavnId || retryExo == null) {
+                                if (cur?.saavnId != retryId ||
+                                    cur.onlineSource != retryTrack.onlineSource ||
+                                    retryExo == null
+                                ) {
                                     // The user moved on, or the player was
                                     // released meanwhile — don't resurrect it.
                                     skipInstead = true
@@ -880,9 +1312,28 @@ object NanaMusicPlayer {
     private suspend fun skipToNextAfterError(appContext: Context, failedTitle: String) {
         playMutex.withLock {
             currentCoroutineContext().ensureActive()
-            val nextIdx = synchronized(this@NanaMusicPlayer) {
+            val (nextIdx, reachedLimit) = synchronized(this@NanaMusicPlayer) {
+                consecutiveErrorCount++
+                val limit = minOf(_tracks.value.size.coerceAtLeast(1), MAX_CONSECUTIVE_PLAYBACK_ERRORS)
+                val reached = consecutiveErrorCount >= limit
                 val cand = _currentIndex.value + 1
-                if (cand in _tracks.value.indices) cand else -1
+                (if (cand in _tracks.value.indices) cand else -1) to reached
+            }
+            if (reachedLimit) {
+                consecutiveErrorCount = 0
+                playRequested = false
+                _isPlaying.value = false
+                val exo = synchronized(this@NanaMusicPlayer) { player }
+                withContext(Dispatchers.Main) {
+                    runCatching {
+                        exo?.playWhenReady = false
+                        exo?.stop()
+                        exo?.clearMediaItems()
+                    }
+                }
+                runCatching { NanaMusicPlaybackService.stop(appContext) }
+                _lastError.value = appContext.getString(R.string.music_err_consecutive_failures)
+                return@withLock
             }
             if (nextIdx >= 0) {
                 _lastError.value = appContext.getString(R.string.music_err_play_failed_next, failedTitle)
@@ -890,17 +1341,29 @@ object NanaMusicPlayer {
                 if (!success) {
                     playRequested = false
                     _isPlaying.value = false
+                    val exo = synchronized(this@NanaMusicPlayer) { player }
+                    withContext(Dispatchers.Main) {
+                        runCatching {
+                            exo?.playWhenReady = false
+                            exo?.stop()
+                            exo?.clearMediaItems()
+                        }
+                    }
                     runCatching { NanaMusicPlaybackService.stop(appContext) }
                 }
             } else {
+                consecutiveErrorCount = 0
                 playRequested = false
                 _isPlaying.value = false
-                runCatching { NanaMusicPlaybackService.stop(appContext) }
                 val exo = synchronized(this@NanaMusicPlayer) { player }
                 withContext(Dispatchers.Main) {
-                    runCatching { exo?.stop() }
-                    runCatching { exo?.clearMediaItems() }
+                    runCatching {
+                        exo?.playWhenReady = false
+                        exo?.stop()
+                        exo?.clearMediaItems()
+                    }
                 }
+                runCatching { NanaMusicPlaybackService.stop(appContext) }
                 _lastError.value =
                     appContext.getString(R.string.music_err_play_failed_end, failedTitle)
             }
@@ -926,7 +1389,7 @@ object NanaMusicPlayer {
             _lastError.value = appContext.getString(R.string.music_err_online_unavailable)
             return null
         }
-        if (!isPlaceholderUri(track)) return track
+        if (!needsStreamResolve(track)) return track
         // 1.0.59: the resolve below is a network call (up to ~35s on bad
         // networks). Surface it as buffering so the UI doesn't look dead —
         // the online tab already renders _isBuffering.
@@ -938,6 +1401,23 @@ object NanaMusicPlayer {
         }
     }
 
+    private suspend fun resolveFreshStreamUrl(track: NanaTrack): String? = withContext(Dispatchers.IO) {
+        val trackId = track.saavnId?.takeIf { it.isNotBlank() } ?: return@withContext null
+        when (track.onlineSource) {
+            NanaOnlineMusicSource.YOUTUBE_MUSIC -> {
+                val target = track.onlineUrl?.takeIf { it.isNotBlank() } ?: trackId
+                val maxRelated = if (NativeStreamInputRouter.getClient() != null) 0 else 5
+                val resolved = NanaYtMusicProvider.resolveAudioStreamWithRelated(target, maxRelated = maxRelated)
+                    ?: return@withContext null
+                if (resolved.relatedTracks.isNotEmpty()) {
+                    cacheRelatedTracks(trackId, resolved.relatedTracks)
+                }
+                resolved.streamUrl
+            }
+            NanaOnlineMusicSource.JIOSAAVN -> NanaSaavnApi.resolveAudioUrl(trackId)
+        }
+    }
+
     /** 1.0.59: network half of resolvePlayable, extracted for the buffering wrapper above. */
     private suspend fun resolveOnlineUrl(
         appContext: Context,
@@ -945,7 +1425,7 @@ object NanaMusicPlayer {
         saavnId: String,
     ): NanaTrack? {
         val url = try {
-            NanaSaavnApi.resolveAudioUrl(saavnId)
+            resolveFreshStreamUrl(track)
         } catch (t: Throwable) {
             if (t is CancellationException) throw t
             logCrashToFile(appContext, "resolvePlayable", t)
@@ -1013,7 +1493,8 @@ object NanaMusicPlayer {
             // still the same track we resolved.
             val stillMatches = synchronized(this) {
                 val cur = _tracks.value.getOrNull(index) ?: return false
-                val match = (cur.saavnId != null && cur.saavnId == playable.saavnId) || cur.uri == track.uri
+                val match = (cur.saavnId != null && cur.saavnId == playable.saavnId && cur.onlineSource == playable.onlineSource) ||
+                    cur.uri == track.uri
                 if (match && playable.uri != track.uri) {
                     _tracks.value = _tracks.value.toMutableList().also { it[index] = playable }
                 }
@@ -1041,6 +1522,7 @@ object NanaMusicPlayer {
                 val restoreMs = if (pendingSeekIndex == index) pendingSeekMs else 0L
                 pendingSeekMs = 0L
                 pendingSeekIndex = -1
+                _progress.value = NanaPlaybackProgress(positionMs = restoreMs, durationMs = 0L)
                 restoreMs
             }
             val shouldPlay = playRequested
@@ -1087,11 +1569,13 @@ object NanaMusicPlayer {
     private fun serializedPlay(context: Context, indexProvider: () -> Int) {
         ensureRestored(context)
         playRequested = true
+        val gen = playbackGeneration.incrementAndGet()
         persistScope.launch {
             try {
                 playMutex.withLock {
                     currentCoroutineContext().ensureActive()
                     restoreJob?.join()
+                    if (playbackGeneration.get() != gen) return@withLock
                     val idx = synchronized(this@NanaMusicPlayer) { indexProvider() }
                     if (idx >= 0) playInternal(context.applicationContext, idx)
                 }
@@ -1239,13 +1723,16 @@ object NanaMusicPlayer {
         // Keep the persisted playlist in sync after deletions.
         persistScope.launch { appContextRef?.let { saveState(it) } }
         if (newSize == 0) {
-            // 1.0.59: nothing left to play — drop the foreground service too.
+            // 1.0.59: nothing left to play — stop exo before stopping the foreground service.
             playRequested = false
-            appContextRef?.let { runCatching { NanaMusicPlaybackService.stop(it) } }
             persistScope.launch(Dispatchers.Main) {
                 val exo = synchronized(this@NanaMusicPlayer) { player }
-                runCatching { exo?.stop() }
-                runCatching { exo?.clearMediaItems() }
+                runCatching {
+                    exo?.playWhenReady = false
+                    exo?.stop()
+                    exo?.clearMediaItems()
+                }
+                appContextRef?.let { runCatching { NanaMusicPlaybackService.stop(it) } }
             }
             synchronized(this) { _currentIndex.value = -1 }
         } else if (wasCurrent) {
@@ -1268,26 +1755,43 @@ object NanaMusicPlayer {
      * URL cannot be resolved (caller shows "Online music temporarily
      * unavailable").
      */
-    suspend fun playOnlineTrack(context: Context, online: NanaOnlineTrack): Boolean {
+    suspend fun playOnlineTrack(context: Context, online: NanaOnlineTrack): Boolean =
+        playOnlineSearchSelection(context, online, emptyList())
+
+    suspend fun playOnlineSearchSelection(
+        context: Context,
+        online: NanaOnlineTrack,
+        searchResults: List<NanaOnlineTrack>,
+    ): Boolean {
         ensureRestored(context)
         val appContext = context.applicationContext
         playRequested = true
+        val gen = playbackGeneration.incrementAndGet()
         return playMutex.withLock {
             restoreJob?.join()
+            if (playbackGeneration.get() != gen) return@withLock false
+            val selectedTrack = onlineToNanaTrack(online)
             val index = synchronized(this@NanaMusicPlayer) {
-                val existing = _tracks.value.indexOfFirst { it.isOnline && it.saavnId == online.saavnId }
-                if (existing >= 0) {
-                    existing
+                if (searchResults.isEmpty()) {
+                    val existing = _tracks.value.indexOfFirst {
+                        it.isOnline && it.saavnId == online.saavnId && it.onlineSource == online.source
+                    }
+                    if (existing >= 0) {
+                        existing
+                    } else {
+                        _tracks.value = _tracks.value + selectedTrack
+                        _tracks.value.size - 1
+                    }
                 } else {
-                    _tracks.value = _tracks.value + NanaTrack(
-                        uri = Uri.parse("$PLACEHOLDER_SCHEME://track/${online.saavnId}"),
-                        title = online.title,
-                        artist = online.artist,
-                        thumbnailUrl = online.thumbnailUrl,
-                        isOnline = true,
-                        saavnId = online.saavnId,
+                    val orderedOnline = selectOnlineQueueOrder(online, searchResults)
+                        .map(::onlineToNanaTrack)
+                    val (newQueue, selectedIdx) = mergePreservingLocalTracks(
+                        currentQueue = _tracks.value,
+                        isOnline = { it.isOnline },
+                        newOnlineTracks = orderedOnline,
                     )
-                    _tracks.value.size - 1
+                    _tracks.value = newQueue
+                    selectedIdx
                 }
             }
             // playInternal resolves the fresh URL (or reuses this session's).
@@ -1302,11 +1806,24 @@ object NanaMusicPlayer {
             val appContext = context.applicationContext
             val exo = ensurePlayer(appContext)
             if (exo.isPlaying) {
+                playbackGeneration.incrementAndGet()
                 playRequested = false
                 // 1.0.59: a manual pause cancels any pending call auto-resume.
                 pausedForCall = false
                 wasPlayingBeforeCall = false
                 exo.pause()
+                return@guarded
+            }
+            val curIdx = synchronized(this) { _currentIndex.value.takeIf { it >= 0 } ?: 0 }
+            val curTrack = synchronized(this) { _tracks.value.getOrNull(curIdx) }
+            // Re-resolve online track transparently when stream URL expired while paused.
+            if (curTrack != null && needsStreamResolve(curTrack)) {
+                val resumePos = if (exo.playbackState == Player.STATE_ENDED) 0L else exo.currentPosition.coerceAtLeast(0L)
+                synchronized(this) {
+                    pendingSeekMs = resumePos
+                    pendingSeekIndex = curIdx
+                }
+                serializedPlay(context) { curIdx }
                 return@guarded
             }
             // 1.0.35: if the track finished, seek back to the start first —
@@ -1327,23 +1844,60 @@ object NanaMusicPlayer {
                 return@guarded
             }
             // Nothing loaded — start the current (or first) track.
-            val idx = synchronized(this) { _currentIndex.value.takeIf { it >= 0 } ?: 0 }
-            serializedPlay(context) { idx }
+            serializedPlay(context) { curIdx }
         }
     }
 
     fun next(context: Context) {
         guarded(context, "next") {
-            serializedPlay(context) {
-                val size = _tracks.value.size
-                if (size <= 0) -1
-                else if (_shuffleEnabled.value && size > 1) {
-                    val cur = _currentIndex.value
-                    var rand = kotlin.random.Random.nextInt(size)
-                    if (rand == cur) rand = (cur + 1) % size
-                    rand
-                } else {
-                    (_currentIndex.value + 1) % size
+            ensureRestored(context)
+            playRequested = true
+            val gen = playbackGeneration.incrementAndGet()
+            val appContext = context.applicationContext
+            persistScope.launch {
+                try {
+                    playMutex.withLock {
+                        currentCoroutineContext().ensureActive()
+                        restoreJob?.join()
+                        if (playbackGeneration.get() != gen) return@withLock
+                        val (nextIdx, curTrack, shouldFetchRelated) = synchronized(this@NanaMusicPlayer) {
+                            val tracks = _tracks.value
+                            val size = tracks.size
+                            val curIdx = _currentIndex.value
+                            val cur = tracks.getOrNull(curIdx)
+                            if (size <= 0) {
+                                Triple(-1, null, false)
+                            } else if (_shuffleEnabled.value && size > 1) {
+                                var rand = kotlin.random.Random.nextInt(size)
+                                if (rand == curIdx) rand = (curIdx + 1) % size
+                                Triple(rand, cur, false)
+                            } else if (curIdx + 1 < size) {
+                                Triple(curIdx + 1, cur, false)
+                            } else if (
+                                _repeatMode.value == NanaRepeatMode.OFF &&
+                                _autoPlayEnabled.value &&
+                                cur?.isOnline == true &&
+                                cur.onlineSource == NanaOnlineMusicSource.YOUTUBE_MUSIC
+                            ) {
+                                Triple(-1, cur, true)
+                            } else {
+                                Triple(0, cur, false)
+                            }
+                        }
+                        val targetIdx = if (shouldFetchRelated) {
+                            resolveAndAppendRelatedTrack(curTrack, gen).takeIf { it >= 0 }
+                                ?: if (_tracks.value.isNotEmpty()) 0 else -1
+                        } else {
+                            nextIdx
+                        }
+                        if (targetIdx >= 0 && playbackGeneration.get() == gen) {
+                            playInternal(appContext, targetIdx)
+                        }
+                    }
+                } catch (t: Throwable) {
+                    if (t is CancellationException) throw t
+                    logCrashToFile(appContext, "next", t)
+                    _lastError.value = appContext.getString(R.string.music_err_cannot_play)
                 }
             }
         }
@@ -1353,11 +1907,13 @@ object NanaMusicPlayer {
         guarded(context, "previous") {
             val exo = synchronized(this) { player }
             val pos = runCatching { exo?.currentPosition }.getOrNull() ?: 0L
-            if (pos > 3000L && exo?.isPlaying == true) {
-                persistScope.launch(Dispatchers.Main) {
+            val wasPlaying = exo?.isPlaying == true
+            if (exo != null && exo.currentMediaItem != null && pos > 3000L) {
+                mainScope.launch {
                     runCatching {
                         exo.seekTo(0)
-                        exo.play()
+                        captureProgress(exo)
+                        if (wasPlaying) exo.play()
                     }
                 }
                 return@guarded
@@ -1374,30 +1930,48 @@ object NanaMusicPlayer {
     }
 
     fun stop() {
+        playbackGeneration.incrementAndGet()
         playRequested = false
         pausedForCall = false
         wasPlayingBeforeCall = false
-        appContextRef?.let { runCatching { NanaMusicPlaybackService.stop(it) } }
+        stopProgressTicker()
+        sleepTimerJob?.cancel()
+        sleepTimerJob = null
+        _sleepTimerRemainingMs.value = null
         persistScope.launch(Dispatchers.Main) {
             val exo = synchronized(this@NanaMusicPlayer) { player }
-            runCatching { exo?.stop() }
-            runCatching { exo?.clearMediaItems() }
+            runCatching {
+                exo?.playWhenReady = false
+                exo?.stop()
+                exo?.clearMediaItems()
+            }
+            appContextRef?.let { runCatching { NanaMusicPlaybackService.stop(it) } }
         }
         _currentIndex.value = -1
+        _progress.value = NanaPlaybackProgress()
         synchronized(this) { pendingSeekMs = 0L; pendingSeekIndex = -1 }
     }
 
     // 1.0.67 (F-05): synchronize with playInternal's Guard 3 — a concurrent
     // release() must not null out `player` while playInternal is using it.
     @Synchronized
-    fun release() {
+    fun release(stopService: Boolean = true) {
         // Final save before the player goes away (process death, logout, ...).
         appContextRef?.let { saveState(it) }
+        playbackGeneration.incrementAndGet()
         playRequested = false
         pausedForCall = false
         wasPlayingBeforeCall = false
+        stopProgressTicker()
+        sleepTimerJob?.cancel()
+        sleepTimerJob = null
+        volumeSaveJob?.cancel()
+        volumeSaveJob = null
+        _sleepTimerRemainingMs.value = null
         appContextRef?.let {
-            runCatching { NanaMusicPlaybackService.stop(it) }
+            if (stopService) {
+                runCatching { NanaMusicPlaybackService.stop(it) }
+            }
             NanaCallStateWatcher.unregister(it)
         }
         val exo = player
@@ -1407,6 +1981,7 @@ object NanaMusicPlayer {
         }
         _isPlaying.value = false
         _currentIndex.value = -1
+        _progress.value = NanaPlaybackProgress()
         synchronized(this) { pendingSeekMs = 0L; pendingSeekIndex = -1 }
     }
 

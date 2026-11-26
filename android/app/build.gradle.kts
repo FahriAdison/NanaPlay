@@ -125,6 +125,12 @@ android {
         }
     }
 
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true
+    }
+
     buildFeatures {
         compose = true
         buildConfig = true
@@ -157,6 +163,9 @@ kotlin {
 }
 
 dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
+    implementation("com.github.teamnewpipe:NewPipeExtractor:v0.27.1")
+
     implementation(project(":keymap"))
     implementation(platform("androidx.compose:compose-bom:2026.06.00"))
     androidTestImplementation(platform("androidx.compose:compose-bom:2026.06.00"))

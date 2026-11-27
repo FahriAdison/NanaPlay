@@ -15,8 +15,11 @@ internal fun standardCloudMatchSessionControlBaseUrl(rawHost: String?, port: Int
 /** Use the control host returned by this session snapshot for the next queue poll. */
 internal fun SessionInfo.sessionControlPollBaseUrl(): String? {
     val launchHost = streamingBaseUrl?.toHttpUrlOrNull()?.host ?: return null
-    if (!launchHost.endsWith(".cloudmatchbeta.nvidiagrid.net") &&
-        !launchHost.endsWith(".cloudmatch.nvidiagrid.net")) return null
+    val launchBaseOk = launchHost == "cloudmatchbeta.nvidiagrid.net" ||
+        launchHost == "cloudmatch.nvidiagrid.net" ||
+        launchHost.endsWith(".cloudmatchbeta.nvidiagrid.net") ||
+        launchHost.endsWith(".cloudmatch.nvidiagrid.net")
+    if (!launchBaseOk) return null
     val controlBase = sessionControlBaseUrl ?: return null
     val controlUrl = controlBase.toHttpUrlOrNull() ?: return null
     if (controlUrl.scheme != "https" || controlUrl.port != 443 || !STANDARD_SESSION_CONTROL_HOST.matches(controlUrl.host)) return null

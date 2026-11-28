@@ -263,11 +263,20 @@ class StreamLivenessWatchdogTest {
         watchdog.markConnected(0L)
         watchdog.observe(100L, bytesReceived = 10L, framesDecoded = 0L, connected = true)
         assertEquals(false, watchdog.latestObservationProgressed)
+        assertEquals(false, watchdog.latestFramesDecodedProgressed)
 
         watchdog.observe(200L, bytesReceived = 20L, framesDecoded = 1L, connected = true)
         assertEquals(true, watchdog.latestObservationProgressed)
+        assertEquals(true, watchdog.latestFramesDecodedProgressed)
 
         watchdog.observe(300L, bytesReceived = 30L, framesDecoded = 1L, connected = true)
         assertEquals(false, watchdog.latestObservationProgressed)
+        assertEquals(false, watchdog.latestFramesDecodedProgressed)
+
+        watchdog.reset()
+        watchdog.markConnected(400L)
+        watchdog.observe(500L, bytesReceived = 40L, framesDecoded = null, connected = true)
+        assertEquals(true, watchdog.latestObservationProgressed)
+        assertEquals(false, watchdog.latestFramesDecodedProgressed)
     }
 }

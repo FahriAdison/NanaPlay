@@ -83,6 +83,7 @@ object KeymapMapper {
         Thread(r, "keymap-mouse-decay").apply { isDaemon = true }
     }
     private var decayFuture: java.util.concurrent.ScheduledFuture<*>? = null
+    private var decayGeneration = 0L
     private var lastOutput: GamepadOutput? = null
 
     // Android KeyEvent key codes (hardcoded to avoid android.view dependency).
@@ -240,15 +241,26 @@ object KeymapMapper {
 
         // 50ms decay timeout: lifts touch finger when mouse stops
         decayFuture?.cancel(false)
+        val decayGen = ++decayGeneration
         decayFuture = decayExecutor.schedule(
-            { onMouseDecay(output) },
+            { onScheduledMouseDecay(decayGen) },
             MOUSE_DECAY_TIMEOUT_MS,
             java.util.concurrent.TimeUnit.MILLISECONDS,
         )
     }
 
     @Synchronized
+    private fun onScheduledMouseDecay(expectedGeneration: Long) {
+        if (expectedGeneration != decayGeneration) return
+        val output = lastOutput ?: return
+        onMouseDecay(output)
+    }
+
+    @Synchronized
     fun onMouseDecay(output: GamepadOutput) {
+        decayGeneration++
+        decayFuture?.cancel(false)
+        decayFuture = null
         if (isTouchDragging) {
             val sent = output.sendTouchDrag(TOUCH_PHASE_UP, currentTouchX, currentTouchY)
             logger?.invoke("mouse-decay: UP sent=$sent x=${"%.2f".format(java.util.Locale.US, currentTouchX)} y=${"%.2f".format(java.util.Locale.US, currentTouchY)}")
@@ -297,7 +309,8 @@ object KeymapMapper {
 
     @Synchronized
     fun releaseAll(output: GamepadOutput) {
-        // A-02: stop the decay thread from firing after teardown.
+        // A-02: stop the decay thread and invalidate any in-flight decay from firing after teardown.
+        decayGeneration++
         decayFuture?.cancel(false)
         decayFuture = null
         if (isTouchDragging) {

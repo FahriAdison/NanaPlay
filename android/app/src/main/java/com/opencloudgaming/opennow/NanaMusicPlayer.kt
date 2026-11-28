@@ -1110,7 +1110,7 @@ object NanaMusicPlayer {
 
     fun clearQueue(context: Context) {
         guarded(context, "clearQueue") {
-            playbackGeneration.incrementAndGet()
+            val gen = playbackGeneration.incrementAndGet()
             playRequested = false
             pausedForCall = false
             wasPlayingBeforeCall = false
@@ -1118,24 +1118,36 @@ object NanaMusicPlayer {
             sleepTimerJob?.cancel()
             sleepTimerJob = null
             _sleepTimerRemainingMs.value = null
-            val exo = synchronized(this) { player }
-            persistScope.launch(Dispatchers.Main) {
-                runCatching {
-                    exo?.playWhenReady = false
-                    exo?.stop()
-                    exo?.clearMediaItems()
+            val appContext = context.applicationContext
+            persistScope.launch {
+                try {
+                    playMutex.withLock {
+                        currentCoroutineContext().ensureActive()
+                        if (playbackGeneration.get() != gen) return@withLock
+                        val exo = synchronized(this@NanaMusicPlayer) { player }
+                        withContext(Dispatchers.Main) {
+                            runCatching {
+                                exo?.playWhenReady = false
+                                exo?.stop()
+                                exo?.clearMediaItems()
+                            }
+                        }
+                        appContextRef?.let { runCatching { NanaMusicPlaybackService.stop(it) } }
+                        synchronized(this@NanaMusicPlayer) {
+                            _tracks.value = emptyList()
+                            _currentIndex.value = -1
+                            pendingSeekMs = 0L
+                            pendingSeekIndex = -1
+                            _isPlaying.value = false
+                            _progress.value = NanaPlaybackProgress()
+                        }
+                        resetToEmptyState(appContext)
+                    }
+                } catch (t: Throwable) {
+                    if (t is CancellationException) throw t
+                    logCrashToFile(appContext, "clearQueue", t)
                 }
-                appContextRef?.let { runCatching { NanaMusicPlaybackService.stop(it) } }
             }
-            synchronized(this) {
-                _tracks.value = emptyList()
-                _currentIndex.value = -1
-                pendingSeekMs = 0L
-                pendingSeekIndex = -1
-                _isPlaying.value = false
-                _progress.value = NanaPlaybackProgress()
-            }
-            resetToEmptyState(context)
         }
     }
 
@@ -1485,7 +1497,9 @@ object NanaMusicPlayer {
      */
     private suspend fun playInternal(appContext: Context, index: Int): Boolean {
         try {
+            val startGen = playbackGeneration.get()
             restoreJob?.join()
+            if (playbackGeneration.get() != startGen) return false
             // Guard 1: the index must be valid at entry.
             val track = synchronized(this) {
                 if (index !in _tracks.value.indices) return false
@@ -1495,6 +1509,7 @@ object NanaMusicPlayer {
                 _lastError.value = appContext.getString(R.string.music_err_online_unavailable)
                 return false
             }
+            if (playbackGeneration.get() != startGen) return false
             // Guard 2: the queue may have changed during the resolve — only
             // overwrite the entry when the index is still valid and it's
             // still the same track we resolved.
@@ -1719,34 +1734,52 @@ object NanaMusicPlayer {
     }
 
     fun removeTrack(context: Context, index: Int) {
-        val (wasCurrent, newSize) = synchronized(this) {
-            val tracks = _tracks.value
-            if (index !in tracks.indices) return
-            val wasCur = index == _currentIndex.value
-            _tracks.value = tracks.toMutableList().also { it.removeAt(index) }
-            if (index < _currentIndex.value) _currentIndex.value--
-            wasCur to _tracks.value.size
-        }
-        // Keep the persisted playlist in sync after deletions.
-        persistScope.launch { appContextRef?.let { saveState(it) } }
-        if (newSize == 0) {
-            // 1.0.59: nothing left to play — stop exo before stopping the foreground service.
-            playRequested = false
-            persistScope.launch(Dispatchers.Main) {
-                val exo = synchronized(this@NanaMusicPlayer) { player }
-                runCatching {
-                    exo?.playWhenReady = false
-                    exo?.stop()
-                    exo?.clearMediaItems()
-                }
-                appContextRef?.let { runCatching { NanaMusicPlaybackService.stop(it) } }
-            }
-            synchronized(this) { _currentIndex.value = -1 }
-        } else if (wasCurrent) {
-            // Play whatever slid into the removed position.
-            serializedPlay(context) {
-                synchronized(this@NanaMusicPlayer) {
-                    index.coerceIn(0, _tracks.value.size - 1)
+        guarded(context, "removeTrack") {
+            val gen = playbackGeneration.incrementAndGet()
+            val appContext = context.applicationContext
+            persistScope.launch {
+                try {
+                    playMutex.withLock {
+                        currentCoroutineContext().ensureActive()
+                        if (playbackGeneration.get() != gen) return@withLock
+                        val (wasCurrent, newSize) = synchronized(this@NanaMusicPlayer) {
+                            val tracks = _tracks.value
+                            if (index !in tracks.indices) return@withLock
+                            val wasCur = index == _currentIndex.value
+                            _tracks.value = tracks.toMutableList().also { it.removeAt(index) }
+                            if (index < _currentIndex.value) _currentIndex.value--
+                            if (_tracks.value.isEmpty()) _currentIndex.value = -1
+                            wasCur to _tracks.value.size
+                        }
+                        // Keep the persisted playlist in sync after deletions.
+                        persistScope.launch { appContextRef?.let { saveState(it) } }
+                        if (newSize == 0) {
+                            // 1.0.59: nothing left to play — stop exo before stopping the foreground service.
+                            playRequested = false
+                            val exo = synchronized(this@NanaMusicPlayer) { player }
+                            withContext(Dispatchers.Main) {
+                                runCatching {
+                                    exo?.playWhenReady = false
+                                    exo?.stop()
+                                    exo?.clearMediaItems()
+                                }
+                            }
+                            appContextRef?.let { runCatching { NanaMusicPlaybackService.stop(it) } }
+                            synchronized(this@NanaMusicPlayer) {
+                                pendingSeekMs = 0L
+                                pendingSeekIndex = -1
+                                _isPlaying.value = false
+                                _progress.value = NanaPlaybackProgress()
+                            }
+                        } else if (wasCurrent) {
+                            // Play whatever slid into the removed position.
+                            playRequested = true
+                            playInternal(appContext, index.coerceIn(0, newSize - 1))
+                        }
+                    }
+                } catch (t: Throwable) {
+                    if (t is CancellationException) throw t
+                    logCrashToFile(appContext, "removeTrack", t)
                 }
             }
         }
@@ -1937,7 +1970,7 @@ object NanaMusicPlayer {
     }
 
     fun stop() {
-        playbackGeneration.incrementAndGet()
+        val gen = playbackGeneration.incrementAndGet()
         playRequested = false
         pausedForCall = false
         wasPlayingBeforeCall = false
@@ -1945,18 +1978,30 @@ object NanaMusicPlayer {
         sleepTimerJob?.cancel()
         sleepTimerJob = null
         _sleepTimerRemainingMs.value = null
-        persistScope.launch(Dispatchers.Main) {
-            val exo = synchronized(this@NanaMusicPlayer) { player }
+        persistScope.launch {
             runCatching {
-                exo?.playWhenReady = false
-                exo?.stop()
-                exo?.clearMediaItems()
+                playMutex.withLock {
+                    currentCoroutineContext().ensureActive()
+                    if (playbackGeneration.get() != gen) return@withLock
+                    val exo = synchronized(this@NanaMusicPlayer) { player }
+                    withContext(Dispatchers.Main) {
+                        runCatching {
+                            exo?.playWhenReady = false
+                            exo?.stop()
+                            exo?.clearMediaItems()
+                        }
+                    }
+                    appContextRef?.let { runCatching { NanaMusicPlaybackService.stop(it) } }
+                    synchronized(this@NanaMusicPlayer) {
+                        _currentIndex.value = -1
+                        _isPlaying.value = false
+                        _progress.value = NanaPlaybackProgress()
+                        pendingSeekMs = 0L
+                        pendingSeekIndex = -1
+                    }
+                }
             }
-            appContextRef?.let { runCatching { NanaMusicPlaybackService.stop(it) } }
         }
-        _currentIndex.value = -1
-        _progress.value = NanaPlaybackProgress()
-        synchronized(this) { pendingSeekMs = 0L; pendingSeekIndex = -1 }
     }
 
     // 1.0.67 (F-05): synchronize with playInternal's Guard 3 — a concurrent

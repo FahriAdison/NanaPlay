@@ -2767,6 +2767,8 @@ internal class StreamLivenessWatchdog(
     private var keyframeAttempts = 0
     var latestObservationProgressed: Boolean = false
         private set
+    var latestFramesDecodedProgressed: Boolean = false
+        private set
 
     fun reset() {
         lastProgressAtMs = null
@@ -2775,6 +2777,7 @@ internal class StreamLivenessWatchdog(
         lastKeyframeRequestAtMs = Long.MIN_VALUE
         keyframeAttempts = 0
         latestObservationProgressed = false
+        latestFramesDecodedProgressed = false
     }
 
     fun markConnected(nowMs: Long) {
@@ -2785,13 +2788,16 @@ internal class StreamLivenessWatchdog(
 
     fun observe(nowMs: Long, bytesReceived: Long?, framesDecoded: Long?, connected: Boolean): StreamLivenessAction {
         latestObservationProgressed = false
+        latestFramesDecodedProgressed = false
         if (!connected) {
             reset()
             return StreamLivenessAction.None
         }
 
+        val framesDecodedProgressed = framesDecoded != null &&
+            (lastFramesDecoded?.let { framesDecoded > it } ?: (framesDecoded > 0))
         val progressed = if (framesDecoded != null) {
-            lastFramesDecoded?.let { framesDecoded > it } ?: (framesDecoded > 0)
+            framesDecodedProgressed
         } else {
             bytesReceived != null && (lastBytesReceived?.let { bytesReceived > it } ?: (bytesReceived > 0))
         }
@@ -2799,6 +2805,7 @@ internal class StreamLivenessWatchdog(
         if (framesDecoded != null) lastFramesDecoded = framesDecoded
         if (progressed) {
             latestObservationProgressed = true
+            latestFramesDecodedProgressed = framesDecodedProgressed
             lastProgressAtMs = nowMs
             lastKeyframeRequestAtMs = Long.MIN_VALUE
             keyframeAttempts = 0
@@ -3840,8 +3847,8 @@ class NativeStreamClient(
     private var factory: PeerConnectionFactory? = null
     private var peerConnection: PeerConnection? = null
     private var signaling: GfnSignalingClient? = null
-    private var reliableInput: DataChannel? = null
-    private var partiallyReliableInput: DataChannel? = null
+    @Volatile private var reliableInput: DataChannel? = null
+    @Volatile private var partiallyReliableInput: DataChannel? = null
     private var statsChannel: DataChannel? = null
     private var lastParsedGameFps: Int? = null
     private var partiallyReliableGamepadMask = 0
@@ -3886,7 +3893,7 @@ class NativeStreamClient(
     internal var settings: StreamSettings = StreamSettings()
     private var networkAdaptor = NetworkConditionAdaptor(DynamicNetworkAdjustment.NoAdjustment)
     private var session: SessionInfo? = null
-    private var transportGeneration = 0
+    @Volatile private var transportGeneration = 0
     private var reconnectAttempts = 0
     // Start (elapsedRealtime ms) of the current no-media-progress episode, 0 = none.
     // Circuit breaker for uncapped persistent-reconnect retries.
@@ -5184,14 +5191,16 @@ class NativeStreamClient(
         livenessWatchdog.reset()
         signaling?.disconnect()
         signaling = null
-        // F-06: dispose native DataChannel objects — nulling the Kotlin refs alone
-        // leaks the C++ observer and risks SIGSEGV on late packets.
-        runCatching { reliableInput?.unregisterObserver() }
-        runCatching { reliableInput?.dispose() }
+        // F-06: detach refs before disposing native DataChannel objects so queued
+        // input tasks see the null channel immediately and never send after dispose.
+        val oldReliableInput = reliableInput
         reliableInput = null
-        runCatching { partiallyReliableInput?.unregisterObserver() }
-        runCatching { partiallyReliableInput?.dispose() }
+        val oldPartiallyReliableInput = partiallyReliableInput
         partiallyReliableInput = null
+        runCatching { oldReliableInput?.unregisterObserver() }
+        runCatching { oldReliableInput?.dispose() }
+        runCatching { oldPartiallyReliableInput?.unregisterObserver() }
+        runCatching { oldPartiallyReliableInput?.dispose() }
         runCatching { statsChannel?.unregisterObserver() }
         runCatching { statsChannel?.dispose() }
         statsChannel = null
@@ -6367,7 +6376,10 @@ class NativeStreamClient(
             snapshot.framesDecoded,
             connected,
         )
-        updateTransportRecoveryProgress(livenessWatchdog.latestObservationProgressed)
+        updateTransportRecoveryProgress(
+            progressed = livenessWatchdog.latestObservationProgressed,
+            framesDecodedProgressed = livenessWatchdog.latestFramesDecodedProgressed,
+        )
         if (
             rendererSinkAttached &&
             firstVideoFrameWatchdog.shouldRecover(SystemClock.elapsedRealtime(), snapshot.bytesReceived, connected)
@@ -6421,14 +6433,19 @@ class NativeStreamClient(
         }
     }
 
-    private fun updateTransportRecoveryProgress(progressed: Boolean) {
+    private fun updateTransportRecoveryProgress(
+        progressed: Boolean,
+        framesDecodedProgressed: Boolean,
+    ) {
         if (!progressed) {
             consecutiveTransportProgressSamples = 0
             return
         }
-        // Any media progress resets the persistent-reconnect stall timer.
-        persistentStallStartMs = 0L
-        firstVideoFrameWatchdog.markRendered()
+        // Reset persistent-reconnect stall timer only on decoded-frame progress;
+        // first-frame watchdog is exclusively cleared by onFirstFrameRendered().
+        if (framesDecodedProgressed) {
+            persistentStallStartMs = 0L
+        }
         consecutiveTransportProgressSamples += 1
         if (consecutiveTransportProgressSamples < STABLE_TRANSPORT_PROGRESS_SAMPLES) return
 
@@ -6871,7 +6888,11 @@ class NativeStreamClient(
             }
             return false
         }
+        val generation = transportGeneration
         inputScope.launch {
+            if (generation != transportGeneration) return@launch
+            if (channel !== reliableInput && channel !== partiallyReliableInput) return@launch
+            if (channel.state() != DataChannel.State.OPEN) return@launch
             runCatching {
                 channel.send(DataChannel.Buffer(java.nio.ByteBuffer.wrap(bytes), true))
             }

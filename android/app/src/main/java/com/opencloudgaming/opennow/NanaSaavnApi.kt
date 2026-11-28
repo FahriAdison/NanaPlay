@@ -123,13 +123,21 @@ object NanaSaavnApi {
             for (j in 0 until downloads.length()) {
                 val entry = downloads.optJSONObject(j) ?: continue
                 val url = entry.optString("url").takeIf { it.isNotBlank() } ?: continue
-                if (!url.startsWith("https://", ignoreCase = true) && !url.startsWith("http://", ignoreCase = true)) continue
                 // Quality looks like "320kbps" — parse the leading number.
                 val kbps = entry.optString("quality").takeWhile { it.isDigit() }
                     .toIntOrNull() ?: 0
+                // Cleartext is blocked by network_security_config, so any http://
+                // stream URL would fail deterministically in ExoPlayer. The
+                // JioSaavn CDN (saavncdn.com) serves the same paths over TLS,
+                // so upgrade instead of accepting/bouncing http.
+                val streamUrl = when {
+                    url.startsWith("https://", ignoreCase = true) -> url
+                    url.startsWith("http://", ignoreCase = true) -> "https://" + url.substring(7)
+                    else -> continue
+                }
                 if (kbps > bestKbps) {
                     bestKbps = kbps
-                    bestUrl = url
+                    bestUrl = streamUrl
                 }
             }
         }

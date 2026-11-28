@@ -825,7 +825,12 @@ object NanaMusicPlayer {
         }
         latch.await(3, java.util.concurrent.TimeUnit.SECONDS)
         error[0]?.let { throw it }
-        return holder[0] ?: throw IllegalStateException("Music player failed to start")
+        // The posted build may have completed after the latch timed out on a
+        // busy main thread — re-check before declaring failure so callers don't
+        // get "failed to start" for a player that actually exists now.
+        holder[0]?.let { return it }
+        synchronized(this) { player?.let { return it } }
+        throw IllegalStateException("Music player failed to start")
     }
 
     private fun captureProgress(exo: androidx.media3.exoplayer.ExoPlayer) {
@@ -911,7 +916,9 @@ object NanaMusicPlayer {
         val exo = androidx.media3.exoplayer.ExoPlayer.Builder(appContext)
             .setLoadControl(loadControl)
             .setAudioAttributes(audioAttributes, true)
-            .setHandleAudioBecomingNoisy(true)
+            // Becoming-noisy is handled by NanaMusicPlaybackService's receiver
+            // (register/unregister per playback state) — keep exactly one handler.
+            .setHandleAudioBecomingNoisy(false)
             .build()
         exo.volume = _playerVolume.value
         exo.addListener(

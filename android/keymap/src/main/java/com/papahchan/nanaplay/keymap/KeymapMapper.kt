@@ -270,6 +270,7 @@ object KeymapMapper {
         }
     }
 
+    @Synchronized
     fun releaseMouseButtons(output: GamepadOutput) {
         heldMouseButtons.clear()
         output.setTrigger(left = true, pressed = false)
